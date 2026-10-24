@@ -1,0 +1,230 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m5-l2",
+  "phase": 10,
+  "modul": "10.5 Statische vs. dynamische Polymorphie",
+  "titel": "Enum-Dispatch und Sealed Traits",
+  "lernziele": [
+    "Enum-Dispatch als dritte Option neben Generics und `dyn` einsetzen",
+    "Einen Trait versiegeln und erklären, wozu das dient",
+    "Das Expression Problem kennen: Erweiterbarkeit gegen Vollständigkeit abwägen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Firmware hat genau drei Sensortypen, die in einer gemeinsamen Liste ohne Heap verwaltet werden sollen. Welche Lösung passt am besten?",
+      "optionen": [
+        "Ein `enum` mit einer Variante pro Sensortyp, das selbst den Trait `Sensor` implementiert",
+        "`Vec<Box<dyn Sensor>>`",
+        "Ein Generic `Liste<S: Sensor>`",
+        "Drei getrennte Listen, eine pro Typ, die man nie gemeinsam durchläuft"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ist die Menge der Typen **geschlossen** und bekannt, ist ein `enum` oft ideal: Alle Varianten haben denselben Typ, passen also in ein Array oder eine `heapless::Vec`, und der Aufruf ist ein `match` statt einer vtable. Der Compiler kann jeden Zweig inlinen. Das nennt man **Enum-Dispatch**.",
+      "begruendungen": [
+        "Richtig.",
+        "`Box` braucht einen Heap, und der Aufruf geht über die vtable.",
+        "Ein Generic erlaubt nur einen einzigen Sensortyp pro Liste.",
+        "Das funktioniert, verteilt aber jede gemeinsame Operation auf drei Stellen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Enum-Dispatch von Hand",
+      "text": "Das `enum` hält den konkreten Wert in seiner Variante und leitet jeden Methodenaufruf per `match` weiter. Die Grösse des `enum` ist die der grössten Variante plus Diskriminante, es gibt keinen Zeiger und keine vtable.\n\nBei vielen Methoden wird das Weiterleiten lästig. Das Crate `enum_dispatch` erzeugt diesen Code per Makro: `#[enum_dispatch]` am Trait und `#[enum_dispatch(Sensor)]` am `enum` genügen. Es erzeugt auch `From`-Implementierungen, damit `Temp.into()` direkt ein `AlleSensoren` liefert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "enum AlleSensoren {",
+          "    Temp(Temp),",
+          "    Druck(Druck),",
+          "}",
+          "",
+          "impl Sensor for AlleSensoren {",
+          "    fn lesen(&self) -> i32 {",
+          "        match self {",
+          "            AlleSensoren::Temp(s) => s.lesen(),",
+          "            AlleSensoren::Druck(s) => s.lesen(),",
+          "        }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "Das enum ist selbst ein Sensor." },
+          { "zeile": 8, "text": "Ein match statt eines indirekten Aufrufs." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Variante mit dem Crate `enum_dispatch`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use enum_dispatch::enum_dispatch;",
+          "",
+          "#[{{?}}]",
+          "trait Sensor {",
+          "    fn lesen(&self) -> i32;",
+          "}",
+          "",
+          "#[enum_dispatch({{?}})]",
+          "enum AlleSensoren { Temp, Druck }",
+          "",
+          "let v: Vec<AlleSensoren> = vec![Temp.{{?}}(), Druck.into()];"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["enum_dispatch"] },
+        { "loesungen": ["Sensor"] },
+        { "loesungen": ["into"] }
+      ],
+      "auswahl": ["enum_dispatch", "Sensor", "into", "derive(Sensor)", "AlleSensoren", "clone"],
+      "erklaerung": "Das Attribut am Trait registriert dessen Methoden, das Attribut am `enum` nennt den Trait, der weitergeleitet werden soll. Die Kurzschreibweise `Temp` statt `Temp(Temp)` erzeugt eine Variante, die einen Wert des gleichnamigen Typs enthält. `into()` nutzt die generierten `From`-Implementierungen."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sealed Traits",
+      "text": "Ein **versiegelter Trait** (sealed trait) ist öffentlich nutzbar, aber ausserhalb des eigenen Crates nicht implementierbar. Der Trick: Er hat einen Supertrait in einem privaten Modul, den fremde Crates nicht benennen können.\n\nWozu? Der Autor kennt damit alle Implementierungen. Er darf später Methoden ohne Default hinzufügen, ohne dass das ein Breaking Change ist (Modul 9.2). HALs versiegeln z. B. Pin-Modi, damit niemand einen ungültigen Modus erfindet.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "mod private {",
+          "    pub trait Sealed {}",
+          "}",
+          "",
+          "pub trait Pin: private::Sealed {",
+          "    fn nummer(&self) -> u8;",
+          "}",
+          "",
+          "pub struct Pa0;",
+          "impl private::Sealed for Pa0 {}",
+          "impl Pin for Pa0 {",
+          "    fn nummer(&self) -> u8 { 0 }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Das Modul ist privat, der Trait darin zwar `pub`, aber von aussen nicht erreichbar." },
+          { "zeile": 5, "text": "Supertrait: Wer `Pin` implementiert, muss auch `Sealed` implementieren." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein fremdes Crate versucht `impl Pin for MeinPin`. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: the trait bound `MeinPin: versiegelt::private::Sealed` is not satisfied",
+          "  --> examples/fremd.rs:3:14",
+          "   |",
+          " 3 | impl Pin for MeinPin {",
+          "   |              ^^^^^^^ unsatisfied trait bound",
+          "...",
+          "note: required by a bound in `versiegelt::Pin`",
+          "  --> src/lib.rs:5:16",
+          "   |",
+          " 5 | pub trait Pin: private::Sealed {",
+          "   |                ^^^^^^^^^^^^^^^ required by this bound in `Pin`",
+          "   = note: `Pin` is a \"sealed trait\", because to implement it you also need to implement `versiegelt::private::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it"
+        ]
+      },
+      "optionen": [
+        "Die Versiegelung wirkt: `MeinPin` müsste `Sealed` implementieren, kann diesen Trait aber nicht erreichen",
+        "Der Trait `Pin` ist privat und kann gar nicht benutzt werden",
+        "Man muss nur `use versiegelt::private::Sealed;` ergänzen",
+        "Ein Fehler der Orphan Rule, weil `Pin` aus einem fremden Crate stammt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc erkennt das Muster sogar und nennt es in der Meldung „sealed trait“. Benutzen kann das fremde Crate `Pin` weiterhin, etwa als Bound `fn f(p: impl Pin)`. Nur eigene Implementierungen sind ausgeschlossen.",
+      "begruendungen": [
+        "Richtig.",
+        "`Pin` ist öffentlich, nur `Sealed` liegt in einem privaten Modul.",
+        "Das Modul `private` ist nicht öffentlich, der Import scheitert.",
+        "Die Orphan Rule erlaubt das, weil `MeinPin` lokal ist. Der Fehler kommt vom fehlenden Supertrait."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Das **Expression Problem**: Neue Typen oder neue Operationen, was ist wo einfach?",
+      "paare": [
+        { "links": "Offener Trait mit `dyn` oder Generics", "rechts": "Neue Typen einfach (auch in fremden Crates), neue Methode ohne Default ist ein Breaking Change" },
+        { "links": "`enum` mit `match`", "rechts": "Neue Operation einfach (neue Funktion mit `match`), neue Variante bricht jedes erschöpfende `match`" },
+        { "links": "Sealed Trait", "rechts": "Nur der Autor fügt Typen hinzu, darf dafür Methoden frei ergänzen" },
+        { "links": "`#[non_exhaustive]` am `enum`", "rechts": "Fremde Crates müssen einen `_`-Zweig schreiben, neue Varianten bleiben kompatibel" }
+      ],
+      "erklaerung": "Kein Ansatz macht beide Richtungen gleichzeitig einfach. Ein Senior entscheidet bewusst: Wird das System eher um neue Geräte erweitert (offener Trait) oder um neue Auswertungen über eine feste Menge von Geräten (`enum`)?"
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Das Crate `versiegelt` exportiert `#[non_exhaustive] pub enum Fehler { Timeout, Crc }`. Was passiert in einem **anderen** Crate mit diesem Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use versiegelt::Fehler;",
+          "",
+          "fn text(f: Fehler) -> &'static str {",
+          "    match f {",
+          "        Fehler::Timeout => \"timeout\",",
+          "        Fehler::Crc => \"crc\",",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, weil alle Varianten abgedeckt sind",
+        "Fehler `E0004`: Das Muster `_` ist nicht abgedeckt",
+        "Fehler `E0603`: Das `enum` ist privat",
+        "Kompiliert nur mit einer Warnung"
+      ],
+      "korrekt": 1,
+      "erklaerung": "`#[non_exhaustive]` sagt fremden Crates: „Es können später Varianten dazukommen.“ Darum verlangt rustc ausserhalb des definierenden Crates einen `_`-Zweig. Innerhalb des eigenen Crates gilt die Einschränkung nicht. Es ist das Gegenstück zur Empfehlung aus Modul 10.4, auf `_` zu verzichten: Dort will man jede neue Variante sehen, hier will der Autor neue Varianten ohne Breaking Change einführen können.",
+      "begruendungen": [
+        "Für fremde Crates reicht das nicht, auch wenn heute alle Varianten aufgezählt sind.",
+        "Richtig.",
+        "Das `enum` ist `pub`.",
+        "Es ist ein harter Fehler, keine Warnung."
+      ]
+    }
+  ],
+  "praxis": "Enum-Dispatch ist in Embedded-Rust beliebt, weil er ohne Heap auskommt und schnell ist: Ein `enum` über alle Sensoren eines Boards in einer `heapless::Vec` ist ein typisches Muster. Sealed Traits findest du in fast jedem HAL und in vielen Bibliotheken der Standardbibliothek. Für dein eigenes öffentliches Crate lohnt die Frage: Sollen Nutzer diesen Trait implementieren dürfen? Wenn nicht, versiegle ihn von Anfang an. Nachträglich ist es ein Breaking Change.",
+  "labor": {
+    "titel": "enum_dispatch ausprobieren",
+    "anleitung": "Lege ein Projekt an, füge `enum_dispatch` hinzu und baue das Beispiel aus der Lektion. Gib `size_of::<AlleSensoren>()` aus und vergleiche mit `size_of::<Box<dyn Sensor>>()`.",
+    "befehle": [
+      "cargo new dispatch && cd dispatch",
+      "cargo add enum_dispatch",
+      "cargo run"
+    ],
+    "beobachtung": "Mit zwei leeren Sensortypen ist `AlleSensoren` nur 1 Byte gross (die Diskriminante), ein `Box<dyn Sensor>` dagegen 16 Bytes plus Heap-Allokation. Mit `cargo expand` (falls installiert) siehst du den erzeugten `match`-Code."
+  },
+  "begriffe": [
+    {
+      "begriff": "Enum-Dispatch",
+      "englisch": "enum dispatch",
+      "erklaerung": "Polymorphie über ein `enum`, dessen Methoden per `match` an die Varianten weiterleiten."
+    },
+    {
+      "begriff": "Versiegelter Trait",
+      "englisch": "sealed trait",
+      "erklaerung": "Öffentlicher Trait, den nur das eigene Crate implementieren kann, über einen privaten Supertrait."
+    },
+    {
+      "begriff": "Expression Problem",
+      "englisch": "expression problem",
+      "erklaerung": "Entwurfsproblem: Neue Typen und neue Operationen lassen sich nicht gleichzeitig ohne Änderungen hinzufügen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "enum_dispatch auf docs.rs",
+      "url": "https://docs.rs/enum_dispatch"
+    },
+    {
+      "titel": "Rust API Guidelines: Future proofing",
+      "url": "https://rust-lang.github.io/api-guidelines/future-proofing.html"
+    }
+  ]
+}

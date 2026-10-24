@@ -1,0 +1,166 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m7-l3",
+  "phase": 6,
+  "modul": "6.7 Start, Updates und Zuverlässigkeit",
+  "titel": "Watchdog, Low Power und Panics im Feld",
+  "lernziele": [
+    "Einen unabhängigen Watchdog richtig einsetzen und füttern",
+    "Mit `wfi`/`wfe` und Schlafmodi Strom sparen",
+    "Eine Panic-Strategie für Geräte im Feld wählen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "watchdog-was",
+      "frage": "Ein Gerät im Feld hängt nach Wochen in einer Endlosschleife, weil ein Sensor nicht antwortet. Was hätte es automatisch neu gestartet?",
+      "optionen": [
+        "Ein **Watchdog**: Ein Hardware-Timer, der den Chip zurücksetzt, wenn die Firmware ihn nicht regelmässig zurücksetzt („füttert“)",
+        "Ein Panic-Handler",
+        "Der Borrow-Checker",
+        "Ein `loop {}` am Ende von `main`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der **unabhängige Watchdog** (IWDG beim STM32) läuft mit einem eigenen Oszillator und lässt sich nach dem Start nicht mehr ausschalten. So setzt er den Chip auch dann zurück, wenn die Firmware den Haupttakt kaputt konfiguriert hat. In `stm32f4xx-hal`: `let mut wd = IndependentWatchdog::new(dp.IWDG); wd.start(500.millis());` und regelmässig `wd.feed();`.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Endlosschleife ist kein Panic, der Handler wird nie aufgerufen.",
+        "Der Borrow-Checker findet Speicherfehler, keine hängenden Sensoren.",
+        "Das ist gerade die Art von Schleife, aus der man nicht mehr herauskommt."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "watchdog-in-isr",
+      "frage": "Dieser Watchdog schützt kaum. Welche Zeile ist das Problem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[exception]",
+          "fn SysTick() {",
+          "    critical_section::with(|cs| {",
+          "        if let Some(wd) = WATCHDOG.borrow_ref_mut(cs).as_mut() {",
+          "            wd.feed();",
+          "        }",
+          "    });",
+          "}"
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "Der SysTick-Interrupt läuft weiter, auch wenn die Hauptschleife hängt. Der Watchdog wird also immer gefüttert und merkt nichts. Füttere ihn dort, wo der Fortschritt der eigentlichen Arbeit sichtbar ist: am Ende jedes Durchlaufs der Hauptschleife, oder erst, wenn sich alle wichtigen Tasks über ein Flag als lebendig gemeldet haben."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Strom sparen",
+      "text": "Ein Cortex-M bei 100 MHz braucht einige zehn Milliampere, im Tiefschlaf nur Mikroampere. Wer nur auf den nächsten Interrupt wartet, sollte nicht im `loop {}` kreisen:\n\n- `cortex_m::asm::wfi()` (*wait for interrupt*): Der Kern schläft, bis ein Interrupt kommt\n- `cortex_m::asm::wfe()` (*wait for event*): wartet auf ein Ereignis, z. B. `sev()` eines anderen Kerns\n- `scb.set_sleepdeep()` vor `wfi`: tieferer Schlaf, je nach Chip werden Takte und Spannungsregler abgeschaltet\n\nDer Watchdog läuft im Tiefschlaf meist weiter. Darum muss die Weckzeit kürzer als sein Timeout sein, oder der Chip muss ihn im Schlaf anhalten können."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "wfi-schleife",
+      "frage": "Ein Timer-Interrupt setzt alle 10 ms ein Flag `TICK`. Was ist an dieser Hauptschleife gut?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "loop {",
+          "    if TICK.swap(false, Ordering::Acquire) {",
+          "        messen_und_senden();",
+          "        watchdog.feed();",
+          "    }",
+          "    cortex_m::asm::wfi();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Die CPU schläft zwischen den Ticks, und der Watchdog wird nur gefüttert, wenn die Arbeit wirklich erledigt wurde",
+        "`wfi` blockiert für immer, das Programm hängt",
+        "`swap` ist auf Cortex-M nicht erlaubt",
+        "Der Watchdog wird zu oft gefüttert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`wfi` kehrt bei jedem Interrupt zurück, der Timer weckt den Kern also alle 10 ms. Kommt der Interrupt zwischen der Prüfung und `wfi`, ist das Flag gesetzt und das Pending-Bit weckt sofort wieder. Für Cortex-M0 ohne atomares `swap` nimmt man `load` und `store` in einem kritischen Abschnitt.",
+      "begruendungen": [
+        "Richtig.",
+        "Jeder freigeschaltete Interrupt weckt den Kern.",
+        "Auf Cortex-M3 und höher ist `swap` atomar verfügbar.",
+        "Einmal alle 10 ms ist bei einem Timeout von z. B. 500 ms angemessen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "panic-crates",
+      "frage": "Ordne die Panic-Handler-Crates ihrem Verhalten zu.",
+      "paare": [
+        { "links": "`panic-halt`", "rechts": "Endlosschleife; gut im Debugger, im Feld ein totes Gerät" },
+        { "links": "`panic-reset`", "rechts": "Setzt den Chip sofort zurück" },
+        { "links": "`panic-probe`", "rechts": "Meldet den Panic über den Debug-Adapter (mit `defmt`)" },
+        { "links": "`panic-persist`", "rechts": "Speichert die Meldung in reserviertem RAM und setzt zurück" }
+      ],
+      "erklaerung": "Du kannst mit `cfg` je nach Build-Profil verschiedene Handler einbinden: `panic-probe` in der Entwicklung, `panic-persist` oder `panic-reset` im Feld. Es darf im Binary immer nur genau einen `#[panic_handler]` geben."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "panic-im-feld",
+      "frage": "Welche Panic-Strategie ist für ein Gerät im Feld meist am sinnvollsten?",
+      "optionen": [
+        "Ausgänge in einen sicheren Zustand bringen, die Meldung sichern und neu starten. Nach dem Start die gespeicherte Meldung melden",
+        "Mit `panic-halt` anhalten, damit der Fehler erhalten bleibt",
+        "Panics mit `catch_unwind` abfangen und weitermachen",
+        "Den Watchdog im Panic-Handler weiter füttern"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein angehaltenes Gerät hilft niemandem, solange kein Debugger dran ist. Mit `panic-persist` liest du nach dem Neustart `get_panic_message_bytes()` aus und schickst die Meldung an den Server. Wichtig: Häufen sich Neustarts, ist das selbst ein Fehlerbild. Ein Zähler in nicht genulltem RAM erkennt eine Reset-Schleife und kann in einen abgesicherten Modus wechseln.",
+      "begruendungen": [
+        "Richtig.",
+        "Im Feld sieht niemand den angehaltenen Zustand, und das Gerät fällt aus.",
+        "`catch_unwind` gibt es nur mit `std` und Unwinding, Embedded-Targets nutzen `panic = \"abort\"`.",
+        "Dann würde der Watchdog das hängende Gerät nie zurücksetzen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "panic-persist-memory",
+      "frage": "`panic-persist` braucht einen RAM-Bereich, den der Start-Code nicht anfasst. Ergänze die `memory.x` für 64 KB RAM, davon 1 KB für die Panic-Meldung.",
+      "code": {
+        "sprache": "linker",
+        "datei": "memory.x",
+        "zeilen": [
+          "MEMORY",
+          "{",
+          "  FLASH   : ORIGIN = 0x08000000, LENGTH = 256K",
+          "  RAM     : ORIGIN = 0x20000000, LENGTH = {{?}}",
+          "  PANDUMP : ORIGIN = 0x2000FC00, LENGTH = 1K",
+          "}",
+          "_panic_dump_start = ORIGIN({{?}});",
+          "_panic_dump_end   = ORIGIN(PANDUMP) + LENGTH(PANDUMP);"
+        ]
+      },
+      "luecken": [{ "loesungen": ["63K"] }, { "loesungen": ["PANDUMP"] }],
+      "auswahl": ["63K", "64K", "PANDUMP", "RAM"],
+      "erklaerung": "Die Region `RAM` wird um 1 KB verkleinert, damit `.bss` und Stack den Panic-Bereich nicht überdecken. `0x2000_FC00` ist genau 63 KB nach dem RAM-Anfang. Weil dieser Bereich weder in `.data` noch in `.bss` liegt, nullt ihn der Reset-Handler nicht, und die Meldung überlebt einen Soft-Reset (nicht aber einen Stromausfall)."
+    }
+  ],
+  "praxis": "Zuverlässigkeit im Feld entsteht aus mehreren Schichten: Watchdog an der richtigen Stelle füttern, Panics sichtbar machen statt verschlucken, Reset-Ursache nach dem Start auslesen (beim STM32 im Register `RCC_CSR`) und protokollieren. Diese Kombination macht aus einem Gerät, das „manchmal hängt“, ein Gerät, das einen Fehlerbericht schickt.",
+  "labor": {
+    "titel": "Panic-Strategien vergleichen",
+    "anleitung": "Füge zu deinem Embedded-Projekt aus Modul 6.1 nacheinander die Panic-Crates hinzu und vergleiche mit `cargo size`, wie viel Flash sie kosten. Ohne Board reicht `cargo build`.",
+    "befehle": [
+      "cargo add panic-reset",
+      "cargo size --release -- -A",
+      "cargo remove panic-reset && cargo add panic-persist",
+      "cargo size --release -- -A"
+    ],
+    "beobachtung": "`panic-persist` formatiert die Meldung mit `core::fmt` und braucht deutlich mehr Flash als `panic-reset`. Mit dem Feature `min-panic` speichert es nur Datei und Zeile."
+  },
+  "begriffe": [
+    { "begriff": "Watchdog", "englisch": "watchdog timer", "erklaerung": "Hardware-Timer, der den Chip zurücksetzt, wenn die Firmware ihn nicht rechtzeitig füttert." },
+    { "begriff": "WFI", "englisch": "wait for interrupt", "erklaerung": "Befehl, mit dem der Kern bis zum nächsten Interrupt schläft." },
+    { "begriff": "Tiefschlaf", "englisch": "deep sleep", "erklaerung": "Stromsparmodus, in dem auch Takte und Teile der Peripherie abgeschaltet sind." },
+    { "begriff": "Reset-Schleife", "englisch": "boot loop", "erklaerung": "Gerät startet immer wieder neu, weil ein Fehler kurz nach dem Start auftritt." }
+  ],
+  "weiterlesen": [
+    { "titel": "panic-persist (docs.rs)", "url": "https://docs.rs/panic-persist" },
+    { "titel": "cortex-m (docs.rs)", "url": "https://docs.rs/cortex-m" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

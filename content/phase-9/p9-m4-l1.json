@@ -1,0 +1,190 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m4-l1",
+  "phase": 9,
+  "modul": "9.4 Code-Reviews",
+  "titel": "Was ein Rust-Review prüft",
+  "lernziele": [
+    "Ein Rust-Review nach Prioritäten gliedern",
+    "`unsafe`-Blöcke, `unwrap` in Bibliotheken und unnötige `clone`-Aufrufe beurteilen",
+    "Änderungen an Fehlertypen und der öffentlichen API als Vertragsänderungen erkennen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Pull Request ändert 300 Zeilen Rust-Code. CI mit `cargo fmt --check` und `cargo clippy -- -D warnings` ist grün. Worauf konzentrierst du dich im Review?",
+      "optionen": [
+        "Auf das, was Werkzeuge nicht prüfen: Ist das Problem richtig gelöst, stimmen Ort, Abhängigkeiten, `unsafe`-Begründungen, Fehlerbehandlung und API?",
+        "Auf Einrückung und Klammersetzung, denn rustfmt übersieht oft etwas",
+        "Darauf, ob der Code exakt so geschrieben ist, wie du es getan hättest",
+        "Nur darauf, ob die Tests grün sind, alles andere hat der Compiler geprüft"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Borrow-Checker nimmt dir viel ab, aber nicht alles: Er weiss nicht, ob eine `unsafe`-Annahme stimmt, ob ein `unwrap` in einer Bibliothek eine Firmware zum Absturz bringt oder ob ein neues `pub` die API für Jahre festlegt. Genau dort lohnt die menschliche Aufmerksamkeit.",
+      "begruendungen": [
+        "Richtig.",
+        "rustfmt formatiert deterministisch. Ist `--check` grün, ist das Format in Ordnung.",
+        "„Anders als ich“ ist kein Befund. Es gibt meist mehrere gute Lösungen.",
+        "Der Compiler prüft Speichersicherheit in sicherem Code, nicht Fachlogik, Architektur oder `unsafe`-Annahmen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Eine Reihenfolge für Rust-Reviews",
+      "text": "1. **Problem und Ort**: Richtiges Problem? Richtiges Crate, richtige Schicht?\n2. **Abhängigkeiten**: Neue Zeilen in `Cargo.toml`? Richtung der Schichten (Lektion 9.1)? Features?\n3. **Öffentliche API**: neue `pub`-Elemente, geänderte Signaturen, Fehlertypen, SemVer (Lektion 9.2).\n4. **`unsafe`**: Gibt es einen `// SAFETY:`-Kommentar? Stimmt die Begründung wirklich?\n5. **Fehler und Paniken**: `unwrap`, `expect`, Indexzugriffe, Überläufe in Bibliotheken und Firmware.\n6. **Ownership und Kosten**: unnötige `clone`, `Box`, `String` statt `&str`.\n7. **Tests und Lesbarkeit**.\n\nWer oben ein grundlegendes Problem findet, braucht unten nicht ins Detail zu gehen."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile solltest du in diesem Bibliotheks-Code ansprechen?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/puffer.rs",
+        "zeilen": [
+          "pub struct Puffer {",
+          "    daten: Vec<u8>,",
+          "}",
+          "",
+          "impl Puffer {",
+          "    pub fn neu(kapazitaet: usize) -> Self {",
+          "        Puffer { daten: Vec::with_capacity(kapazitaet) }",
+          "    }",
+          "",
+          "    pub fn erstes(&self) -> u8 {",
+          "        // SAFETY: Der Puffer ist nie leer.",
+          "        unsafe { *self.daten.get_unchecked(0) }",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 11,
+      "erklaerung": "Der `SAFETY`-Kommentar ist vorhanden, aber **falsch**: `neu` erzeugt einen leeren `Vec`, nur mit reservierter Kapazität. `erstes` liest dann ausserhalb der Länge, das ist Undefined Behavior. Der Kommentar ist kein Ritual, sondern eine Behauptung, die der Reviewer prüft. Hier ist `self.daten.first().copied()` mit `Option<u8>` die richtige Lösung, ganz ohne `unsafe`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Team schaltet für sein Bibliotheks-Crate zwei Clippy-Lints ein. Was sagt dir die Ausgabe für das Review?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub fn konfig_lesen(pfad: &str) -> u32 {",
+          "    let text = std::fs::read_to_string(pfad).unwrap();",
+          "    text.trim().parse().unwrap()",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo clippy -- -W clippy::unwrap_used -W clippy::missing_panics_doc",
+        "ausgabe": [
+          "warning: docs for function which may panic missing `# Panics` section",
+          "warning: used `unwrap()` on a `Result` value",
+          "warning: used `unwrap()` on a `Result` value",
+          "warning: `review` (lib) generated 3 warnings"
+        ]
+      },
+      "optionen": [
+        "Die öffentliche Funktion kann bei fehlender Datei oder falschem Inhalt panicken, und das ist nicht dokumentiert. Besser: `Result<u32, KonfigFehler>` zurückgeben und den Aufrufer entscheiden lassen",
+        "Die Warnungen sind Stilfragen ohne Bedeutung",
+        "`unwrap` sollte überall durch `expect(\"\")` ersetzt werden, dann ist alles gut",
+        "Clippy meldet einen Kompilierfehler, der Code baut nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In einer Bibliothek trifft `unwrap` eine Entscheidung, die dem Aufrufer gehört: Vielleicht will er einen Standardwert nehmen oder den Fehler anzeigen. In Firmware führt eine Panik meist zum Reset. In Anwendungscode, Tests und bei echten Invarianten ist `expect(\"Begründung\")` dagegen in Ordnung. Mit einem `[lints.clippy]`-Abschnitt in `Cargo.toml` lassen sich solche Regeln pro Crate festlegen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein ungeplanter Absturz bei falscher Konfiguration ist ein echter Fehler.",
+        "`expect` mit leerem Text verbessert nichts. Die Frage ist, ob hier überhaupt eine Panik richtig ist.",
+        "Es sind Warnungen (`-W`). Der Build läuft durch."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was solltest du an diesem Code im Review anmerken?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Clone)]",
+          "pub struct Messreihe {",
+          "    pub werte: Vec<f32>,",
+          "}",
+          "",
+          "pub fn mittelwert(r: Messreihe) -> f32 {",
+          "    r.werte.iter().sum::<f32>() / r.werte.len() as f32",
+          "}",
+          "",
+          "pub fn auswerten(r: &Messreihe) -> f32 {",
+          "    let kopie = r.clone();",
+          "    mittelwert(kopie)",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`mittelwert` nimmt den Wert, obwohl es nur liest. Deshalb muss `auswerten` den ganzen `Vec` kopieren. Besser `mittelwert(r: &[f32])`",
+        "Nichts, `clone` ist in Rust immer billig",
+        "`#[derive(Clone)]` ist bei `Vec`-Feldern verboten",
+        "`auswerten` müsste `r` als `&mut Messreihe` nehmen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "„Clone-Inflation“: Ein `clone` wird eingefügt, um den Borrow-Checker zu beruhigen, statt die Signatur zu korrigieren. Bei einem `Vec` heisst das Heap-Allokation und Kopie. `cargo clippy -- -W clippy::pedantic` meldet hier `needless_pass_by_value` für `mittelwert`. Achte im Review auch auf leere Messreihen: Die Division ergibt dann `NaN`.",
+      "begruendungen": [
+        "Richtig.",
+        "`Clone` auf `Vec` alloziert und kopiert alle Elemente. Billig ist nur `Copy`.",
+        "`derive(Clone)` funktioniert für alle Felder, die selbst `Clone` sind.",
+        "`auswerten` ändert nichts, eine geteilte Referenz reicht."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Art Befund ist das?",
+      "paare": [
+        { "links": "`unsafe { … }` ohne Begründung, warum die Annahmen gelten", "rechts": "Unbelegte Sicherheitsannahme" },
+        { "links": "`pub fn lese() -> Result<u16, Box<dyn Error>>` in einer `no_std`-tauglichen Bibliothek", "rechts": "Ungeeigneter Fehlertyp" },
+        { "links": "Ein neues Feld in einer `pub struct` mit nur `pub`-Feldern", "rechts": "Breaking Change an der API" },
+        { "links": "`fn speichere(name: String)`, die den Namen nur liest", "rechts": "Unnötige Ownership-Übernahme" }
+      ],
+      "erklaerung": "`Box<dyn Error>` braucht `alloc` und lässt Aufrufer nicht auf einzelne Fälle reagieren. Bibliotheken bieten besser ein eigenes `enum` mit `#[non_exhaustive]`. Ein neues `pub`-Feld bricht jeden Nutzer, der die Struktur per Literal baut (Lektion 9.2). Einen Befund zu benennen, macht das Gespräch sachlich: „Hier ist die Ownership unnötig“ statt „Das ist falsch“."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Abschnitt in `Cargo.toml`, mit dem ein Crate seine Review-Regeln maschinell durchsetzt.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[lints.rust]",
+          "unsafe_code = \"{{?}}\"",
+          "",
+          "[lints.{{?}}]",
+          "unwrap_used = \"deny\"",
+          "undocumented_unsafe_blocks = \"warn\""
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["forbid"] },
+        { "loesungen": ["clippy"] }
+      ],
+      "auswahl": ["forbid", "clippy", "allow", "rustc", "deny"],
+      "erklaerung": "`forbid` ist strenger als `deny`: Es lässt sich im Code nicht mehr mit `#[allow]` überstimmen. Für ein reines Fachlogik-Crate ist `unsafe_code = \"forbid\"` eine starke Zusicherung. Crates, die `unsafe` brauchen, setzen stattdessen `undocumented_unsafe_blocks`, damit jeder Block begründet wird. Im Workspace geht das zentral mit `[workspace.lints]`."
+    }
+  ],
+  "praxis": "Gute Rust-Reviewer finden nicht Tippfehler, sondern Stellen, an denen ein System über Jahre schlechter würde: ein `unsafe` mit falscher Annahme, ein `unwrap` im Treiber, ein voreiliges `pub`, eine neue Abhängigkeit in der falschen Schicht. Fang deshalb mit `Cargo.toml`, öffentlichen Signaturen und `unsafe`-Blöcken an. Alles, was eine Maschine prüfen kann, gehört in `[lints]` und in die CI.",
+  "labor": {
+    "titel": "Ein Crate mit strengen Lints prüfen",
+    "anleitung": "Nimm ein eigenes Bibliotheks-Crate, schalte die Review-Lints aus dieser Lektion ein und sieh dir an, wie viele Stellen gemeldet werden. Suche ausserdem alle `unsafe`-Blöcke und `unwrap`-Aufrufe.",
+    "befehle": [
+      "cargo clippy -- -W clippy::unwrap_used -W clippy::undocumented_unsafe_blocks -W clippy::missing_panics_doc",
+      "cargo clippy -- -W clippy::pedantic",
+      "rg -n 'unsafe|\\.unwrap\\(\\)' src/"
+    ],
+    "beobachtung": "`clippy::pedantic` meldet viel, nicht alles davon ist wichtig. Wähle bewusst einzelne Lints aus und lege sie in `[lints.clippy]` fest. Jeder gefundene `unsafe`-Block sollte einen `// SAFETY:`-Kommentar haben, der einer Prüfung standhält."
+  },
+  "begriffe": [
+    { "begriff": "SAFETY-Kommentar", "englisch": "safety comment", "erklaerung": "Kommentar vor einem `unsafe`-Block, der begründet, warum die Bedingungen für die unsichere Operation erfüllt sind." },
+    { "begriff": "Clone-Inflation", "englisch": "clone inflation", "erklaerung": "Unnötige `clone`-Aufrufe, die ein Ownership-Problem verdecken statt es über bessere Signaturen zu lösen." },
+    { "begriff": "Lint-Tabelle", "englisch": "lints table", "erklaerung": "Abschnitt `[lints]` in `Cargo.toml`, der Warnstufen für rustc- und Clippy-Lints pro Crate oder Workspace festlegt." }
+  ],
+  "weiterlesen": [
+    { "titel": "Clippy: Liste aller Lints", "url": "https://rust-lang.github.io/rust-clippy/master/index.html" },
+    { "titel": "The Cargo Book: The [lints] section", "url": "https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section" }
+  ]
+}

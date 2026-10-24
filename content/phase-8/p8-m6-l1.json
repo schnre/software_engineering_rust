@@ -1,0 +1,168 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m6-l1",
+  "phase": 8,
+  "modul": "8.6 Git im Team",
+  "titel": "Branching-Strategien und Feature-Flags",
+  "lernziele": [
+    "Trunk-Based Development und GitFlow unterscheiden",
+    "Fixes für ausgelieferte Versionen auf Release-Branches übertragen",
+    "Unfertige Funktionen mit Laufzeit-Flags oder Cargo-Features verstecken"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Branching-Strategie passt am besten zu Continuous Integration?",
+      "optionen": [
+        "Trunk-Based Development: alle integrieren mindestens täglich in `main`, Branches leben höchstens ein, zwei Tage",
+        "GitFlow mit langlebigen `develop`- und Feature-Branches",
+        "Jedes Teammitglied hat einen eigenen dauerhaften Branch"
+      ],
+      "korrekt": 0,
+      "erklaerung": "CI heisst: oft integrieren. Kurze Branches und kleine Pull Requests sind die direkte Umsetzung. GitFlow stammt aus einer Zeit seltener, geplanter Releases und erzeugt mehr Zusammenführungsarbeit. Für Bibliotheken und Dienste mit häufigen Releases ist es meist zu schwer.",
+      "begruendungen": [
+        "Richtig.",
+        "Langlebige Branches sind das Gegenteil von häufiger Integration.",
+        "Dauerhafte persönliche Branches integrieren nie wirklich."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Gängige Strategien",
+      "text": "- **Trunk-Based Development**: ein Hauptzweig, sehr kurze Feature-Branches oder direkte Commits. Releases werden von `main` getaggt.\n- **GitHub Flow**: Feature-Branch, Pull Request, Review, Merge auf `main`. Praktisch Trunk-Based mit Pull Requests; der Standard der meisten Rust-Projekte auf GitHub.\n- **GitFlow**: `main` für Releases, `develop` für Integration, dazu Feature-, Release- und Hotfix-Branches.\n- **Release-Branches** wie `release/1.4`: zusätzlich zu jeder Strategie, wenn ältere Versionen gepflegt werden müssen, etwa Firmware im Feld oder eine LTS-Version einer Bibliothek."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Strategien zu.",
+      "paare": [
+        { "links": "Trunk-Based Development", "rechts": "Alle integrieren mindestens täglich in einen Hauptzweig" },
+        { "links": "GitHub Flow", "rechts": "Kurzer Feature-Branch, Pull Request, Merge auf `main`" },
+        { "links": "GitFlow", "rechts": "Getrennte `develop`- und `main`-Zweige mit Release- und Hotfix-Branches" },
+        { "links": "Release-Branch", "rechts": "Pflegt eine ausgelieferte Version mit Fixes, ohne neue Funktionen" }
+      ],
+      "erklaerung": "Die Strategie folgt aus dem Produkt: Ein Web-Dienst mit einer laufenden Version braucht keine Release-Branches. Firmware, die in drei Versionen im Feld steht, braucht sie, und zwar unabhängig davon, wie auf `main` gearbeitet wird."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Auf Geräten im Feld läuft Firmware 2.3, auf `main` wird 2.5 entwickelt. Ein Fehler wurde auf `main` mit Commit `3f9c2ab` behoben. Ergänze die Befehle, um ihn auf den Release-Branch zu übernehmen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "git {{?}} release/2.3",
+          "git {{?}} -x 3f9c2ab",
+          "cargo test --locked",
+          "git tag v2.3.1"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["switch"] },
+        { "loesungen": ["cherry-pick"] }
+      ],
+      "auswahl": ["switch", "merge", "cherry-pick", "rebase"],
+      "erklaerung": "`cherry-pick` übernimmt genau einen Commit. `-x` schreibt „cherry picked from commit 3f9c2ab“ in die Nachricht, damit man später nachvollziehen kann, woher der Fix kommt. Ein `merge` von `main` würde alle neuen Funktionen von 2.5 mitbringen. Die Regel „erst auf `main` fixen, dann zurückportieren“ verhindert, dass ein Fix in der nächsten Version wieder fehlt."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Feature-Flags: unfertig, aber integriert",
+      "text": "Trunk-Based heisst nicht, dass alles sofort fertig ist. Unfertiger Code landet auf `main`, bleibt aber ausgeschaltet. Zwei Arten von Schaltern:\n\n- **Laufzeit-Flag**: eine Konfiguration oder ein `bool`, das beim Start gelesen wird. Kann ohne neuen Build umgeschaltet werden.\n- **Cargo-Feature**: zur Kompilierzeit. Mit `#[cfg(feature = \"neuer-filter\")]` ist der Code ohne das Feature gar nicht im Binary. Das ist für Firmware wichtig, wo jedes Kilobyte Flash zählt.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[features]",
+          "default = []",
+          "neuer-filter = []"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Unfertiges gehört nicht in `default`." },
+          { "zeile": 3, "text": "Einschalten mit `cargo build --features neuer-filter`." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Kollege will den neuen Filter in der CI testen. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo test --features neuer_filtr",
+        "ausgabe": [
+          "error: the package 'sensor' does not contain this feature: neuer_filtr",
+          "help: there is a similarly named feature: neuer-filter"
+        ]
+      },
+      "optionen": [
+        "Der Feature-Name ist falsch geschrieben. Cargo bricht ab, statt das unbekannte Feature still zu ignorieren",
+        "Das Feature ist in `default` nicht enthalten und kann deshalb nicht aktiviert werden",
+        "Features können nur bei `cargo build`, nicht bei `cargo test` angegeben werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo prüft Feature-Namen und schlägt einen ähnlichen vor. Wichtig für die CI: Code hinter einem Feature wird nur geprüft, wenn das Feature aktiv ist. Deshalb gehört in die Pipeline mindestens ein Lauf mit `--all-features` und einer ohne Features. Für viele Features prüft `cargo hack --feature-powerset` alle Kombinationen.",
+      "begruendungen": [
+        "Richtig.",
+        "Jedes deklarierte Feature lässt sich mit `--features` aktivieren, auch ausserhalb von `default`.",
+        "`--features` funktioniert bei allen Befehlen, die bauen."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Branch lebt seit sechs Wochen und hat 3000 geänderte Zeilen. Welche Probleme sind zu erwarten?",
+      "optionen": [
+        "Viele Merge-Konflikte, auch in `Cargo.lock`",
+        "Ein oberflächliches Review, weil niemand 3000 Zeilen gründlich lesen kann",
+        "Semantische Konflikte mit Änderungen, die andere inzwischen gemacht haben",
+        "Der Rust-Compiler weigert sich, so grosse Änderungen zu übersetzen"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Die ersten drei sind typisch und verstärken sich gegenseitig. Abhilfe: grosse Vorhaben in kleine, einzeln integrierbare Schritte zerlegen, unfertige Teile hinter einem Feature verstecken und täglich mergen. Ein guter Pull Request lässt sich in einer halben Stunde reviewen.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Grosse Pull Requests bekommen erfahrungsgemäss weniger gründliche Reviews.",
+        "Richtig.",
+        "Die Grösse eines Diffs spielt für rustc keine Rolle."
+      ]
+    }
+  ],
+  "praxis": "Beobachte in deinem Team: Wie lange leben Branches im Schnitt? Gibt es Pull Requests über 1000 Zeilen? Werden Fixes für ausgelieferte Firmware zuerst auf `main` gemacht und dann zurückportiert? Und prüft die CI Cargo-Features sowohl ein- als auch ausgeschaltet? Wer kleine Schritte und Feature-Flags vorlebt, verändert die Kultur eines Teams oft stärker als jede Richtlinie.",
+  "labor": {
+    "titel": "Ein Cargo-Feature als Schalter",
+    "anleitung": "Lege in einem Bibliotheks-Crate ein Feature `neuer-filter` an und schreibe eine Funktion mit zwei Varianten: eine mit `#[cfg(feature = \"neuer-filter\")]`, eine mit `#[cfg(not(feature = \"neuer-filter\"))]`.",
+    "befehle": [
+      "cargo test",
+      "cargo test --features neuer-filter",
+      "cargo test --features neuer_filtr"
+    ],
+    "beobachtung": "Die ersten beiden Läufe testen jeweils eine andere Variante. Der dritte bricht mit einem Hinweis auf den ähnlich benannten Feature-Namen ab."
+  },
+  "begriffe": [
+    {
+      "begriff": "Trunk-Based Development",
+      "englisch": "trunk-based development",
+      "erklaerung": "Arbeitsweise, bei der alle sehr häufig in einen gemeinsamen Hauptzweig integrieren."
+    },
+    {
+      "begriff": "Cherry-Pick",
+      "englisch": "cherry-pick",
+      "erklaerung": "Einen einzelnen Commit auf einen anderen Branch übertragen."
+    },
+    {
+      "begriff": "Feature Flag",
+      "englisch": "feature flag, feature toggle",
+      "erklaerung": "Schalter, mit dem unfertiger Code integriert, aber noch nicht aktiviert ist."
+    },
+    {
+      "begriff": "Cargo-Feature",
+      "englisch": "Cargo feature",
+      "erklaerung": "In `[features]` deklarierter Schalter, der zur Kompilierzeit Code und optionale Abhängigkeiten ein- oder ausschliesst."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Trunk Based Development",
+      "url": "https://trunkbaseddevelopment.com/"
+    },
+    {
+      "titel": "The Cargo Book: Features",
+      "url": "https://doc.rust-lang.org/cargo/reference/features.html"
+    }
+  ]
+}

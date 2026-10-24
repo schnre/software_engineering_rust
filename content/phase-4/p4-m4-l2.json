@@ -1,0 +1,232 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m4-l2",
+  "phase": 4,
+  "modul": "4.4 Miri und Sanitizer",
+  "titel": "Sanitizer, Valgrind und Fuzzing",
+  "lernziele": [
+    "Begründen, wann Sanitizer trotz Borrow-Checker und Miri nötig sind",
+    "AddressSanitizer und ThreadSanitizer für Rust auf nightly einschalten",
+    "Einen Valgrind-Bericht für ein Rust-Binary lesen und Fuzzing einordnen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "wozu-sanitizer",
+      "frage": "Dein Crate ruft über FFI eine C-Bibliothek für Kompression auf. Gelegentlich stürzt es ab. Warum hilft Miri hier nicht weiter?",
+      "optionen": [
+        "Miri kann Fremdcode in C nicht ausführen. Ein Sanitizer instrumentiert dagegen den nativen Code, auch über die Sprachgrenze",
+        "Miri findet nur Fehler in Code ohne `unsafe`",
+        "Miri läuft nur auf Mikrocontrollern",
+        "Miri findet grundsätzlich keine Speicherfehler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Sicherer Rust-Code ist durch den Borrow-Checker vor Speicherfehlern geschützt. Fehler entstehen in `unsafe`-Blöcken und an **FFI-Grenzen** (Foreign Function Interface). Miri prüft `unsafe`-Rust sehr genau, kann aber keinen C-Code interpretieren. **Sanitizer** setzen beim Kompilieren Prüfcode in das native Programm ein und finden Fehler auch dort, wo Rust und C sich Speicher teilen, sofern der C-Teil ebenfalls instrumentiert ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Im Gegenteil: Miri ist gerade für `unsafe`-Code gedacht.",
+        "Miri läuft auf dem Entwicklungsrechner.",
+        "Speicherfehler in Rust-Code findet Miri sehr zuverlässig."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sanitizer in Rust",
+      "text": "rustc nutzt dieselben Sanitizer wie Clang, weil beide auf LLVM aufbauen. Die Option ist aber noch **instabil** und nur auf nightly verfügbar. Man muss die Standardbibliothek mit instrumentieren, darum gehört `-Zbuild-std` dazu, und ein explizites `--target`.\n\n- `address` (ASan): Überläufe, use after free, Lecks\n- `thread` (TSan): Data Races, z. B. bei `unsafe impl Sync` oder in C-Threads\n- `memory` (MSan): Lesen von nicht initialisiertem Speicher, verlangt, dass wirklich alles instrumentiert ist\n- `leak` (LSan): nur Lecks\n\nKosten: ASan etwa doppelte Laufzeit, TSan deutlich mehr. Sanitizer-Builds sind nur für Tests und Fuzzing gedacht, nie für die Auslieferung."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "stable-zsanitizer",
+      "frage": "Was sagt diese Meldung?",
+      "terminal": {
+        "befehl": "RUSTFLAGS=-Zsanitizer=address cargo test",
+        "ausgabe": [
+          "error: failed to run `rustc` to learn about target-specific information",
+          "",
+          "Caused by:",
+          "  process didn't exit successfully: `rustc - --crate-name ___ --print=file-names -Zsanitizer=address …` (exit status: 1)",
+          "  --- stderr",
+          "  error: the option `Z` is only accepted on the nightly compiler",
+          "",
+          "  help: consider switching to a nightly toolchain: `rustup default nightly`"
+        ]
+      },
+      "optionen": [
+        "Sanitizer sind ein `-Z`-Flag und damit nur mit einer Nightly-Toolchain nutzbar, z. B. `cargo +nightly test`",
+        "AddressSanitizer ist für Rust grundsätzlich nicht verfügbar",
+        "Die Schreibweise ist falsch, richtig wäre `-C sanitizer=address`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`-Z`-Optionen sind die instabilen Optionen von rustc. Statt den Standard global zu wechseln, nimmt man `+nightly` für den einzelnen Befehl. Ein `-C sanitizer` gibt es auf stable nicht, rustc meldet dafür `unknown codegen option`. Die Stabilisierung einzelner Sanitizer wird diskutiert, eine Aussage über eine bestimmte Version sollte man vor dem Einsatz in der rustc-Dokumentation nachprüfen.",
+      "begruendungen": [
+        "Richtig.",
+        "Auf nightly ist er verfügbar und wird z. B. in der CI vieler Crates genutzt.",
+        "Auf stable kennt rustc keine Codegen-Option `sanitizer`."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "asan-befehl",
+      "frage": "Ergänze den Befehl für einen ASan-Testlauf auf nightly.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "RUSTFLAGS=\"-Zsanitizer={{?}}\" \\",
+          "  cargo +nightly test -Zbuild-std {{?}} x86_64-unknown-linux-gnu"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "address"
+          ]
+        },
+        {
+          "loesungen": [
+            "--target"
+          ]
+        }
+      ],
+      "auswahl": [
+        "address",
+        "--target",
+        "thread",
+        "--release",
+        "memory"
+      ],
+      "erklaerung": "Das explizite `--target` sorgt dafür, dass `RUSTFLAGS` nicht auch Build-Skripte und Proc-Macros instrumentiert, die auf dem Host laufen. `-Zbuild-std` baut die Standardbibliothek mit, damit auch deren Speicherzugriffe geprüft werden. Bei FFI muss man den C-Teil (z. B. über das `cc`-Crate) zusätzlich mit `-fsanitize=address` bauen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "valgrind",
+      "frage": "Valgrind braucht keine spezielle Toolchain. Was meldet es für das Use-after-free-Beispiel aus der Miri-Lektion?",
+      "terminal": {
+        "befehl": "rustc -g uaf.rs && valgrind -q ./uaf",
+        "ausgabe": [
+          "==19276== Invalid read of size 4",
+          "==19276==    at 0x11C68C: uaf::main (uaf.rs:5)",
+          "==19276==    by 0x11CA9A: <fn() as core::ops::function::FnOnce<()>>::call_once (library/core/src/ops/function.rs:250)",
+          "==19276==  Address 0x4aabce0 is 0 bytes inside a block of size 12 free'd",
+          "==19276==    at 0x484988F: free (in /usr/libexec/valgrind/vgpreload_memcheck-amd64-linux.so)",
+          "==19276==    by 0x11CA42: <alloc::raw_vec::RawVec<u32> as core::ops::drop::Drop>::drop (library/alloc/src/raw_vec/mod.rs:424)",
+          "==19276==    by 0x11C385: core::mem::drop::<alloc::vec::Vec<u32>> (library/core/src/mem/mod.rs:1004)",
+          "==19276==    by 0x11C648: uaf::main (uaf.rs:4)"
+        ]
+      },
+      "optionen": [
+        "In Zeile 5 werden 4 Bytes aus einem 12-Byte-Block gelesen, den `drop(v)` in Zeile 4 bereits freigegeben hat",
+        "In Zeile 5 werden 12 Bytes über das Ende eines 4-Byte-Blocks hinaus gelesen",
+        "Valgrind meldet einen Fehler in seiner eigenen Bibliothek `vgpreload_memcheck`",
+        "Es ist ein Speicherleck von 12 Bytes"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Valgrind** (Werkzeug memcheck) führt das unveränderte Binary in einer simulierten CPU aus und prüft jeden Zugriff. Es braucht keine Neukompilierung und erfasst auch C-Bibliotheken, ist aber 20- bis 50-mal langsamer und läuft nur auf wenigen Plattformen. `size 4` ist ein `u32`, der Block mit 12 Bytes ist der Puffer des `Vec` mit drei `u32`. Der zweite Teil zeigt den Weg über `Drop` von `RawVec` bis zu `free`.",
+      "begruendungen": [
+        "Richtig.",
+        "Umgekehrt: 4 Bytes gelesen, Block 12 Bytes gross, und der Zugriff liegt innerhalb des Blocks.",
+        "`free` stammt aus Valgrinds Ersatz der Allokator-Funktionen. Dort wird nur gezeigt, wer freigegeben hat.",
+        "Der Block wurde freigegeben, also kein Leck. Das Problem ist der Zugriff danach."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "welches-werkzeug",
+      "frage": "Welches Werkzeug passt am besten?",
+      "paare": [
+        {
+          "links": "UB in reinem `unsafe`-Rust, z. B. ein eigener Ringpuffer",
+          "rechts": "Miri"
+        },
+        {
+          "links": "Speicherfehler an einer FFI-Grenze zu C",
+          "rechts": "AddressSanitizer"
+        },
+        {
+          "links": "Verdacht auf Data Race in einem `unsafe impl Sync`",
+          "rechts": "ThreadSanitizer oder Miri"
+        },
+        {
+          "links": "Ausgeliefertes Binary ohne Neukompilieren prüfen",
+          "rechts": "Valgrind"
+        },
+        {
+          "links": "Parser mit unbekannten, beliebigen Eingaben quälen",
+          "rechts": "cargo fuzz"
+        }
+      ],
+      "erklaerung": "Die Werkzeuge ergänzen sich. Ein typischer Aufbau in der CI: `cargo +nightly miri test` für die `unsafe`-Module, ein ASan-Job für die FFI-Tests und ein nächtlicher Fuzzing-Lauf für Parser."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vorgeschmack: Fuzzing",
+      "text": "**Fuzzing** erzeugt automatisch Millionen von Eingaben und beobachtet, welche neue Codepfade öffnen. Diese Eingaben werden weiter verändert. So findet ein Fuzzer Panics, Endlosschleifen und mit Sanitizer auch Speicherfehler in Parsern, Dekodern und Protokoll-Stacks. In Rust ist **cargo-fuzz** (libFuzzer, nightly) der übliche Einstieg: `cargo fuzz init`, ein Fuzz-Target schreiben, das die Eingabe-Bytes an deinen Parser gibt, dann `cargo fuzz run`. cargo-fuzz schaltet ASan dabei standardmässig ein. Mehr dazu in Phase 12 zur Sicherheit."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "safe-rust-sanitizer",
+      "frage": "Ein Crate enthält **kein** `unsafe` und keine FFI. Was kann ein ASan-Lauf dort noch finden?",
+      "optionen": [
+        "Fehler in `unsafe`-Code von Abhängigkeiten oder der Standardbibliothek, die dein Code auslöst",
+        "Speicherlecks, z. B. durch `Box::leak` oder Rc-Zyklen, über LeakSanitizer",
+        "Logikfehler wie eine falsch berechnete Prüfsumme",
+        "Gar nichts, sicherer Rust-Code ist vollständig frei von Speicherproblemen"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "Die Garantie von sicherem Rust hängt davon ab, dass sämtlicher `unsafe`-Code darunter korrekt ist. Lecks gelten in Rust als sicher (`std::mem::forget` ist keine `unsafe`-Funktion), können auf einem Gerät mit wenig RAM aber genauso schaden. Logikfehler sind kein Thema für Sanitizer, dafür sind Tests da.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Lecks sind in Rust erlaubt, aber selten gewollt.",
+        "Sanitizer prüfen Speicherzugriffe, keine fachliche Logik.",
+        "Lecks und Fehler in fremdem `unsafe`-Code sind trotzdem möglich."
+      ]
+    }
+  ],
+  "praxis": "In reinen Rust-Projekten reicht oft Miri. Sobald C-Bibliotheken im Spiel sind (Herstellertreiber, Krypto, Kompression), gehört ein ASan-Job auf nightly in die CI. Valgrind ist praktisch, wenn ein Fehler nur mit dem ausgelieferten Binary auftritt. Für Parser von Daten aus dem Netz oder von Funkschnittstellen planst du Fuzzing ein, das ist eine der wirksamsten Massnahmen gegen Sicherheitslücken.",
+  "labor": {
+    "titel": "Valgrind und ASan vergleichen",
+    "anleitung": "Baue das Use-after-free-Beispiel und untersuche es zuerst mit Valgrind auf stable, dann mit AddressSanitizer auf nightly.",
+    "befehle": [
+      "rustc -g uaf.rs -o uaf && ./uaf",
+      "valgrind -q ./uaf",
+      "rustup toolchain install nightly --component rust-src",
+      "RUSTFLAGS=-Zsanitizer=address cargo +nightly run -Zbuild-std --target x86_64-unknown-linux-gnu"
+    ],
+    "beobachtung": "Valgrind meldet `Invalid read of size 4`, ASan einen `heap-use-after-free` mit den drei Stationen Zugriff, Freigabe und Allokation. ASan ist dabei deutlich schneller als Valgrind."
+  },
+  "begriffe": [
+    {
+      "begriff": "Sanitizer",
+      "englisch": "sanitizer",
+      "erklaerung": "Vom Compiler eingebaute Laufzeitprüfung, z. B. für Speicherfehler (ASan) oder Data Races (TSan)."
+    },
+    {
+      "begriff": "FFI",
+      "englisch": "foreign function interface",
+      "erklaerung": "Schnittstelle, über die Rust Funktionen in anderen Sprachen wie C aufruft oder für sie bereitstellt."
+    },
+    {
+      "begriff": "Valgrind",
+      "englisch": "Valgrind",
+      "erklaerung": "Werkzeug, das unveränderte Binaries in einer simulierten CPU ausführt und jeden Speicherzugriff prüft."
+    },
+    {
+      "begriff": "Fuzzing",
+      "englisch": "fuzzing",
+      "erklaerung": "Automatisches Testen mit massenhaft erzeugten, gezielt veränderten Eingaben."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Unstable Book: sanitizer",
+      "url": "https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html"
+    },
+    {
+      "titel": "Rust Fuzz Book",
+      "url": "https://rust-fuzz.github.io/book/"
+    }
+  ]
+}

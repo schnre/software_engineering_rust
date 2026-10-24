@@ -1,0 +1,268 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m7-l1",
+  "phase": 2,
+  "modul": "2.7 Fehlerbehandlung",
+  "titel": "Result, Option und der ?-Operator",
+  "lernziele": [
+    "Fehler mit `Result` und `?` weiterreichen und die `From`-Konvertierung dahinter erklären",
+    "Eigene Fehlertypen als `enum` bauen, von Hand oder mit `thiserror`",
+    "Begründen, wann `thiserror`, `anyhow` oder `Box<dyn Error>` passt"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In C gibt `int parse_port(const char*)` bei einem Fehler `-1` zurück. Was macht Rust mit `fn parse_port(s: &str) -> Result<u16, ParseIntError>` grundsätzlich anders?",
+      "optionen": [
+        "Wert und Fehler stehen getrennt im Typ, und an den `u16` kommt man nur, wenn man den Fehlerfall behandelt oder ausdrücklich ignoriert",
+        "Rust wirft bei einem Fehler eine Exception, die man fangen muss",
+        "Rust prüft zur Compilezeit, dass der String eine gültige Zahl ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Result<T, E>` ist ein Enum mit den Varianten `Ok(T)` und `Err(E)`. Es gibt keinen „magischen“ Fehlerwert, der mit einem gültigen Ergebnis verwechselt werden kann. Zudem ist `Result` mit `#[must_use]` markiert: Ignorierst du es, warnt rustc *unused `Result` that must be used*. Rust hat keine Exceptions. Panics (nächste Lektion) sind für Programmierfehler gedacht.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust hat keine Exceptions, Fehler sind normale Rückgabewerte.",
+        "Der String ist erst zur Laufzeit bekannt. Geprüft wird nur, dass du den Fehlerfall behandelst."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der ?-Operator",
+      "text": "`ausdruck?` heisst: Ist es `Ok(v)`, mach mit `v` weiter. Ist es `Err(e)`, kehre sofort mit `Err(From::from(e))` zurück. Das `From::from` ist der wichtige Teil: Der Fehler wird automatisch in den Fehlertyp der eigenen Funktion umgewandelt, sofern eine `From`-Implementierung existiert.\n\nBei `Option` funktioniert `?` genauso (`None` wird weitergereicht), aber nur in Funktionen, die selbst `Option` zurückgeben.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn lies_port(pfad: &str) -> Result<u16, KonfigFehler> {",
+          "    let text = std::fs::read_to_string(pfad)?;",
+          "    let port = text.trim().parse::<u16>()?;",
+          "    Ok(port)",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 2,
+            "text": "`io::Error` → `KonfigFehler` über `From<io::Error>`."
+          },
+          {
+            "zeile": 3,
+            "text": "`ParseIntError` → `KonfigFehler` über `From<ParseIntError>`."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`KonfigFehler` hat eine Variante `Io(io::Error)`, aber noch keine für Parse-Fehler. Was fehlt?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: `?` couldn't convert the error to `KonfigFehler`",
+          "  --> src/main.rs:10:42",
+          "   |",
+          " 8 | fn lies_port(pfad: &str) -> Result<u16, KonfigFehler> {",
+          "   |                             ------------------------- expected `KonfigFehler` because of this",
+          " 9 |     let text = std::fs::read_to_string(pfad).map_err(KonfigFehler::Io)?;",
+          "10 |     let port = text.trim().parse::<u16>()?;",
+          "   |                            --------------^ the trait `From<ParseIntError>` is not implemented for `KonfigFehler`",
+          "   |",
+          "   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait"
+        ]
+      },
+      "optionen": [
+        "Eine Implementierung `impl From<ParseIntError> for KonfigFehler` (oder ein `map_err` an dieser Stelle)",
+        "Ein `unwrap()` vor dem `?`",
+        "`KonfigFehler` muss `Copy` sein"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc sagt es genau: Der `?` wandelt über `From` um, und für `ParseIntError` gibt es keine. Zeile 9 zeigt die Alternative ohne `From`: `map_err(KonfigFehler::Io)` wandelt explizit um. Mit `From`-Implementierungen bleibt der Code kürzer, mit `map_err` siehst du an der Stelle, was passiert.",
+      "begruendungen": [
+        "Richtig.",
+        "`unwrap()` würde den Fehler in einen Panic verwandeln, statt ihn weiterzureichen.",
+        "`Copy` hat mit der Umwandlung nichts zu tun."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Mit `thiserror` schreibt ein Makro die `Display`- und `From`-Implementierungen. Ergänze.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use thiserror::Error;",
+          "",
+          "#[derive(Debug, {{?}})]",
+          "pub enum KonfigFehler {",
+          "    #[error(\"Datei nicht lesbar\")]",
+          "    Io(#[{{?}}] std::io::Error),",
+          "    #[error(\"ungültiger Port: {0}\")]",
+          "    Port(#[from] std::num::ParseIntError),",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Error"
+          ]
+        },
+        {
+          "loesungen": [
+            "from"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Error",
+        "Clone",
+        "from",
+        "into",
+        "source"
+      ],
+      "erklaerung": "`#[derive(Error)]` implementiert `std::error::Error`, `#[error(\"…\")]` erzeugt `Display`, und `#[from]` erzeugt `From<io::Error>` und setzt die Ursache (`source()`). So bleibt der Fehlertyp ein normales, öffentliches Enum, das Aufrufer mit `match` auswerten können. `thiserror` taucht nicht in deiner öffentlichen API auf."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Der Compiler meldet E0277 mit dem Hinweis *use `.ok_or(...)?`*. Welche Zeile?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::collections::HashMap;",
+          "",
+          "fn port(cfg: &HashMap<String, String>) -> Result<u16, String> {",
+          "    let roh = cfg.get(\"port\")?;",
+          "    roh.parse::<u16>().map_err(|e| e.to_string())",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "`cfg.get` liefert `Option<&String>`, die Funktion gibt aber `Result` zurück. `?` wandelt `None` nicht automatisch in einen Fehler um, denn woher sollte die Fehlermeldung kommen? Lösung: `cfg.get(\"port\").ok_or(\"port fehlt\")?` bzw. `ok_or_else(|| …)`, wenn der Fehlerwert teuer zu bauen ist."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`main` gibt `anyhow::Result<()>` zurück und ruft `lies_port(\"port.txt\").context(\"Konfiguration laden\")?` auf. Die Datei enthält `abc`. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "Error: Konfiguration laden",
+          "",
+          "Caused by:",
+          "    0: ungültiger Port: invalid digit found in string",
+          "    1: invalid digit found in string"
+        ]
+      },
+      "optionen": [
+        "Die Fehlerkette: `anyhow` hat den `KonfigFehler` mit Kontext umhüllt und gibt über `source()` alle Ursachen aus",
+        "Drei unabhängige Fehler sind nacheinander aufgetreten",
+        "Das Programm hat gepanickt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`anyhow::Error` nimmt jeden Fehlertyp auf und kann mit `.context(…)` beschreiben, *was* gerade versucht wurde. Beim Beenden folgt es der Kette über `Error::source()`: Kontext → `KonfigFehler::Port` → `ParseIntError`. Der Prozess endet mit Exit-Code 1, nicht 101 wie bei einem Panic.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist ein einziger Fehler, dargestellt mit allen Ursachen.",
+        "Ein Panic sähe anders aus (*thread 'main' panicked at …*)."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Ansatz passt?",
+      "paare": [
+        {
+          "links": "Bibliothek, deren Aufrufer auf einzelne Fehlerfälle reagieren sollen",
+          "rechts": "Eigenes `enum` mit `thiserror`"
+        },
+        {
+          "links": "Kommandozeilen-Tool, das Fehler nur melden und beenden soll",
+          "rechts": "`anyhow::Result` mit `.context()`"
+        },
+        {
+          "links": "Kleines Skript ohne zusätzliche Abhängigkeiten",
+          "rechts": "`Box<dyn std::error::Error>`"
+        },
+        {
+          "links": "Firmware ohne Heap",
+          "rechts": "Kleines `enum` ohne `Box` und ohne `String`"
+        }
+      ],
+      "erklaerung": "Faustregel: Bibliotheken liefern **konkrete** Fehlertypen, damit Aufrufer `match`en können. Anwendungen sammeln Fehler in einem **opaken** Typ (`anyhow`, `Box<dyn Error>`) und reichern sie mit Kontext an. `Box<dyn Error>` und `anyhow` allozieren auf dem Heap, in `no_std` ohne `alloc` bleiben nur Enums mit Daten fester Grösse."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt das Programm aus, und mit welchem Exit-Code endet es?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::error::Error;",
+          "",
+          "fn main() -> Result<(), Box<dyn Error>> {",
+          "    let n: u16 = \"70000\".parse()?;",
+          "    println!(\"{n}\");",
+          "    Ok(())",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`Error: ParseIntError { kind: PosOverflow }`, Exit-Code 1",
+        "`4464` (70000 modulo 65536), Exit-Code 0",
+        "Ein Panic mit Exit-Code 101"
+      ],
+      "korrekt": 0,
+      "erklaerung": "70000 passt nicht in `u16`, `parse` liefert `Err`. Der `?` wandelt den `ParseIntError` über eine Blanket-`From`-Implementierung in `Box<dyn Error>` um. Gibt `main` ein `Err` zurück, druckt die Standardbibliothek es mit der **Debug**-Darstellung und beendet mit 1. Deshalb sieht die Meldung technisch aus. `anyhow` gibt hier die lesbarere `Display`-Kette aus.",
+      "begruendungen": [
+        "Richtig.",
+        "`parse` schneidet nicht ab, sondern meldet den Überlauf als Fehler.",
+        "Ein zurückgegebenes `Err` aus `main` ist kein Panic."
+      ]
+    }
+  ],
+  "praxis": "In fast jedem Rust-Projekt findest du das Muster: ein `error.rs` mit einem `thiserror`-Enum pro Bibliotheks-Crate und `anyhow` in `main.rs`. Im Review achtest du darauf, dass Fehler mit Kontext weitergereicht und nicht mit `unwrap()` oder `let _ =` verschluckt werden, und dass Bibliotheken nicht `anyhow::Error` in ihrer öffentlichen API zurückgeben. In Embedded-Code ohne Heap sind kleine `Copy`-Enums üblich, z. B. `enum SensorFehler { Bus, Timeout, Pruefsumme }`.",
+  "labor": {
+    "titel": "Fehlerketten bauen",
+    "anleitung": "Baue `lies_port` mit `thiserror` und rufe es aus einem `main` mit `anyhow` auf. Teste die Fälle „Datei fehlt“, „kein Zahlenwert“ und „Zahl zu gross“.",
+    "befehle": [
+      "cargo new fehler && cd fehler",
+      "cargo add thiserror anyhow",
+      "cargo run",
+      "echo abc > port.txt && cargo run",
+      "echo 70000 > port.txt && cargo run"
+    ],
+    "beobachtung": "Jeder Fall erzeugt eine andere Kette unter *Caused by*. Ist `RUST_BACKTRACE=1` gesetzt, hängt `anyhow` zusätzlich einen Backtrace an die Stelle an, an der der Fehler entstanden ist."
+  },
+  "begriffe": [
+    {
+      "begriff": "Result",
+      "englisch": "Result",
+      "erklaerung": "Enum mit `Ok(T)` und `Err(E)` für Operationen, die fehlschlagen können."
+    },
+    {
+      "begriff": "Fragezeichen-Operator",
+      "englisch": "question mark operator",
+      "erklaerung": "`?` reicht `Err`/`None` sofort an den Aufrufer weiter und wandelt Fehler dabei mit `From` um."
+    },
+    {
+      "begriff": "Fehlerkette",
+      "englisch": "error chain",
+      "erklaerung": "Folge von Fehlern, die über `Error::source()` auf ihre Ursache verweisen."
+    },
+    {
+      "begriff": "Opaker Fehlertyp",
+      "englisch": "opaque error type",
+      "erklaerung": "Fehlertyp wie `anyhow::Error` oder `Box<dyn Error>`, der beliebige Fehler aufnimmt, aber kein `match` auf einzelne Fälle erlaubt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Error Handling",
+      "url": "https://doc.rust-lang.org/book/ch09-00-error-handling.html"
+    },
+    {
+      "titel": "thiserror auf docs.rs",
+      "url": "https://docs.rs/thiserror"
+    },
+    {
+      "titel": "anyhow auf docs.rs",
+      "url": "https://docs.rs/anyhow"
+    }
+  ]
+}

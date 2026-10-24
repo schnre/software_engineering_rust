@@ -1,0 +1,174 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m4-l2",
+  "phase": 11,
+  "modul": "11.4 Kommunikation zwischen Prozessen",
+  "titel": "Serialisierung mit serde, postcard und Protobuf",
+  "lernziele": [
+    "Datentypen mit serde serialisieren und das passende Format wählen",
+    "Byte-Reihenfolge explizit behandeln",
+    "Nachrichtenformate so entwerfen, dass sie sich weiterentwickeln lassen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Messwert wird in drei Formaten serialisiert. Was zeigt die Ausgabe?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Serialize, Deserialize, Debug)]",
+          "struct Messwert { kanal: u8, temperatur_mc: i32, zeit_ms: u32 }",
+          "",
+          "let m = Messwert { kanal: 3, temperatur_mc: 21_500, zeit_ms: 1_000 };",
+          "let json = serde_json::to_vec(&m)?;",
+          "let pc = postcard::to_allocvec(&m)?;",
+          "let mut cbor = Vec::new();",
+          "ciborium::into_writer(&m, &mut cbor)?;",
+          "",
+          "// Ausgabe:",
+          "// JSON:     48 Bytes",
+          "// CBOR:     36 Bytes",
+          "// postcard: 6 Bytes  [03, f8, cf, 02, e8, 07]"
+        ]
+      },
+      "optionen": [
+        "Dieselbe `derive`-Zeile genügt für alle Formate. JSON und CBOR speichern die Feldnamen mit, postcard nur die Werte in Feldreihenfolge, kompakt kodiert",
+        "Jedes Format braucht eine eigene `derive`-Zeile",
+        "postcard komprimiert die Daten mit zlib",
+        "Die Grösse ist bei allen Formaten gleich, nur die Ausgabe ist anders formatiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**serde** trennt Datenmodell und Format: `Serialize`/`Deserialize` beschreiben den Typ, das Format-Crate entscheidet über die Bytes. postcard kodiert Ganzzahlen als **Varint** (variable Länge): `21500` braucht 3 Byte, `1000` braucht 2. postcard funktioniert in `no_std` ohne Heap und ist deshalb auf Mikrocontrollern beliebt.",
+      "begruendungen": [
+        "Richtig, das sind die echten Werte.",
+        "Ein `derive` gilt für alle serde-Formate.",
+        "postcard komprimiert nicht, die Varint-Kodierung spart Platz.",
+        "48, 36 und 6 Byte sind deutlich verschieden."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Format passt wozu?",
+      "paare": [
+        { "links": "JSON (`serde_json`)", "rechts": "Menschenlesbar, Konfiguration und Web-APIs" },
+        { "links": "postcard", "rechts": "Kompakt, `no_std`, Mikrocontroller über UART oder Funk" },
+        { "links": "CBOR (`ciborium`)", "rechts": "Binär, selbstbeschreibend, IoT-Standards wie CoAP" },
+        { "links": "Protobuf (`prost`)", "rechts": "Schema in `.proto`, sprachübergreifend, gRPC" },
+        { "links": "bincode", "rechts": "Schnell und kompakt zwischen Rust-Programmen mit gleichen Typen" }
+      ],
+      "erklaerung": "**Selbstbeschreibend** heisst: Die Bytes enthalten Feldnamen oder Typinformation, ein Leser ohne Schema kann sie dekodieren. postcard und bincode sind nicht selbstbeschreibend: Beide Seiten müssen exakt dieselbe Typdefinition haben."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Version 2 des Typs bekommt ein neues Feld `einheit: String`. Ein neues Programm liest alte Daten. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "Err(Error(\"missing field `einheit`\", line: 1, column: 48))",
+          "Err(DeserializeUnexpectedEnd)"
+        ]
+      },
+      "optionen": [
+        "Beide Formate lehnen die alten Daten ab: JSON vermisst das Feld, postcard läuft am Ende der Bytes ins Leere",
+        "JSON setzt `einheit` automatisch auf einen leeren String",
+        "postcard liest die Daten korrekt, nur JSON scheitert",
+        "Das Programm stürzt mit einem Panic ab"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für **Schema-Evolution** braucht es Regeln. Bei serde-Formaten mit Feldnamen hilft `#[serde(default)]` für neue Felder. Bei postcard sind Felder nur über ihre Position bekannt: Neue Felder ändern das Format, deshalb versioniert man die Nachricht (z. B. `enum Nachricht { V1(..), V2(..) }`). Protobuf löst das mit Feldnummern: Unbekannte Felder werden übersprungen, fehlende bekommen Standardwerte.",
+      "begruendungen": [
+        "Richtig, das ist die echte Ausgabe.",
+        "Ohne `#[serde(default)]` gibt es keinen Standardwert.",
+        "postcard meldet `DeserializeUnexpectedEnd`.",
+        "Beide liefern ein `Err`, kein Panic."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ein CAN-Protokoll verlangt Big-Endian. Ergänze.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let drehzahl: u16 = 0x1234;",
+          "let bytes = drehzahl.{{?}}();     // [0x12, 0x34]",
+          "",
+          "let empfangen = [0x34, 0x12];",
+          "let wert = u16::{{?}}(empfangen); // 0x1234 aus Little-Endian"
+        ]
+      },
+      "luecken": [{ "loesungen": ["to_be_bytes"] }, { "loesungen": ["from_le_bytes"] }],
+      "auswahl": ["to_be_bytes", "from_le_bytes", "to_ne_bytes", "from_be_bytes", "to_le_bytes"],
+      "erklaerung": "`to_be_bytes`/`from_be_bytes` (big-endian), `to_le_bytes`/`from_le_bytes` (little-endian) und `ne` (native, je nach CPU) sind in der Standardbibliothek eingebaut. Bei `ne` hängt das Ergebnis von der Plattform ab, für Protokolle ist es deshalb fast immer falsch. Das Crate `byteorder` bietet dasselbe für `Read`/`Write`-Ströme."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Protobuf mit prost",
+      "text": "Bei **Protobuf** steht das Schema in einer `.proto`-Datei, jedes Feld mit einer festen Nummer. `prost-build` erzeugt daraus in `build.rs` Rust-Structs, `tonic-build` zusätzlich gRPC-Clients und -Server.\n\nRegeln für Evolution:\n\n- Feldnummern nie ändern oder wiederverwenden\n- Neue Felder bekommen neue Nummern, alte Leser überspringen sie\n- Gelöschte Felder als `reserved` markieren\n\nDas Schema ist damit die Schnittstelle zwischen Teams und Sprachen. Für reine Rust-Systeme ist serde mit einem Versionsfeld oft einfacher."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieses Nachrichtenformat soll auch in zwei Jahren noch alte Geräte verstehen. Welche Zeile ist das Problem?",
+      "code": {
+        "sprache": "text",
+        "datei": "messung.proto",
+        "zeilen": [
+          "syntax = \"proto3\";",
+          "",
+          "message Messung {",
+          "  uint32 kanal = 1;",
+          "  sint32 temperatur_mc = 2;",
+          "  // Feld 3 \"druck\" wurde entfernt",
+          "  string einheit = 3;",
+          "  uint64 zeit_ms = 4;",
+          "}"
+        ]
+      },
+      "fehlerZeile": 7,
+      "erklaerung": "Alte Geräte senden in Feld 3 noch den Druck als Zahl. Neue Leser interpretieren ihn als `einheit`-String, das führt zu Dekodierfehlern oder falschen Werten. Richtig: `reserved 3;` und das neue Feld mit Nummer 5.",
+      "hinweis": "Was senden alte Geräte in Feld 3?"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Firmware schickt Messwerte per Funk an ein Linux-Gateway, beide in Rust. Was ist eine gute Wahl?",
+      "optionen": [
+        "Ein gemeinsames Crate mit den Nachrichtentypen (`no_std`, serde-derive), postcard als Format, eine Versionsnummer oder ein `enum` für künftige Varianten",
+        "JSON auf dem Mikrocontroller, weil es lesbar ist",
+        "Die Structs per `transmute` als Bytes senden",
+        "Jede Seite definiert ihre Typen selbst, Hauptsache die Feldnamen stimmen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein gemeinsames Protokoll-Crate im Workspace ist ein starkes Rust-Muster: Firmware und Gateway übersetzen gegen dieselbe Typdefinition, Abweichungen fallen beim Bauen auf. postcard ist kompakt und braucht keinen Heap.",
+      "begruendungen": [
+        "Richtig.",
+        "JSON kostet auf dem Mikrocontroller viel Platz und Rechenzeit.",
+        "`transmute` hängt von Layout und Endianness ab und ist `unsafe`.",
+        "Bei postcard zählen nicht Namen, sondern Reihenfolge und Typen. Getrennte Definitionen laufen auseinander."
+      ]
+    }
+  ],
+  "praxis": "Lege Nachrichtentypen in ein eigenes Crate, das Firmware, Gateway und Tests teilen. Schreibe Tests mit festen Bytefolgen („golden files“), damit eine unbeabsichtigte Formatänderung sofort auffällt. Für Schnittstellen zu anderen Sprachen oder Teams ist ein Schema (Protobuf, CBOR mit CDDL) die bessere Grundlage.",
+  "labor": {
+    "titel": "Formate vergleichen",
+    "anleitung": "Serialisiere eine eigene Struktur mit JSON, CBOR und postcard und vergleiche die Grössen. Füge dann ein Feld hinzu und versuche, die alten Bytes zu lesen.",
+    "befehle": [
+      "cargo new formate && cd formate",
+      "cargo add serde --features derive",
+      "cargo add serde_json ciborium",
+      "cargo add postcard --features alloc",
+      "cargo run"
+    ],
+    "beobachtung": "Versuche danach `#[serde(default)]` am neuen Feld: JSON liest die alten Daten jetzt, postcard weiterhin nicht, weil die Bytes einfach zu Ende sind."
+  },
+  "begriffe": [
+    { "begriff": "Serialisierung", "englisch": "serialization", "erklaerung": "Umwandlung von Datenstrukturen in eine Bytefolge und zurück." },
+    { "begriff": "Endianness", "englisch": "endianness", "erklaerung": "Byte-Reihenfolge mehrbytiger Zahlen: Big-Endian (höchstwertiges Byte zuerst) oder Little-Endian." },
+    { "begriff": "Varint", "englisch": "variable-length integer", "erklaerung": "Ganzzahlkodierung, bei der kleine Werte weniger Bytes brauchen." },
+    { "begriff": "Schema-Evolution", "englisch": "schema evolution", "erklaerung": "Weiterentwicklung eines Datenformats, ohne alte Leser oder Schreiber zu brechen." }
+  ],
+  "weiterlesen": [
+    { "titel": "serde", "url": "https://serde.rs/" },
+    { "titel": "postcard", "url": "https://docs.rs/postcard/latest/postcard/" },
+    { "titel": "prost", "url": "https://docs.rs/prost/latest/prost/" }
+  ]
+}

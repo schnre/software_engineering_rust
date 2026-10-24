@@ -1,0 +1,173 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m2-l1",
+  "phase": 6,
+  "modul": "6.2 Register und Bits",
+  "titel": "Memory-mapped I/O mit volatile",
+  "lernziele": [
+    "Erklären, warum Registerzugriffe `read_volatile`/`write_volatile` brauchen",
+    "Einzelne Bits und Bitfelder in Rust setzen, löschen und lesen",
+    "Lese-Ändere-Schreibe-Zugriffe als Fehlerquelle erkennen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "ohne-volatile",
+      "frage": "Das Ausgangsregister von GPIOA liegt bei `0x4002_0014`. Was erzeugt rustc mit `-O` für diese Funktion?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "const GPIOA_ODR: *mut u32 = 0x4002_0014 as *mut u32;",
+          "",
+          "pub unsafe fn blinke() {",
+          "    unsafe {",
+          "        *GPIOA_ODR = 1 << 5;   // LED an",
+          "        *GPIOA_ODR = 0;        // LED aus",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nur noch einen einzigen Schreibzugriff mit 0, das Einschalten wird wegoptimiert",
+        "Beide Schreibzugriffe in der angegebenen Reihenfolge",
+        "Gar keinen Zugriff, weil die Funktion nichts zurückgibt",
+        "Einen Compilerfehler, weil Integer nicht in Zeiger umgewandelt werden dürfen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für den Compiler ist das gewöhnlicher Speicher. Ein Wert, der sofort überschrieben wird, ist nie beobachtbar, also fällt der erste Store weg. Genau so sieht es im erzeugten Assembler aus (`rustc -O --emit=asm`): Es bleibt ein einziges `movl $0, …`. Die LED blinkt nie.",
+      "begruendungen": [
+        "Richtig. Ein überschriebener Store ohne Leser dazwischen ist für den Optimierer tot.",
+        "Das garantiert erst `write_volatile`.",
+        "Der letzte Store bleibt, weil der Speicher nach der Funktion für andere Code-Teile sichtbar sein könnte. Nur der überschriebene fällt weg.",
+        "`as *mut u32` aus einer Ganzzahl ist erlaubt. Erst das Dereferenzieren braucht `unsafe`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Volatile Zugriffe",
+      "text": "**Memory-mapped I/O** heisst: Peripherie-Register erscheinen als Adressen im Speicher. Ein Lesen kann ein Flag löschen, ein Schreiben kann ein Byte versenden. Darum muss jeder Zugriff genau so stattfinden, wie er im Code steht. Das garantieren `core::ptr::read_volatile` und `write_volatile`: Der Compiler entfernt, verdoppelt oder vertauscht sie untereinander nicht.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::ptr::{read_volatile, write_volatile};",
+          "",
+          "unsafe {",
+          "    write_volatile(GPIOA_ODR, 1 << 5);",
+          "    write_volatile(GPIOA_ODR, 0);",
+          "    let status = read_volatile(USART2_SR);",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "`unsafe`: Der Compiler kann nicht prüfen, ob an der Adresse wirklich ein gültiges Register liegt." },
+          { "zeile": 4, "text": "Gleichwertig: `GPIOA_ODR.write_volatile(1 << 5)` als Methode des Rohzeigers." }
+        ]
+      }
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "warteschleife",
+      "frage": "Die Funktion soll warten, bis das Bit 7 (TXE, „Senderegister leer“) im Statusregister gesetzt ist. Mit `--release` hängt sie für immer. Welche Zeile ist schuld?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "const USART2_SR: *const u32 = 0x4000_4400 as *const u32;",
+          "const TXE: u32 = 1 << 7;",
+          "",
+          "fn warte_bis_frei() {",
+          "    unsafe {",
+          "        while *USART2_SR & TXE == 0 {}",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 6,
+      "erklaerung": "`*USART2_SR` ist ein normaler Lesezugriff. Der Optimierer sieht, dass in der Schleife nichts den Speicher verändert, liest einmal und macht daraus eine Endlosschleife, falls das Bit beim ersten Mal 0 war. Richtig ist `while USART2_SR.read_volatile() & TXE == 0 {}`. Auf dem PC lässt sich das mit `rustc -O --emit=asm` nachprüfen: Die Schleife springt ohne erneuten Speicherzugriff auf sich selbst."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Bits setzen und löschen",
+      "text": "Register bestehen aus Bitfeldern. In Rust ist `!` das bitweise Nicht (in C `~`). Achte auf Klammern: `!1 << 5` ist `(!1) << 5`, weil unäre Operatoren stärker binden als `<<`.",
+      "tabelle": {
+        "kopf": ["Ziel", "Rust"],
+        "zeilen": [
+          ["Bit 5 setzen", "`reg |= 1 << 5`"],
+          ["Bit 5 löschen", "`reg &= !(1 << 5)`"],
+          ["Bit 5 umschalten", "`reg ^= 1 << 5`"],
+          ["Bit 5 lesen", "`(reg >> 5) & 1 == 1`"],
+          ["2-Bit-Feld ab Bit 10 auf `0b01`", "`reg = (reg & !(0b11 << 10)) | (0b01 << 10)`"]
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "moder-feld",
+      "frage": "Pin PA5 soll Ausgang werden: Im Register `MODER` gehören die Bits 10 und 11 zu Pin 5, der Wert `0b01` bedeutet „Ausgang“. Ergänze den Lese-Ändere-Schreibe-Zugriff.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "unsafe {",
+          "    let alt = GPIOA_MODER.{{?}}();",
+          "    let neu = (alt & {{?}}(0b11 << 10)) | (0b01 << 10);",
+          "    GPIOA_MODER.{{?}}(neu);",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["read_volatile"] }, { "loesungen": ["!"] }, { "loesungen": ["write_volatile"] }],
+      "auswahl": ["read_volatile", "write_volatile", "!", "~", "read", "write"],
+      "erklaerung": "Erst das ganze Feld mit der Maske löschen, dann den neuen Wert hineinodern. Nur odern würde aus `0b10` (alternative Funktion) `0b11` (analog) machen. `~` gibt es in Rust nicht. `read`/`write` wären nicht-volatile Zugriffe."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "rmw-isr",
+      "frage": "Hauptprogramm und eine ISR ändern beide verschiedene Bits desselben `ODR`-Registers per Lese-Ändere-Schreibe. Was kann passieren?",
+      "optionen": [
+        "Unterbricht die ISR zwischen Lesen und Schreiben, überschreibt das Hauptprogramm danach die Änderung der ISR mit dem alten Wert",
+        "Nichts, `write_volatile` ist atomar",
+        "Der Compiler meldet einen Data Race",
+        "Die CPU erkennt den Konflikt und wiederholt den Zugriff"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Volatile heisst nicht atomar. Lesen, Ändern und Schreiben sind drei Befehle. Viele Chips bieten dafür spezielle Register: Beim STM32 setzt oder löscht `BSRR` einzelne Pins mit einem einzigen Schreibzugriff, ganz ohne Lesen. Rusts Ownership-Modell hilft zusätzlich: Ein PAC gibt das Register nur einem Besitzer (nächste Lektion).",
+      "begruendungen": [
+        "Richtig.",
+        "Der einzelne Schreibzugriff ist unteilbar, die Folge Lesen-Ändern-Schreiben nicht.",
+        "Bei Rohzeigern in `unsafe` prüft der Compiler nichts. Data Races verhindert er nur bei sicheren Referenzen.",
+        "Cortex-M hat keine solche Erkennung für normale Speicherzugriffe."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "begriffe-mmio",
+      "frage": "Ordne zu.",
+      "paare": [
+        { "links": "`write_volatile`", "rechts": "Schreibzugriff, den der Compiler weder entfernt noch verdoppelt" },
+        { "links": "`BSRR`-Register", "rechts": "Setzt oder löscht Pins mit einem einzigen Schreiben" },
+        { "links": "`!(1 << 5)`", "rechts": "Maske, die alle Bits ausser Bit 5 enthält" },
+        { "links": "`vcell::VolatileCell<u32>`", "rechts": "Hülle um einen Wert, deren `get`/`set` volatile zugreifen" }
+      ],
+      "erklaerung": "`VolatileCell` ist ein Baustein, auf dem ältere Register-Crates aufbauen: Ein `#[repr(C)]`-Struct aus `VolatileCell`-Feldern bildet einen Registerblock nach. Moderne PACs aus svd2rust kapseln das hinter einer typsicheren API, die du in der nächsten Lektion kennenlernst."
+    }
+  ],
+  "praxis": "Rohe `read_volatile`/`write_volatile` schreibst du im Alltag selten, das erledigen PACs. Du brauchst das Wissen trotzdem: beim Portieren von C-Code, bei Registern, die im PAC fehlen, und um im Review zu erkennen, wann ein `unsafe`-Block wirklich korrekt ist. Jeder Rohzugriff verdient einen `// SAFETY:`-Kommentar mit Adresse und Quelle im Referenzhandbuch.",
+  "labor": {
+    "titel": "Volatile im Assembler sehen",
+    "anleitung": "Schreib zwei Funktionen mit `#[unsafe(no_mangle)]`: eine mit `*ptr = …`, eine mit `write_volatile`. Übersetze ohne sie auszuführen und vergleiche den Assembler.",
+    "befehle": [
+      "rustc --edition 2024 --crate-type=lib -O --emit=asm -o vol.s vol.rs",
+      "grep -A6 '^blink_' vol.s"
+    ],
+    "beobachtung": "Die normale Variante enthält nur noch den letzten Store, die volatile Variante beide. Die Warteschleife ohne volatile wird zu einem Sprung auf sich selbst."
+  },
+  "begriffe": [
+    { "begriff": "Memory-mapped I/O", "englisch": "memory-mapped I/O", "erklaerung": "Peripherie-Register erscheinen als Speicheradressen und werden mit Lade- und Speicherbefehlen angesprochen." },
+    { "begriff": "Volatile Zugriff", "englisch": "volatile access", "erklaerung": "Speicherzugriff, den der Compiler genau so ausführen muss, wie er im Code steht." },
+    { "begriff": "Lese-Ändere-Schreibe", "englisch": "read-modify-write", "erklaerung": "Register lesen, Bits ändern, zurückschreiben; nicht unteilbar." },
+    { "begriff": "Bitmaske", "englisch": "bit mask", "erklaerung": "Wert, der festlegt, welche Bits eine Operation betrifft." }
+  ],
+  "weiterlesen": [
+    { "titel": "core::ptr::read_volatile", "url": "https://doc.rust-lang.org/core/ptr/fn.read_volatile.html" },
+    { "titel": "core::ptr::write_volatile", "url": "https://doc.rust-lang.org/core/ptr/fn.write_volatile.html" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

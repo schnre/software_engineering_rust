@@ -1,0 +1,226 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m3-l2",
+  "phase": 1,
+  "modul": "1.3 Bibliotheken",
+  "titel": "Rust und C verbinden",
+  "lernziele": [
+    "Eine Rust-Funktion mit `extern \"C\"`, `#[unsafe(no_mangle)]` und `#[repr(C)]` für C aufrufbar machen",
+    "Header mit cbindgen und Rust-Deklarationen mit bindgen erzeugen lassen",
+    "C-Code mit dem `cc`-Crate in `build.rs` übersetzen und mit `links` in `Cargo.toml` umgehen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese Funktion soll von C aus aufgerufen werden. rustc warnt: `extern` fn uses type `Punkt`, which is not FFI-safe. Welche Zeile ist die Ursache?",
+      "code": {
+        "sprache": "rust",
+        "datei": "lib.rs",
+        "zeilen": [
+          "pub struct Punkt {",
+          "    pub x: f64,",
+          "    pub y: f64,",
+          "}",
+          "",
+          "#[unsafe(no_mangle)]",
+          "pub extern \"C\" fn punkt_laenge(p: Punkt) -> f64 {",
+          "    (p.x * p.x + p.y * p.y).sqrt()",
+          "}"
+        ]
+      },
+      "fehlerZeile": 1,
+      "erklaerung": "Ohne `#[repr(C)]` darf rustc die Felder eines Structs beliebig anordnen (`repr(Rust)`), das Layout ist nicht festgelegt. C erwartet aber die Felder in Deklarationsreihenfolge mit C-Padding. Die Warnung `improper_ctypes_definitions` schlägt genau das vor: `#[repr(C)]` vor `pub struct Punkt`. Mehr zu Layouts in Phase 2.1."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die drei Zutaten für Rust → C",
+      "text": "- `extern \"C\"`: C-Aufrufkonvention statt der instabilen Rust-Konvention.\n- `#[unsafe(no_mangle)]`: ein Symbolname, den C kennt.\n- `#[repr(C)]` für jeden Typ, der die Grenze überquert, und nur FFI-taugliche Typen: Zahlen, Raw Pointer, `repr(C)`-Structs. Kein `String`, kein `Vec`, kein `&str`.\n\nDen passenden C-Header schreibst du nicht von Hand: **cbindgen** liest den Rust-Code und erzeugt ihn.",
+      "terminal": {
+        "befehl": "cbindgen --lang c --output rmathe.h && cat rmathe.h",
+        "ausgabe": [
+          "#include <stdarg.h>",
+          "#include <stdbool.h>",
+          "#include <stdint.h>",
+          "#include <stdlib.h>",
+          "",
+          "typedef struct Punkt {",
+          "  double x;",
+          "  double y;",
+          "} Punkt;",
+          "",
+          "double punkt_laenge(struct Punkt p);"
+        ]
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Du willst eine Rust-Bibliothek `rmathe` in ein C-Programm einbauen. Bringe die Schritte in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "In `Cargo.toml` den Crate-Typ `staticlib` eintragen",
+        "Exportierte Funktionen mit C-ABI und `#[unsafe(no_mangle)]` versehen",
+        "`cargo build --release` erzeugt `librmathe.a`",
+        "Mit `cbindgen` den Header `rmathe.h` erzeugen",
+        "`main.c` mit `gcc` übersetzen und gegen `librmathe.a` linken"
+      ],
+      "erklaerung": "Den Header kannst du auch vor dem Build erzeugen, er hängt nur vom Quelltext ab. Wichtig ist: erst den Rust-Code exportierbar machen, dann Header und Archiv erzeugen, zum Schluss das C-Programm linken. Auf Linux braucht `gcc` je nach Code zusätzlich die Systembibliotheken, die `--print native-static-libs` nennt."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Die Gegenrichtung: Du hast eine C-Bibliothek `libbme280` mit Header `bme280.h` und 80 Funktionen. Wie kommst du am besten zu den Rust-Deklarationen?",
+      "optionen": [
+        "Mit **bindgen** aus dem Header einen `extern`-Block samt `repr(C)`-Structs erzeugen lassen",
+        "Mit **cbindgen** aus dem Header Rust-Code erzeugen lassen",
+        "Den Header mit `include!(\"bme280.h\")` direkt in Rust einbinden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**bindgen** parst C-Header mit libclang und erzeugt Rust-Deklarationen. Üblich ist ein eigenes `-sys`-Crate (z. B. `bme280-sys`), das nur diese rohen, `unsafe` Bindings enthält. Darüber baut ein zweites Crate eine sichere Rust-API.",
+      "begruendungen": [
+        "Richtig. bindgen: C → Rust, cbindgen: Rust → C.",
+        "cbindgen geht in die andere Richtung, von Rust-Code zu C-Header.",
+        "`include!` fügt Rust-Quelltext ein. C-Syntax versteht rustc nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "C-Code im Cargo-Build",
+      "text": "Liegt der C-Code im eigenen Projekt, übersetzt ihn das `cc`-Crate in einem **Build-Skript** (`build.rs`). Es ruft den passenden C-Compiler auf, erzeugt eine statische Bibliothek in `OUT_DIR` und teilt Cargo mit, dass sie gelinkt werden soll. Auch beim Cross-Kompilieren wählt `cc` den richtigen Compiler für das Target.",
+      "code": {
+        "sprache": "rust",
+        "datei": "build.rs",
+        "zeilen": [
+          "fn main() {",
+          "    cc::Build::new().file(\"c/sensor.c\").compile(\"sensor\");",
+          "    println!(\"cargo::rerun-if-changed=c/sensor.c\");",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 2,
+            "text": "Erzeugt `libsensor.a` und gibt `cargo:rustc-link-lib=static=sensor` und `cargo:rustc-link-search=…` aus."
+          },
+          {
+            "zeile": 3,
+            "text": "Das Build-Skript läuft nur neu, wenn sich diese Datei ändert."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze `Cargo.toml` eines Projekts mit Build-Skript: `cc` wird nur beim Bauen gebraucht, und das Crate soll als einziges die native Bibliothek `sensor` linken.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"sensor-sys\"",
+          "version = \"0.1.0\"",
+          "edition = \"2024\"",
+          "{{?}} = \"sensor\"",
+          "",
+          "[{{?}}]",
+          "cc = \"1\""
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "links"
+          ]
+        },
+        {
+          "loesungen": [
+            "build-dependencies"
+          ]
+        }
+      ],
+      "auswahl": [
+        "links",
+        "build-dependencies",
+        "dependencies",
+        "lib"
+      ],
+      "erklaerung": "`links = \"sensor\"` erklärt: Dieses Crate linkt die native Bibliothek `sensor`. Cargo erlaubt im ganzen Abhängigkeitsbaum nur **ein** Crate mit demselben `links`-Wert und verhindert so, dass zwei Versionen dieselbe C-Bibliothek doppelt linken. `[build-dependencies]` sind nur für `build.rs` da und landen nicht im fertigen Programm. `cargo add --build cc` trägt das automatisch ein."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Dieses Plugin soll von einem C-Programm geladen werden. Was meldet `rustc --crate-type=cdylib`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[unsafe(no_mangle)]",
+          "pub extern \"C\" fn plugin_name() -> String {",
+          "    String::from(\"filter\")",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Eine Warnung: `String` ist nicht FFI-tauglich",
+        "Einen Fehler: `String` ist in `extern \"C\"` verboten",
+        "Nichts, `String` wird automatisch in `char*` umgewandelt"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Es ist nur eine Warnung (`improper_ctypes_definitions`), der Code wird trotzdem gebaut. Das C-Programm wüsste aber nicht, wie ein `String` aussieht und wer ihn freigibt. Richtig wäre ein `*const c_char` (z. B. aus `CString::into_raw`) plus eine zweite exportierte Funktion, die den Speicher wieder freigibt. Behandle diese Warnung in FFI-Code wie einen Fehler.",
+      "begruendungen": [
+        "Richtig. rustc warnt `extern` fn uses type `String`, which is not FFI-safe.",
+        "rustc lehnt den Code nicht ab, er weist nur auf das unklare Layout hin.",
+        "Rust konvertiert an der FFI-Grenze nie automatisch. Darum muss sich der Code selbst kümmern."
+      ]
+    }
+  ],
+  "praxis": "Ein bewährtes Muster für C-Bibliotheken ist die Aufteilung in zwei Crates: `foo-sys` mit `links = \"foo\"`, `build.rs` (findet oder baut die Bibliothek, oft mit `pkg-config` oder `cc`) und von bindgen erzeugten Deklarationen, darüber `foo` mit einer sicheren API. Im Code-Review sind an der FFI-Grenze besonders wichtig: `#[repr(C)]` auf allen geteilten Typen, keine Panik über die Grenze (Phase 2.7) und klar dokumentiert, wer welchen Speicher freigibt.",
+  "labor": {
+    "titel": "Rust ruft C, C ruft Rust",
+    "anleitung": "Teil 1: Lege mit `cargo new ccdemo` ein Projekt an, schreibe `c/sensor.c` mit `int sensor_lesen(void) { return 42; }`, übersetze es per `build.rs` und `cc` und rufe es aus `main.rs` über einen `unsafe extern \"C\"`-Block auf. Teil 2: Baue die `Punkt`-Bibliothek als `staticlib` und rufe sie aus `main.c` auf.",
+    "befehle": [
+      "cargo add --build cc && cargo run",
+      "cat target/debug/build/ccdemo-*/output",
+      "cargo install cbindgen && cbindgen --lang c --output rmathe.h",
+      "gcc main.c target/release/librmathe.a -o app && ./app"
+    ],
+    "beobachtung": "Teil 1 gibt `Sensor: 42` aus. Die Datei `output` enthält die Anweisungen von `cc` an Cargo: `cargo:rustc-link-lib=static=sensor` und `cargo:rustc-link-search=native=…/out`. Teil 2 gibt `5.0` aus."
+  },
+  "begriffe": [
+    {
+      "begriff": "FFI",
+      "englisch": "foreign function interface",
+      "erklaerung": "Schnittstelle, über die Code verschiedener Sprachen einander aufruft, in Rust meist über das C-ABI."
+    },
+    {
+      "begriff": "repr(C)",
+      "englisch": "C representation",
+      "erklaerung": "Attribut, das für einen Typ das Speicherlayout von C festlegt."
+    },
+    {
+      "begriff": "bindgen",
+      "englisch": "bindgen",
+      "erklaerung": "Werkzeug, das aus C-Headern Rust-Deklarationen erzeugt."
+    },
+    {
+      "begriff": "cbindgen",
+      "englisch": "cbindgen",
+      "erklaerung": "Werkzeug, das aus Rust-Code C- oder C++-Header erzeugt."
+    },
+    {
+      "begriff": "-sys-Crate",
+      "englisch": "sys crate",
+      "erklaerung": "Crate, das nur rohe Bindings an eine native Bibliothek enthält und sie linkt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rustonomicon: Foreign Function Interface",
+      "url": "https://doc.rust-lang.org/nomicon/ffi.html"
+    },
+    {
+      "titel": "The Cargo Book: Build Scripts (links, rustc-link-lib)",
+      "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html"
+    },
+    {
+      "titel": "The bindgen User Guide",
+      "url": "https://rust-lang.github.io/rust-bindgen/"
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m5-l2",
+  "phase": 6,
+  "modul": "6.5 Kommunikationsschnittstellen",
+  "titel": "SPI, I²C und CAN mit generischen Treibern",
+  "lernziele": [
+    "SPI, I²C und CAN nach Leitungen, Adressierung und Einsatz unterscheiden",
+    "Einen Sensortreiber generisch über die `embedded-hal`-Traits `I2c` und `SpiDevice` schreiben",
+    "Einen Bus mit `embedded-hal-bus` zwischen mehreren Treibern teilen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "id": "busse",
+      "frage": "Ordne die Schnittstellen ihren Merkmalen zu.",
+      "paare": [
+        { "links": "SPI", "rechts": "Takt, MOSI, MISO und eine Chip-Select-Leitung pro Gerät; schnell, voll-duplex" },
+        { "links": "I²C", "rechts": "Zwei Leitungen (SDA, SCL) mit Pull-ups, Geräte über 7-Bit-Adressen" },
+        { "links": "CAN", "rechts": "Differenzielles Leitungspaar, Nachrichten mit IDs, Arbitrierung, robust im Fahrzeug" },
+        { "links": "UART", "rechts": "Punkt-zu-Punkt ohne Takt, vereinbarte Baudrate" }
+      ],
+      "erklaerung": "SPI erreicht oft zweistellige MHz und eignet sich für Displays und Flash-Speicher. I²C ist langsamer (100 kHz bis 1 MHz), braucht aber nur zwei Leitungen für viele Sensoren. CAN adressiert nicht Geräte, sondern Nachrichten: Jede hat eine ID, und die niedrigere ID gewinnt bei gleichzeitigem Senden."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Traits in embedded-hal 1.0",
+      "text": "Ein Treiber für einen Sensor soll auf STM32, nRF und RP2040 gleich funktionieren. Darum schreibst du ihn **generisch** über Traits:\n\n- `embedded_hal::i2c::I2c`: `read`, `write`, `write_read(addr, &[u8], &mut [u8])`, `transaction`\n- `embedded_hal::spi::SpiDevice`: ein Gerät **inklusive** Chip-Select. `transaction` setzt CS, führt alle Operationen aus und gibt CS wieder frei\n- `embedded_hal::spi::SpiBus`: nur der rohe Bus ohne CS, für Implementierer von Bus-Sharing\n\nTreiber nehmen fast immer `SpiDevice`, nicht `SpiBus`."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "i2c-treiber",
+      "frage": "Ein Treiber für einen Temperatursensor liest zwei Byte aus Register 0x00. Ergänze ihn.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::i2c::I2c;",
+          "",
+          "pub struct Tmp117<I2C> { i2c: I2C, adresse: u8 }",
+          "",
+          "impl<I2C: {{?}}> Tmp117<I2C> {",
+          "    pub fn new(i2c: I2C, adresse: u8) -> Self { Self { i2c, adresse } }",
+          "",
+          "    pub fn temperatur_roh(&mut self) -> Result<i16, I2C::{{?}}> {",
+          "        let mut buf = [0u8; 2];",
+          "        self.i2c.{{?}}(self.adresse, &[0x00], &mut buf)?;",
+          "        Ok(i16::from_be_bytes(buf))",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["I2c"] }, { "loesungen": ["Error"] }, { "loesungen": ["write_read"] }],
+      "auswahl": ["I2c", "SpiDevice", "Error", "Output", "write_read", "transfer"],
+      "erklaerung": "`write_read` schickt die Registeradresse und liest ohne Stoppbedingung dazwischen (*repeated start*). Der Treiber übernimmt den Bus per Wert (`I2C`), so kann er auch `&mut I2C` oder ein geteiltes Gerät bekommen, denn `embedded-hal` implementiert die Traits auch für `&mut T`. Der Fehlertyp wird durchgereicht, ohne dass der Treiber den konkreten HAL kennt."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "zwei-treiber-ein-bus",
+      "frage": "Ein Display und ein Flash-Speicher hängen am selben SPI-Bus, jeder mit eigenem CS-Pin. Beide Treiber wollen ein `SpiDevice` besitzen. Wie löst du das?",
+      "optionen": [
+        "Mit `embedded-hal-bus`: Den Bus in ein `RefCell` legen und pro Gerät ein `RefCellDevice::new(&bus, cs, delay)` erzeugen",
+        "Den Bus mit `.clone()` verdoppeln",
+        "Zwei SPI-Peripherien verwenden, einen Bus pro Gerät",
+        "Ein `static mut` für den Bus anlegen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`embedded-hal-bus` bietet `ExclusiveDevice` (ein Gerät, Bus allein), `RefCellDevice` (mehrere Geräte im selben Kontext) und `CriticalSectionDevice` bzw. Mutex-Varianten (über Interrupts oder Threads hinweg). Jedes implementiert `SpiDevice` und kümmert sich um CS. Für I²C gibt es entsprechende Typen, z. B. `i2c::RefCellDevice`.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein SPI-Treiber des HAL ist nicht `Clone`, er besitzt die Peripherie.",
+        "Möglich, aber verschwendet Pins und Peripherie, und das Problem stellt sich bei drei Geräten erneut.",
+        "Das braucht `unsafe` und schützt nichts gegen gleichzeitige Transaktionen."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "spibus-statt-device",
+      "frage": "Ein Kollege schreibt den Display-Treiber so. Was ist das Problem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::spi::SpiBus;",
+          "",
+          "pub struct Display<SPI> { spi: SPI }",
+          "",
+          "impl<SPI: SpiBus> Display<SPI> {",
+          "    pub fn befehl(&mut self, b: u8) -> Result<(), SPI::Error> {",
+          "        self.spi.write(&[b])",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`SpiBus` kennt kein Chip-Select: Der Treiber steuert CS nicht und blockiert den Bus für andere Geräte",
+        "`SpiBus` hat keine Methode `write`",
+        "Es kompiliert nicht, weil `SPI` keine Lebensdauer hat",
+        "Nichts, `SpiBus` ist die empfohlene Wahl für Treiber"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `SpiBus` müsste der Treiber selbst einen CS-Pin bekommen und schalten. Teilen ginge dann nicht mehr sauber. Mit `SpiDevice` schreibt man `self.spi.write(&[b])` genauso, CS ist aber Teil des Geräts und jede Transaktion ist atomar gegenüber anderen Geräten am Bus.",
+      "begruendungen": [
+        "Richtig.",
+        "`SpiBus` hat `write`, `read`, `transfer` und `flush`.",
+        "Generische Parameter brauchen keine Lebensdauer.",
+        "Die Dokumentation von `embedded-hal` empfiehlt für Treiber `SpiDevice`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "can-id",
+      "frage": "Zwei CAN-Knoten beginnen gleichzeitig zu senden: einer mit ID `0x100`, einer mit `0x0F0`. Wer gewinnt?",
+      "optionen": [
+        "`0x0F0`: Die niedrigere ID hat Vorrang, der andere Knoten merkt es bitweise und sendet später erneut",
+        "`0x100`: Die höhere ID ist wichtiger",
+        "Beide Nachrichten werden zerstört",
+        "Der Knoten, der zuerst eingeschaltet wurde"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auf dem Bus überschreibt eine 0 (dominant) eine 1 (rezessiv). Jeder Sender liest mit. Sieht er eine 0, wo er eine 1 gesendet hat, verliert er die **Arbitrierung** und hört auf, ohne dass Daten kaputtgehen. In Rust beschreibt `embedded-can` Frames (`Frame::new(id, &daten)`), IDs (`StandardId::new(0x0F0)` gibt `Option`, weil nur 11 Bit erlaubt sind) und die Traits `blocking::Can` und `nb::Can`.",
+      "begruendungen": [
+        "Richtig.",
+        "Umgekehrt.",
+        "CAN ist gerade dafür gebaut, Kollisionen verlustfrei aufzulösen.",
+        "Die Reihenfolge entscheidet allein die ID."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "can-id-zu-gross",
+      "frage": "Diese Zeile panikt zur Laufzeit. Welche Zeile ist falsch?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_can::{Frame, StandardId};",
+          "",
+          "let id = StandardId::new(0x7FF).unwrap();",
+          "let id2 = StandardId::new(0x800).unwrap();",
+          "let frame = MeinFrame::new(id, &[0x01, 0x02]).unwrap();"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Standard-IDs haben 11 Bit, das Maximum ist `0x7FF` (`StandardId::MAX`). `0x800` braucht 12 Bit, `new` liefert `None`, und `unwrap` panikt. Für 29-Bit-IDs gibt es `ExtendedId`. `Frame::new` liefert ebenfalls `Option`, weil klassisches CAN höchstens 8 Datenbyte erlaubt."
+    }
+  ],
+  "praxis": "Bevor du einen Sensortreiber schreibst, suche auf crates.io: Für viele Bausteine gibt es Treiber, die nur `embedded-hal` voraussetzen. Achte auf die Version: Treiber für `embedded-hal` 0.2 passen nicht direkt zu einem HAL mit 1.0. Bei eigenen Treibern testest du die Logik auf dem PC mit `embedded-hal-mock`, ohne Hardware.",
+  "labor": {
+    "titel": "Treiber ohne Hardware testen",
+    "anleitung": "Schreibe den TMP117-Treiber aus der Lektion als Bibliothek und teste ihn mit einem Mock, der die erwarteten I²C-Transaktionen vorgibt.",
+    "befehle": [
+      "cargo new --lib tmp117 && cd tmp117",
+      "cargo add embedded-hal",
+      "cargo add --dev embedded-hal-mock --no-default-features --features eh1",
+      "cargo test"
+    ],
+    "beobachtung": "Der Mock prüft, dass genau ein `write_read` an die richtige Adresse geht. Ein falsches Register lässt den Test fehlschlagen."
+  },
+  "begriffe": [
+    { "begriff": "SPI", "englisch": "serial peripheral interface", "erklaerung": "Synchroner, schneller Bus mit Takt, zwei Datenleitungen und Chip-Select pro Gerät." },
+    { "begriff": "I²C", "englisch": "inter-integrated circuit", "erklaerung": "Zweidrahtbus mit adressierten Geräten und Open-Drain-Leitungen." },
+    { "begriff": "Chip-Select", "englisch": "chip select, CS", "erklaerung": "Leitung, die ein SPI-Gerät für eine Transaktion auswählt." },
+    { "begriff": "Arbitrierung", "englisch": "arbitration", "erklaerung": "Verlustfreie Auflösung gleichzeitiger Sendeversuche auf dem CAN-Bus über die ID." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-hal (docs.rs)", "url": "https://docs.rs/embedded-hal" },
+    { "titel": "embedded-hal-bus (docs.rs)", "url": "https://docs.rs/embedded-hal-bus" },
+    { "titel": "embedded-can (docs.rs)", "url": "https://docs.rs/embedded-can" }
+  ]
+}

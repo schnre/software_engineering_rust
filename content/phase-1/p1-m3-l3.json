@@ -1,0 +1,200 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m3-l3",
+  "phase": 1,
+  "modul": "1.3 Bibliotheken",
+  "titel": "Dynamisches Linken und das fehlende Rust-ABI",
+  "lernziele": [
+    "Erklären, warum Rust kein stabiles ABI hat und was das für Shared Libraries bedeutet",
+    "Mit `ldd` die Laufzeitabhängigkeiten eines Rust-Programms prüfen und `-C prefer-dynamic` einordnen",
+    "Ein Plugin-System über `cdylib` und das C-ABI entwerfen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das ist ein normales Hello World, gebaut mit `cargo build --release`. Welche Aussage stimmt?",
+      "terminal": {
+        "befehl": "ldd target/release/hallo",
+        "ausgabe": [
+          "\tlinux-vdso.so.1 (0x00007f9d03451000)",
+          "\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f9d033b6000)",
+          "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f9d03000000)",
+          "\t/lib64/ld-linux-x86-64.so.2 (0x00007f9d03453000)"
+        ]
+      },
+      "optionen": [
+        "Die Rust-Standardbibliothek steckt im Binary. Dynamisch geladen werden nur die C-Bibliothek, `libgcc_s` und der Loader",
+        "Das Programm braucht keine Rust-Toolchain auf dem Zielsystem, aber eine installierte `libstd.so`",
+        "Das Programm ist vollständig statisch gelinkt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust linkt `std` und alle Crates statisch, nutzt aber die C-Bibliothek des Systems dynamisch: `std` ruft für Dateien, Threads und Speicher die Funktionen von `libc` auf. `libgcc_s` liefert das Stack-Unwinding für Panics. `linux-vdso.so.1` ist keine Datei, sondern vom Kernel eingeblendet.",
+      "begruendungen": [
+        "Richtig. Das macht Rust-Programme einfach auszuliefern.",
+        "Eine `libstd.so` wird bei einem normalen Build nicht gebraucht und taucht in der Liste auch nicht auf.",
+        "Dann würde `ldd` `statically linked` melden. Das geht z. B. mit dem Target `x86_64-unknown-linux-musl`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Kein stabiles Rust-ABI",
+      "text": "Das **ABI** (application binary interface) legt fest, wie Funktionen auf Maschinenebene aufgerufen werden und wie Typen im Speicher liegen. Rust garantiert dafür **nichts**: Feldreihenfolge von Structs, Layout von Enums, Aufrufkonvention und Mangling dürfen sich mit jeder Compiler-Version ändern. So kann rustc z. B. Felder umordnen, um Padding zu sparen.\n\nFolge: Eine Rust-Shared-Library (`dylib`) passt nur zu Programmen, die mit **exakt demselben** rustc und denselben Abhängigkeiten gebaut wurden. Deshalb steht in ihrem Dateinamen ein Hash, z. B. `libstd-ca8536218e109c03.so`. Stabil ist nur das C-ABI über `extern \"C\"` und `#[repr(C)]`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Mit `rustc -C prefer-dynamic main.rs` schrumpft das Binary von rund 4 MB auf 9424 Bytes. Was passiert beim Start?",
+      "terminal": {
+        "befehl": "ldd main && ./main",
+        "ausgabe": [
+          "\tlinux-vdso.so.1 (0x00007fc9e8dd4000)",
+          "\tlibstd-ca8536218e109c03.so => not found",
+          "\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fc9e8d8c000)",
+          "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fc9e8a00000)",
+          "\t/lib64/ld-linux-x86-64.so.2 (0x00007fc9e8dd6000)",
+          "./main: error while loading shared libraries: libstd-ca8536218e109c03.so: cannot open shared object file: No such file or directory"
+        ]
+      },
+      "optionen": [
+        "Der Loader findet die dynamische `std` nicht. Sie liegt nur im Sysroot der Toolchain, und der Hash bindet sie an genau diese rustc-Version",
+        "Das Programm startet, stürzt aber beim ersten `println!` ab",
+        "rustc hat beim Linken einen Fehler übersehen, `prefer-dynamic` ist defekt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`-C prefer-dynamic` linkt `std` dynamisch gegen die `libstd-<hash>.so` aus der Toolchain. Auf einem anderen Rechner müsste genau diese Datei vorhanden sein. Linux-Distributionen liefern sie nicht als Systembibliothek aus. Darum ist die Option in der Praxis selten. Ein Einsatzfall sind z. B. Entwicklungs-Builds mit vielen Binaries, die sich eine `std` teilen.",
+      "begruendungen": [
+        "Richtig. `not found` bei `ldd` und der Ladefehler kommen beide vom dynamischen Loader.",
+        "Der Loader bricht vor `main` ab, weil er alle benötigten Bibliotheken zuerst laden muss.",
+        "Das Linken war korrekt. Das Problem tritt erst beim Laden zur Laufzeit auf."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Programm soll zur Laufzeit Plugins laden, die andere Teams mit eigener Rust-Version bauen. Welcher Ansatz ist robust?",
+      "optionen": [
+        "Plugins als `cdylib` mit einer schmalen `extern \"C\"`-Schnittstelle und `#[repr(C)]`-Typen, geladen z. B. mit `libloading`",
+        "Plugins als `dylib`, die direkt Rust-Traits wie `Box<dyn Filter>` austauschen",
+        "Plugins als `rlib`, die das Programm beim Start nachlinkt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Über das C-ABI ist die Schnittstelle unabhängig von der Compiler-Version. Typisch: Das Plugin exportiert eine Funktion wie `plugin_erzeugen()`, die eine `repr(C)`-Struktur mit Funktionszeigern zurückgibt. Wer Rust-Typen wie Traits über die Grenze reichen will, kann das Crate **abi_stable** nutzen. Es bildet Typen wie `RString`, `RVec` und Trait-Objekte mit festem `repr(C)`-Layout nach.",
+      "begruendungen": [
+        "Richtig. Das C-ABI ist der kleinste gemeinsame, stabile Nenner.",
+        "`Box<dyn Filter>` hat kein stabiles Layout, und die vtable kann sich zwischen Compiler-Versionen ändern. Das führt zu undefiniertem Verhalten.",
+        "Ein Programm kann zur Laufzeit nichts mehr statisch linken. `rlib`s sind Eingabe für rustc, nicht für den Loader."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Aussage gehört zu welchem Begriff?",
+      "paare": [
+        {
+          "links": "C-ABI (`extern \"C\"`)",
+          "rechts": "Stabil, von praktisch jeder Sprache aufrufbar"
+        },
+        {
+          "links": "Rust-ABI (`extern \"Rust\"`)",
+          "rechts": "Standard für Rust-Funktionen, kann sich mit jeder Version ändern"
+        },
+        {
+          "links": "`-C prefer-dynamic`",
+          "rechts": "Linkt `std` als `libstd-<hash>.so` statt statisch"
+        },
+        {
+          "links": "`abi_stable`",
+          "rechts": "Crate mit `repr(C)`-Nachbauten von Rust-Typen für Plugins"
+        }
+      ],
+      "erklaerung": "Über die Einführung eines stabilen Rust-ABI (oft unter dem Stichwort `crabi`) wird diskutiert, zum Stand dieser Lektion gibt es aber keins. Bis dahin ist das C-ABI die Grenze für alles, was unabhängig gebaut wird."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Plugin-Schnittstelle so, dass sie über Compiler-Versionen hinweg stabil ist.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[{{?}}]",
+          "pub struct PluginInfo {",
+          "    pub version: u32,",
+          "    pub verarbeiten: extern \"C\" fn(wert: f32) -> f32,",
+          "}",
+          "",
+          "#[unsafe(no_mangle)]",
+          "pub {{?}} fn plugin_info() -> PluginInfo {",
+          "    PluginInfo { version: 1, verarbeiten: verdoppeln }",
+          "}",
+          "",
+          "extern \"C\" fn verdoppeln(wert: f32) -> f32 { wert * 2.0 }"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "repr(C)"
+          ]
+        },
+        {
+          "loesungen": [
+            "extern \"C\""
+          ]
+        }
+      ],
+      "auswahl": [
+        "repr(C)",
+        "extern \"C\"",
+        "derive(Clone)",
+        "unsafe"
+      ],
+      "erklaerung": "`#[repr(C)]` fixiert das Layout von `PluginInfo`, `extern \"C\"` die Aufrufkonvention der Export-Funktion. Auch der Funktionszeiger im Struct ist `extern \"C\"`, damit das Hauptprogramm ihn sicher aufrufen kann. Ein `version`-Feld erlaubt dem Host, inkompatible Plugins abzulehnen."
+    }
+  ],
+  "praxis": "Rust-Programme sind dank statischem Linken leicht zu verteilen: ein Binary, dazu nur `libc`. Für Container mit minimalem Basis-Image (`scratch`, `distroless`) baut man oft für `x86_64-unknown-linux-musl`, dann fällt auch `libc` weg. Sobald unabhängig gebaute Teile zusammenarbeiten müssen (Plugins, Python-Module, Firmware-Komponenten), führt der Weg über das C-ABI. Im Review gilt: Keine Rust-Typen ohne `repr(C)` über eine `cdylib`-Grenze.",
+  "labor": {
+    "titel": "Statisch vs. dynamisch gelinkte std",
+    "anleitung": "Übersetze ein Hello World einmal normal und einmal mit `-C prefer-dynamic` und vergleiche Grösse und Abhängigkeiten. Starte die dynamische Variante danach mit dem Bibliothekspfad der Toolchain.",
+    "befehle": [
+      "rustc main.rs -o statisch && rustc -C prefer-dynamic main.rs -o dynamisch",
+      "ls -l statisch dynamisch",
+      "ldd statisch dynamisch",
+      "ls $(rustc --print target-libdir)/libstd-*.so",
+      "LD_LIBRARY_PATH=$(rustc --print target-libdir) ./dynamisch"
+    ],
+    "beobachtung": "Das dynamische Binary ist nur wenige KB gross, braucht aber `libstd-<hash>.so`. Mit `LD_LIBRARY_PATH` auf das Bibliotheksverzeichnis der Toolchain startet es. Auf einem Rechner mit anderer Rust-Version würde der Hash nicht passen."
+  },
+  "begriffe": [
+    {
+      "begriff": "ABI",
+      "englisch": "application binary interface",
+      "erklaerung": "Regeln auf Maschinenebene: Aufrufkonvention, Speicherlayout von Typen, Symbolnamen."
+    },
+    {
+      "begriff": "Dynamischer Loader",
+      "englisch": "dynamic loader",
+      "erklaerung": "Teil des Systems (`ld-linux.so`), der beim Start Shared Libraries lädt und Symbole auflöst."
+    },
+    {
+      "begriff": "Plugin",
+      "englisch": "plugin",
+      "erklaerung": "Zur Laufzeit geladene Bibliothek, die ein Programm erweitert, in Rust meist als `cdylib`."
+    },
+    {
+      "begriff": "abi_stable",
+      "englisch": "abi_stable",
+      "erklaerung": "Crate, das Rust-Typen mit stabilem `repr(C)`-Layout für dynamisch geladene Bibliotheken bereitstellt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Reference: Linkage",
+      "url": "https://doc.rust-lang.org/reference/linkage.html"
+    },
+    {
+      "titel": "abi_stable auf docs.rs",
+      "url": "https://docs.rs/abi_stable"
+    },
+    {
+      "titel": "libloading auf docs.rs",
+      "url": "https://docs.rs/libloading"
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m3-l2",
+  "phase": 13,
+  "modul": "13.3 Schätzen und Planen",
+  "titel": "Risiken managen",
+  "lernziele": [
+    "Risiken nach Wahrscheinlichkeit und Auswirkung bewerten und in einer Risikoliste führen",
+    "Toolchain-Risiken wie Nightly-Abhängigkeiten und MSRV-Sprünge erkennen und eindämmen",
+    "Verzug früh und mit Optionen kommunizieren"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein neues Gerät besteht aus einer bewährten Bedien-App, einem neuen Funkmodul und einer Firmware, die erstmals in Rust mit Embassy entsteht. Womit beginnst du?",
+      "optionen": [
+        "Mit einer dünnen Firmware, die das Funkmodul auf echter Hardware anspricht und einen Wert bis zur App durchreicht",
+        "Mit der App, weil sie die Kunden zuerst sehen",
+        "Mit der vollständigen Geschäftslogik im Simulator, die Hardware kommt am Ende"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die grössten Unbekannten liegen bei Funkmodul und Embassy auf eurer Hardware. Ein **Walking Skeleton** (laufendes Skelett), also eine dünne, durchgehende Version von Sensor bis Anzeige, deckt Probleme mit HAL-Unterstützung, Speicher und Timing früh auf, solange noch Zeit zum Reagieren ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Die App ist bewährt, dort liegt das kleinste Risiko.",
+        "Probleme, die erst auf der Hardware sichtbar werden, kämen dann zum teuersten Zeitpunkt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Risiken greifbar machen",
+      "text": "Ein **Risiko** ist ein mögliches Ereignis, das dem Vorhaben schadet. Man bewertet es nach **Wahrscheinlichkeit** und **Auswirkung**, ihr Produkt zeigt grob, wie ernst es ist. Eine **Risikoliste** (risk register) hält pro Eintrag Bewertung, Gegenmassnahme, verantwortliche Person und Datum der nächsten Prüfung fest.\n\nTypische Risiken in Rust-Embedded-Projekten:\n- kein oder unreifes HAL-Crate für den gewählten Chip\n- Abhängigkeit von **Nightly**-Funktionen, die sich noch ändern können\n- ein Crate hebt seine **MSRV** (minimum supported Rust version) über eure Toolchain\n- Zertifizierung verlangt einen qualifizierten Compiler"
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Welches Risiko ist nach dem Erwartungswert ernster?",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "Risiko A: HAL-Crate unterstützt den DMA des Chips nicht",
+          "          Wahrscheinlichkeit 40 %, Auswirkung 15 Tage Verzug",
+          "",
+          "Risiko B: Zertifizierungsstelle akzeptiert die Toolchain nicht",
+          "          Wahrscheinlichkeit 5 %, Auswirkung 60 Tage Verzug"
+        ]
+      },
+      "optionen": [
+        "A: erwartet 6 Tage Verzug gegenüber 3 Tagen bei B",
+        "B, weil die mögliche Auswirkung viermal grösser ist",
+        "Beide gleich ernst"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "0,4 × 15 = 6 Tage gegenüber 0,05 × 60 = 3 Tagen. B gehört trotzdem auf die Liste: Wenn eine Auswirkung das ganze Projekt gefährdet, lohnt sich eine frühe, billige Klärung, etwa ein Gespräch mit der Prüfstelle über qualifizierte Rust-Toolchains. Die Rechnung ist Orientierung, kein Automatismus.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Auswirkung allein reicht nicht, die Wahrscheinlichkeit gehört dazu.",
+        "Die Erwartungswerte unterscheiden sich um den Faktor zwei."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Kollege hat in einem Prototyp eine Nightly-Funktion verwendet. Auf dem CI-Server mit stabiler Toolchain erscheint das. Was folgt daraus für die Risikoliste?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling firmware v0.1.0 (/home/user/projekt)",
+          "error[E0554]: `#![feature]` may not be used on the stable release channel",
+          " --> src/main.rs:1:1",
+          "  |",
+          "1 | #![feature(never_type)]",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^^"
+        ]
+      },
+      "optionen": [
+        "Das Produkt hängt an einer instabilen Funktion. Entweder ersetzen oder bewusst eine bestimmte Nightly-Version festschreiben und das Risiko eintragen",
+        "Der CI-Server ist falsch konfiguriert, er sollte immer die neueste Nightly nehmen",
+        "Kein Risiko, Nightly-Funktionen werden ohnehin bald stabil",
+        "Ein Fehler im Code, `never_type` ist falsch geschrieben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`#![feature(...)]` ist nur auf Nightly erlaubt. Solche Funktionen können sich ändern oder wieder verschwinden, und eine „immer neueste“ Nightly macht Builds unreproduzierbar. Manche Funktionen bleiben jahrelang instabil. Wer wirklich Nightly braucht, legt das Datum in `rust-toolchain.toml` fest und plant regelmässige, bewusste Updates ein.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine wandernde Nightly macht Builds von Tag zu Tag unterschiedlich.",
+        "Wann und in welcher Form eine Funktion stabil wird, ist offen.",
+        "Der Name ist korrekt, der Fehler betrifft den Kanal."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Datei so, dass alle Entwickler und die CI dieselbe stabile Toolchain samt Embedded-Target verwenden.",
+      "code": {
+        "sprache": "toml",
+        "datei": "rust-toolchain.toml",
+        "zeilen": [
+          "[toolchain]",
+          "{{?}} = \"1.97.0\"",
+          "components = [\"clippy\", \"rustfmt\"]",
+          "{{?}} = [\"thumbv7em-none-eabihf\"]"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["channel"] },
+        { "loesungen": ["targets"] }
+      ],
+      "auswahl": ["channel", "targets", "edition", "version", "rust-version"],
+      "erklaerung": "`rustup` liest `rust-toolchain.toml` und installiert bei Bedarf genau diese Version mit den Komponenten und Targets. Damit ist die Toolchain Teil des Repositorys und wird wie Code geändert: per Pull Request, mit CI-Lauf, bewusst. Das verwandelt ein schleichendes Risiko in eine geplante Aufgabe."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Nach `cargo update` bricht der Build eures Firmware-Projekts so ab. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: rustc 1.97.0 is not supported by the following package:",
+          "  sensor-hal@0.9.0 requires rustc 1.99"
+        ]
+      },
+      "optionen": [
+        "Eine Abhängigkeit verlangt in ihrer neuen Version einen neueren Compiler (MSRV) als die festgeschriebene Toolchain",
+        "Das Crate `sensor-hal` ist fehlerhaft und lässt sich nicht kompilieren",
+        "Cargo braucht eine neuere Version, rustc ist in Ordnung",
+        "Das Embedded-Target fehlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo prüft das Feld `rust-version` jeder Abhängigkeit. Gegenmassnahmen: `Cargo.lock` einchecken, Updates gezielt und in eigenen Commits machen, und `rust-version` im eigenen `Cargo.toml` setzen. Mit Edition 2024 (Resolver 3) wählt `cargo update` dann bevorzugt Versionen, die zur eigenen MSRV passen.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Code wurde gar nicht übersetzt, Cargo bricht vorher ab.",
+        "Die Meldung nennt ausdrücklich `rustc`.",
+        "Ein fehlendes Target führt zu einer ganz anderen Meldung."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Schlechte Nachrichten früh",
+      "text": "Zeichnet sich ein Verzug ab, ist die Versuchung gross, still zu hoffen. Für alle anderen ist es viel besser, es früh zu wissen: Dann gibt es noch Optionen wie Umfang reduzieren, Termin verschieben oder Hilfe holen. Eine gute Meldung enthält:\n\n- was passiert ist und wie sicher die Einschätzung ist\n- die Auswirkung auf Termin, Kosten oder Qualität\n- Optionen mit ihren Folgen\n- eine Empfehlung"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Du merkst, dass das HAL-Crate den DMA eures Chips nicht unterstützt. Das kostet wahrscheinlich zwei bis drei Wochen. Wie meldest du das?",
+      "optionen": [
+        "Sofort: „Der DMA wird vom HAL nicht unterstützt. Optionen: selbst über die PAC-Register ansteuern (ca. 2–3 Wochen) oder vorerst ohne DMA mit höherer CPU-Last liefern. Ich empfehle Variante 2 für den Messetermin und DMA danach.“",
+        "Erst einmal selbst versuchen, die Zeit aufzuholen, und nur melden, wenn es nicht klappt",
+        "Im nächsten Statusbericht in drei Wochen erwähnen",
+        "Dem Hersteller des HAL-Crates schreiben und abwarten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wer früh mit Optionen und Empfehlung kommt, wird als verlässlich wahrgenommen. Wer spät kommt, nimmt den anderen die Wahlmöglichkeiten. Ein Issue oder Pull Request beim HAL-Projekt ist trotzdem sinnvoll, als Teil der Lösung, nicht als Ersatz für die Meldung.",
+      "begruendungen": [
+        "Richtig.",
+        "Aufholen klappt selten, und dann ist der Spielraum weg.",
+        "Drei Wochen ohne Information sind drei Wochen ohne Handlungsmöglichkeit.",
+        "Ob und wann eine Antwort kommt, ist ungewiss. Das Projekt braucht jetzt eine Entscheidung."
+      ]
+    }
+  ],
+  "praxis": "Seniors erkennen Risiken früh und machen sie sichtbar, bevor sie zu Problemen werden. In Rust-Embedded-Projekten heisst das konkret: früh auf echter Hardware integrieren, die Toolchain mit `rust-toolchain.toml` festschreiben, `Cargo.lock` einchecken, Nightly nur bewusst und mit Datum, und MSRV-Sprünge von Abhängigkeiten im Blick behalten. Und wenn es doch klemmt, kommst du früh, mit Optionen und Empfehlung.",
+  "labor": {
+    "titel": "Toolchain-Risiken prüfen",
+    "anleitung": "Prüfe ein eigenes Rust-Projekt auf typische Toolchain-Risiken: festgeschriebene Toolchain, eingechecktes Lockfile, Nightly-Funktionen und MSRV.",
+    "befehle": [
+      "cat rust-toolchain.toml",
+      "git ls-files Cargo.lock",
+      "grep -rn '#!\\[feature' src/",
+      "grep -n 'rust-version' Cargo.toml",
+      "cargo update --dry-run"
+    ],
+    "beobachtung": "Fehlt `rust-toolchain.toml` oder ist `Cargo.lock` nicht eingecheckt, kann jeder Rechner anders bauen. `cargo update --dry-run` zeigt, welche Versionen sich ändern würden, ohne etwas anzufassen. Jeder Fund ist ein Kandidat für die Risikoliste."
+  },
+  "begriffe": [
+    {
+      "begriff": "Risikoliste",
+      "englisch": "risk register",
+      "erklaerung": "Liste der Projektrisiken mit Bewertung, Massnahme, verantwortlicher Person und Prüfdatum."
+    },
+    {
+      "begriff": "Walking Skeleton",
+      "englisch": "walking skeleton",
+      "erklaerung": "Früh lauffähige, dünne Version des ganzen Systems, die alle Teile einmal durchgehend verbindet."
+    },
+    {
+      "begriff": "MSRV",
+      "englisch": "minimum supported Rust version",
+      "erklaerung": "Die älteste Compilerversion, mit der ein Crate garantiert baut. Im Feld `rust-version` angegeben."
+    },
+    {
+      "begriff": "Nightly",
+      "englisch": "nightly toolchain",
+      "erklaerung": "Täglicher Rust-Build, der instabile Funktionen per `#![feature]` erlaubt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustup book: Overrides (rust-toolchain.toml)",
+      "url": "https://rust-lang.github.io/rustup/overrides.html"
+    },
+    {
+      "titel": "The Cargo Book: The rust-version field",
+      "url": "https://doc.rust-lang.org/cargo/reference/rust-version.html"
+    }
+  ]
+}

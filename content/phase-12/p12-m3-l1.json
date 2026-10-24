@@ -1,0 +1,216 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m3-l1",
+  "phase": 12,
+  "modul": "12.3 Security für Embedded-Systeme",
+  "titel": "Bedrohungsmodelle, CRA und Speichersicherheit",
+  "lernziele": [
+    "Bedrohungen eines Geräts mit STRIDE systematisch finden",
+    "Die wichtigsten Pflichten und Fristen des Cyber Resilience Act einordnen",
+    "Speichersicherheit als Security-Argument mit belastbaren Quellen begründen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "id": "stride",
+      "frage": "STRIDE steht für sechs Bedrohungsarten. Ordne jeder ein Beispiel für ein vernetztes Ladegerät zu.",
+      "paare": [
+        {
+          "links": "Spoofing (Vortäuschen einer Identität)",
+          "rechts": "Ein Angreifer gibt sich gegenüber dem Backend als Ladegerät aus"
+        },
+        {
+          "links": "Tampering (Manipulation)",
+          "rechts": "Veränderte Firmware wird über die Debug-Schnittstelle eingespielt"
+        },
+        {
+          "links": "Repudiation (Abstreiten)",
+          "rechts": "Ein Ladevorgang lässt sich mangels Protokoll keinem Kunden zuordnen"
+        },
+        {
+          "links": "Information disclosure (Preisgabe)",
+          "rechts": "WLAN-Passwort liegt im Klartext im Flash"
+        },
+        {
+          "links": "Denial of service (Dienstverweigerung)",
+          "rechts": "Ein manipuliertes Paket bringt den Parser zum Absturz"
+        },
+        {
+          "links": "Elevation of privilege (Rechteausweitung)",
+          "rechts": "Über den Webserver wird Code mit Systemrechten ausgeführt"
+        }
+      ],
+      "erklaerung": "**Bedrohungsmodellierung** (*threat modeling*) beginnt mit einem Datenflussdiagramm: Komponenten, Datenflüsse, Vertrauensgrenzen. Für jedes Element fragt man STRIDE ab und bewertet das Risiko. Im Fahrzeug heisst das Verfahren TARA (*threat analysis and risk assessment*, ISO/SAE 21434). Es ist das Gegenstück zur Gefährdungsanalyse der Safety."
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "threat-ablauf",
+      "frage": "Bringe die Schritte einer Bedrohungsmodellierung in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Schützenswerte Güter festlegen (Schlüssel, Firmware, Nutzerdaten, Funktion)",
+        "Datenflussdiagramm mit Vertrauensgrenzen zeichnen",
+        "Bedrohungen pro Element mit STRIDE sammeln",
+        "Risiko bewerten (Auswirkung und Angriffsaufwand)",
+        "Gegenmassnahmen festlegen und als Anforderungen erfassen",
+        "Modell bei jeder Architekturänderung aktualisieren"
+      ],
+      "erklaerung": "Das Ergebnis sind Security-Anforderungen mit IDs, die wie Safety-Anforderungen rückverfolgt und getestet werden. Ein Bedrohungsmodell ist nie fertig: Neue Schnittstellen, neue Abhängigkeiten oder neue Angriffstechniken verändern es."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Cyber Resilience Act",
+      "text": "Der **Cyber Resilience Act** (CRA, EU-Verordnung 2024/2847) stellt Cybersicherheitsanforderungen an fast alle „Produkte mit digitalen Elementen“, die in der EU verkauft werden, vom Smart-Home-Sensor bis zur Industriesteuerung. Kernpunkte:\n\n- Sicher entwickelt und ausgeliefert (*secure by design/default*), ohne bekannte ausnutzbare Schwachstellen\n- Schwachstellenmanagement über einen festgelegten Unterstützungszeitraum, inklusive Sicherheitsupdates\n- Eine **SBOM** (Stückliste der Softwarekomponenten) als Teil der technischen Dokumentation\n- Meldepflicht für aktiv ausgenutzte Schwachstellen und schwere Vorfälle\n\nDie Meldepflichten gelten seit dem **11. September 2026**, die übrigen Pflichten im Wesentlichen ab dem **11. Dezember 2027**. Für Einzelfragen (Produktklassen, Open Source) sind die Verordnung und juristische Beratung massgebend."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "cra-melden",
+      "frage": "Ein Hersteller erfährt, dass eine Schwachstelle in seinem Gateway aktiv ausgenutzt wird. Was verlangt der CRA zuerst?",
+      "optionen": [
+        "Eine Frühwarnung innerhalb von 24 Stunden an das zuständige CSIRT und die EU-Agentur ENISA, danach eine ausführlichere Meldung und einen Abschlussbericht",
+        "Nichts, solange das Update innerhalb eines Jahres erscheint",
+        "Eine Meldung erst, wenn ein Patch fertig ist",
+        "Nur eine Information an betroffene Kunden per Newsletter"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der CRA sieht ein gestuftes Verfahren vor: Frühwarnung innerhalb von 24 Stunden, Schwachstellenmeldung innerhalb von 72 Stunden, Abschlussbericht spätestens 14 Tage nach Verfügbarkeit einer Abhilfe. Gemeldet wird über die zentrale Meldeplattform der ENISA. Für Entwickler heisst das: Man muss schnell wissen, welche Produkte und Versionen eine betroffene Komponente enthalten. Genau dafür braucht es SBOMs (nächste Lektion).",
+      "begruendungen": [
+        "Richtig.",
+        "Die Fristen sind kurz und gelten ab Kenntnis, nicht ab Patch.",
+        "Die Frühwarnung muss vor dem Patch erfolgen.",
+        "Nutzer zu informieren kann zusätzlich nötig sein, ersetzt aber nicht die Meldung an die Behörden."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Speichersicherheit als Security-Argument",
+      "text": "Mehrere grosse Hersteller berichten seit Jahren ähnliche Zahlen: Bei Microsoft gingen rund **70 %** der behobenen Sicherheitslücken mit CVE auf Speichersicherheitsfehler zurück, beim Chromium-Projekt ebenfalls rund 70 % der schweren Fehler. Google berichtet für Android, dass der Anteil von Speicherfehlern an den Schwachstellen sank (von 76 % 2019 auf 24 % 2024), seit neuer Code überwiegend in speichersicheren Sprachen wie Rust und Kotlin entsteht.\n\nBehörden ziehen daraus Konsequenzen: **CISA und NSA** empfehlen in gemeinsamen Veröffentlichungen, zuletzt im Juni 2025 („Memory Safe Languages: Reducing Vulnerabilities in Modern Software Development“), Roadmaps hin zu speichersicheren Sprachen, vor allem für neuen Code. Ein Komplett-Neuschreiben wird dabei ausdrücklich nicht verlangt."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "rust-grenzen",
+      "frage": "Ein Manager sagt: „Mit Rust sind wir sicher, Bedrohungsmodell und Pentest können wir sparen.“ Wie antwortest du?",
+      "optionen": [
+        "Rust verhindert in sicherem Code eine ganze Fehlerklasse (Pufferüberläufe, Use-after-free, Datenrennen). Logikfehler, schwache Kryptografie, offene Debug-Ports, fehlende Authentifizierung und Lücken in Abhängigkeiten bleiben",
+        "Richtig, Rust-Programme haben keine Sicherheitslücken",
+        "Rust hilft nur bei Performance, nicht bei Security",
+        "Rust verhindert Speicherfehler auch in `unsafe`-Blöcken und in C-Bibliotheken über FFI"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Speichersicherheit ist ein starkes, messbares Argument, aber nur ein Teil. Von den sechs STRIDE-Kategorien adressiert sie vor allem Tampering und Elevation of Privilege über Speicherfehler, teilweise Denial of Service. Ein gutes Argument gegenüber Management und Behörden lautet: Rust eliminiert die häufigste Ursache schwerer Lücken, damit bleibt mehr Budget für die übrigen Bedrohungen.",
+      "begruendungen": [
+        "Richtig.",
+        "Auch Rust-Crates haben RustSec-Meldungen, etwa durch Logikfehler oder fehlerhaftes `unsafe`.",
+        "Die Zahlen von Microsoft, Google und Chromium zeigen das Gegenteil.",
+        "In `unsafe` und über FFI übernimmt der Mensch die Verantwortung, dort sind Speicherfehler weiter möglich."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "parser-dos",
+      "frage": "Dieser Parser verarbeitet Pakete aus dem Netzwerk. Was passiert bei dem Paket `[5, 1]`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn nutzdaten(paket: &[u8]) -> &[u8] {",
+          "    let laenge = usize::from(paket[0]);",
+          "    &paket[1..1 + laenge]",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Ein Panic wegen Bereichsüberschreitung. Kein Speicherfehler, aber ein Angreifer kann das Gerät damit gezielt zum Absturz bringen (Denial of Service)",
+        "Es werden fremde Speicherbytes nach dem Paket gelesen, wie in C",
+        "Compilerfehler, weil `paket[0]` fehlen könnte",
+        "Die Funktion gibt einen leeren Slice zurück"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Bereichsprüfung verhindert ein Leck wie bei Heartbleed, der Angriff wird von einem Datenleck zu einem Absturz herabgestuft. Bei einem Gerät, das danach neu startet oder im sicheren Zustand stehen bleibt, ist das trotzdem eine Schwachstelle. Robust ist: `let (&laenge, rest) = paket.split_first()?;` und `rest.get(..usize::from(laenge))` mit `Option` als Rückgabe.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau das verhindert Rust mit der Bereichsprüfung bei Slices.",
+        "Indexzugriffe werden zur Laufzeit geprüft, nicht zur Übersetzungszeit.",
+        "Rust kürzt nicht stillschweigend, es panikt bei ungültigen Bereichen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-cra",
+      "frage": "Ergänze.",
+      "text": "Im Akronym STRIDE steht das T für {{?}}. Die Frühwarnung nach CRA muss innerhalb von {{?}} Stunden erfolgen. CISA und NSA empfehlen speichersichere Sprachen vor allem für {{?}} Code.",
+      "luecken": [
+        {
+          "loesungen": [
+            "Tampering"
+          ]
+        },
+        {
+          "loesungen": [
+            "24"
+          ]
+        },
+        {
+          "loesungen": [
+            "neuen"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Tampering",
+        "24",
+        "neuen",
+        "Testing",
+        "72",
+        "bestehenden"
+      ],
+      "erklaerung": "72 Stunden ist die Frist für die ausführlichere Schwachstellenmeldung. Für bestehenden Code empfehlen die Behörden schrittweise Wege, etwa neue Module in Rust und Härtung des Altbestands."
+    }
+  ],
+  "praxis": "Ein Bedrohungsmodell gehört an den Anfang jedes vernetzten Produkts, genau wie die Gefährdungsanalyse. Mit dem CRA wird es zur Pflicht, nachweisbar sicher zu entwickeln und Schwachstellen über Jahre zu behandeln. Als Senior kannst du Rust dabei sachlich begründen: Es beseitigt die häufigste Klasse schwerer Lücken, und das sagen nicht nur Enthusiasten, sondern auch Hersteller und Behörden. Bleib dabei ehrlich über die Grenzen, sonst verlierst du die Glaubwürdigkeit beim ersten Logikfehler.",
+  "labor": {
+    "titel": "Ein STRIDE-Modell für dein Gerät",
+    "anleitung": "Zeichne ein Datenflussdiagramm für ein Gerät deiner Wahl (Komponenten, Schnittstellen, Vertrauensgrenzen) und notiere pro Schnittstelle mindestens eine Bedrohung je STRIDE-Kategorie. Zähle danach im Code die Stellen, an denen Daten von aussen ankommen.",
+    "befehle": [
+      "mkdir -p doc/security && touch doc/security/bedrohungsmodell.md",
+      "grep -rn \"unsafe\" src/ | wc -l",
+      "grep -rnE \"fn (parse|decode|from_bytes)\" src/"
+    ],
+    "beobachtung": "Die Parser für externe Daten sind fast immer die kritischsten Stellen. Sie sind gute Kandidaten für Fuzzing (Lektion 12.3.3) und für eine panikfreie Umsetzung mit `Option` und `Result`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Bedrohungsmodellierung",
+      "englisch": "threat modeling",
+      "erklaerung": "Systematische Suche nach Bedrohungen eines Systems und Ableitung von Gegenmassnahmen."
+    },
+    {
+      "begriff": "STRIDE",
+      "englisch": "STRIDE",
+      "erklaerung": "Merkhilfe für sechs Bedrohungsarten: Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege."
+    },
+    {
+      "begriff": "Cyber Resilience Act",
+      "englisch": "Cyber Resilience Act (CRA)",
+      "erklaerung": "EU-Verordnung mit Cybersicherheitsanforderungen für Produkte mit digitalen Elementen."
+    },
+    {
+      "begriff": "Speichersicherheit",
+      "englisch": "memory safety",
+      "erklaerung": "Garantie, dass ein Programm nur auf gültigen, ihm gehörenden Speicher zugreift."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "EUR-Lex: Verordnung (EU) 2024/2847 (Cyber Resilience Act)",
+      "url": "https://eur-lex.europa.eu/eli/reg/2024/2847/oj"
+    },
+    {
+      "titel": "CISA: New Guidance Released for Reducing Memory-Related Vulnerabilities",
+      "url": "https://www.cisa.gov/news-events/alerts/2025/06/24/new-guidance-released-reducing-memory-related-vulnerabilities"
+    },
+    {
+      "titel": "Chromium: Memory safety",
+      "url": "https://www.chromium.org/Home/chromium-security/memory-safety/"
+    }
+  ]
+}

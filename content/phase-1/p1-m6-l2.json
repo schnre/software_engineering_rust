@@ -1,0 +1,213 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m6-l2",
+  "phase": 1,
+  "modul": "1.6 Build-Systeme",
+  "titel": "Profile, Features und Workspaces",
+  "lernziele": [
+    "Profile anpassen und eigene Profile definieren",
+    "Features additiv entwerfen und `default-features = false` richtig einsetzen",
+    "SemVer-Auflösung, `cargo tree` und Workspaces für grössere Projekte nutzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In `Cargo.toml` steht `heapless = \"0.8\"`. Welche Versionen darf Cargo dafür wählen?",
+      "optionen": [
+        "Jede Version ab 0.8.0 und unter 0.9.0",
+        "Genau 0.8.0",
+        "Jede Version ab 0.8.0, auch 1.x"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Cargo liest Versionsangaben standardmässig als **Caret-Anforderung** (`^`) nach SemVer: Erlaubt ist alles, was laut SemVer kompatibel ist. Bei `1.2` heisst das `>=1.2.0, <2.0.0`. Vor 1.0 gilt die erste Ziffer ungleich null als „Hauptversion“, deshalb ist bei `0.8` schon `0.9` inkompatibel. Exakt festnageln könnte man mit `=0.8.0`, das macht man aber nur selten.",
+      "begruendungen": [
+        "Richtig. Bei 0.x gilt die zweite Ziffer als Hauptversion.",
+        "Das wäre `=0.8.0`.",
+        "Das wäre `>=0.8.0`, das empfiehlt sich wegen möglicher Breaking Changes nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Profile",
+      "text": "Ein **Profil** bündelt Einstellungen für rustc. Eingebaut sind `dev` (für `build`, `check`, `test`) und `release`. Eigene Profile erben mit `inherits`. Häufige Schalter:\n\n- `opt-level`: `0`–`3`, `\"s\"`, `\"z\"`\n- `debug`: Debug-Infos (`true`, `\"line-tables-only\"`, `false`)\n- `overflow-checks`: Panic bei Ganzzahlüberlauf\n- `lto`, `codegen-units`, `panic`, `strip`\n\nMit `[profile.dev.package.\"*\"]` lassen sich Abhängigkeiten auch im Debug-Build optimieren. Das hilft, wenn z. B. Kompression oder Kryptografie im Debug-Build unerträglich langsam ist."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was hast du in `Cargo.toml` falsch gemacht?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: string values must be quoted, expected literal string",
+          "  --> Cargo.toml:16:13",
+          "   |",
+          "16 | opt-level = z",
+          "   |             ^"
+        ]
+      },
+      "optionen": [
+        "In TOML müssen Zeichenketten in Anführungszeichen stehen: `opt-level = \"z\"`",
+        "`z` ist kein gültiger Optimierungsgrad, erlaubt sind nur Zahlen",
+        "`opt-level` darf nur im Profil `release` stehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zahlen wie `opt-level = 3` stehen ohne, Buchstaben wie `\"s\"` und `\"z\"` mit Anführungszeichen. Cargo zeigt Zeile und Spalte wie rustc an. Der Parser scheitert, bevor überhaupt irgendetwas gebaut wird.",
+      "begruendungen": [
+        "Richtig. TOML-Syntax, nicht Cargo-Logik.",
+        "`\"z\"` ist gültig, es fehlen nur die Anführungszeichen.",
+        "`opt-level` ist in jedem Profil erlaubt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Features",
+      "text": "**Features** schalten optionalen Code und optionale Abhängigkeiten ein. Im Code fragt man sie mit `#[cfg(feature = \"std\")]` ab. Wichtigste Regel: Features müssen **additiv** sein. Cargo vereinigt alle Features, die irgendwer im Abhängigkeitsgraphen für ein Crate verlangt, und baut es nur einmal. Ein Feature darf also nie etwas abschalten.",
+      "code": {
+        "sprache": "toml",
+        "datei": "treiber/Cargo.toml",
+        "zeilen": [
+          "[dependencies]",
+          "defmt = { version = \"1\", optional = true }",
+          "",
+          "[features]",
+          "default = [\"std\"]",
+          "std = []",
+          "defmt = [\"dep:defmt\"]"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Optionale Abhängigkeit: wird nur gebaut, wenn ein Feature sie aktiviert." },
+          { "zeile": 5, "text": "Standardmässig aktiv. Firmware-Nutzer schalten das mit `default-features = false` ab." },
+          { "zeile": 7, "text": "`dep:` verknüpft das Feature mit der optionalen Abhängigkeit." }
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Deine Firmware bindet `treiber = { version = \"1\", default-features = false }` ein, damit kein `std` gezogen wird. Trotzdem scheitert der Build für `thumbv7em-none-eabihf`, weil `std` fehlt. Was ist die wahrscheinlichste Ursache?",
+      "optionen": [
+        "Eine andere Abhängigkeit bindet `treiber` mit Default-Features ein, und Cargo vereinigt die Features",
+        "`default-features = false` wirkt nur im Release-Profil",
+        "Features sind nur innerhalb eines Workspaces gültig"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wegen der Feature-Vereinigung genügt **ein** Nutzer mit Default-Features. `cargo tree -e features -i treiber` zeigt, wer welches Feature aktiviert. Deshalb sollten Bibliotheken für Embedded ihre eigenen Abhängigkeiten immer mit `default-features = false` einbinden und nur das Nötige aktivieren.",
+      "begruendungen": [
+        "Richtig. Klassiker in `no_std`-Projekten.",
+        "Features gelten profilunabhängig.",
+        "Features gelten für jede Abhängigkeit, auch von crates.io."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was zeigt `cargo tree -d` in diesem Workspace?",
+      "terminal": {
+        "befehl": "cargo tree -d",
+        "ausgabe": [
+          "hash32 v0.2.1",
+          "└── heapless v0.7.17",
+          "    └── app v0.1.0 (/home/user/ws/app)",
+          "",
+          "hash32 v0.3.1",
+          "└── heapless v0.8.0",
+          "    └── treiber v0.1.0 (/home/user/ws/treiber)",
+          "        └── app v0.1.0 (/home/user/ws/app)"
+        ]
+      },
+      "optionen": [
+        "`heapless` ist in zwei inkompatiblen Versionen (0.7 und 0.8) im Build. `heapless::Vec` aus `treiber` passt nicht zu dem aus `app`",
+        "`hash32` wird zweimal heruntergeladen, aber nur einmal gebaut",
+        "Es gibt einen Zyklus zwischen `app` und `treiber`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Inkompatible SemVer-Versionen dürfen in Rust nebeneinander existieren, sie gelten als verschiedene Crates. Das kostet Buildzeit und Flash, und die Typen sind verschieden: Gibt `treiber` ein `heapless::Vec` 0.8 zurück, kann `app` es nicht als `heapless::Vec` 0.7 verwenden. Abhilfe: in `app` ebenfalls auf 0.8 wechseln.",
+      "begruendungen": [
+        "Richtig. `-d` steht für „duplicates“.",
+        "Beide Versionen werden gebaut und gelinkt.",
+        "`app` hängt von `treiber` ab, nicht umgekehrt."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze das Workspace-Manifest im Wurzelverzeichnis, damit beide Pakete dieselbe `heapless`-Version erben.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[{{?}}]",
+          "members = [\"treiber\", \"app\"]",
+          "resolver = \"3\"",
+          "",
+          "[workspace.{{?}}]",
+          "heapless = \"0.8\""
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["workspace"] },
+        { "loesungen": ["dependencies"] }
+      ],
+      "auswahl": ["workspace", "dependencies", "package", "features"],
+      "erklaerung": "In den Mitgliedern steht dann `heapless = { workspace = true }`. Ein **Workspace** hat ein gemeinsames `Cargo.lock` und ein gemeinsames `target/`, Abhängigkeiten werden also nur einmal gebaut. Profile gelten nur im Wurzel-Manifest des Workspaces, in Mitgliedern werden sie ignoriert."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Befehl beantwortet welche Frage?",
+      "paare": [
+        { "links": "`cargo tree`", "rechts": "Wovon hängt mein Paket direkt und indirekt ab?" },
+        { "links": "`cargo tree -i serde`", "rechts": "Wer zieht `serde` in meinen Build?" },
+        { "links": "`cargo tree -e features`", "rechts": "Welche Features sind wodurch aktiviert?" },
+        { "links": "`cargo update -p heapless`", "rechts": "Nur `heapless` im Lockfile auf die neueste passende Version heben" }
+      ],
+      "erklaerung": "`cargo update` ohne `-p` hebt alle Abhängigkeiten im Rahmen der Versionsbereiche an. In grossen Projekten macht man das bewusst und in eigenen Commits, damit Änderungen nachvollziehbar bleiben."
+    }
+  ],
+  "praxis": "Ein typisches Embedded-Repo ist ein Workspace: Treiber und Protokolle als `no_std`-Bibliotheken, die Firmware, Host-Werkzeuge und Tests als weitere Mitglieder. Im Review achtest du auf `default-features = false` bei Embedded-Abhängigkeiten, auf doppelte Versionen in `cargo tree -d` und darauf, dass Features additiv bleiben. Ein Feature `no_std`, das etwas abschaltet, ist ein Warnsignal.",
+  "labor": {
+    "titel": "Einen Workspace aufbauen",
+    "anleitung": "Lege einen Workspace mit einer Bibliothek `treiber` und einem Programm `app` an, füge Features und eine gemeinsame Abhängigkeit hinzu.",
+    "befehle": [
+      "mkdir ws && cd ws && printf '[workspace]\\nmembers = [\"treiber\", \"app\"]\\nresolver = \"3\"\\n' > Cargo.toml",
+      "cargo new --lib treiber && cargo new app",
+      "cd app && cargo add treiber --path ../treiber && cd ..",
+      "cargo add -p treiber heapless@0.8 && cargo add -p app heapless@0.7",
+      "cargo tree -d && ls"
+    ],
+    "beobachtung": "Es gibt nur ein `Cargo.lock` und ein `target/` im Wurzelverzeichnis. `cargo tree -d` zeigt die doppelte `heapless`-Version. Hebst du `app` auf 0.8, verschwindet sie."
+  },
+  "begriffe": [
+    {
+      "begriff": "Feature",
+      "englisch": "feature flag",
+      "erklaerung": "Benannter Schalter in `Cargo.toml`, der optionalen Code oder optionale Abhängigkeiten aktiviert. Muss additiv sein."
+    },
+    {
+      "begriff": "Feature-Vereinigung",
+      "englisch": "feature unification",
+      "erklaerung": "Cargo aktiviert für ein Crate die Vereinigung aller Features, die irgendwer im Graphen verlangt."
+    },
+    {
+      "begriff": "Semantische Versionierung",
+      "englisch": "Semantic Versioning, SemVer",
+      "erklaerung": "Versionsschema MAJOR.MINOR.PATCH. Inkompatible Änderungen erhöhen MAJOR (vor 1.0: MINOR)."
+    },
+    {
+      "begriff": "Workspace",
+      "englisch": "workspace",
+      "erklaerung": "Mehrere Pakete mit gemeinsamem `Cargo.lock`, gemeinsamem `target/` und gemeinsamen Profilen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Features",
+      "url": "https://doc.rust-lang.org/cargo/reference/features.html"
+    },
+    {
+      "titel": "The Cargo Book: Specifying Dependencies",
+      "url": "https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html"
+    },
+    {
+      "titel": "The Cargo Book: Workspaces",
+      "url": "https://doc.rust-lang.org/cargo/reference/workspaces.html"
+    }
+  ]
+}

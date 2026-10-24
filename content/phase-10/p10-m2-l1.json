@@ -1,0 +1,163 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m2-l1",
+  "phase": 10,
+  "modul": "10.2 Schichten und Hardware Abstraction Layer",
+  "titel": "Schichten von PAC bis App",
+  "lernziele": [
+    "Die Schichten PAC, HAL, BSP, Treiber und Anwendung im Embedded-Rust-Ökosystem unterscheiden",
+    "Die erlaubte Abhängigkeitsrichtung zwischen Schichten begründen",
+    "Schichten in einem echten Abhängigkeitsbaum mit `cargo tree` wiederfinden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "richtung",
+      "frage": "In einer Schichtenarchitektur ruft die Anwendung Dienste auf, Dienste rufen Treiber auf. In welche Richtung dürfen Abhängigkeiten zeigen?",
+      "optionen": [
+        "Nur von oben nach unten: Höhere Schichten kennen tiefere, nie umgekehrt",
+        "Nur von unten nach oben: Treiber melden sich bei der Anwendung",
+        "Beliebig, solange es keinen Compilerfehler gibt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine tiefe Schicht, die eine höhere kennt, lässt sich nicht mehr allein wiederverwenden oder testen. In Rust ist das zwischen Crates sogar technisch erzwungen: Cargo verbietet Zyklen zwischen Paketen (Modul 9.3). Braucht eine tiefe Schicht trotzdem einen Rückweg, etwa für ein Ereignis, nimmt sie einen Trait oder eine Closure entgegen, die oben definiert wird.",
+      "begruendungen": [
+        "Richtig.",
+        "Rückmeldungen nach oben laufen über Callbacks oder Traits, nicht über direkte Abhängigkeiten.",
+        "Gerade zwischen Modulen eines Crates erlaubt der Compiler fast alles. Die Architektur muss man trotzdem einhalten."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Schichten in Embedded Rust",
+      "diagramm": {
+        "knoten": ["Anwendung", "Treiber-Crates", "BSP", "HAL", "PAC", "Hardware"],
+        "beschriftung": "Jede Schicht hängt nur von den darunterliegenden ab"
+      },
+      "text": "- **PAC** (*Peripheral Access Crate*): aus der SVD-Datei des Herstellers mit `svd2rust` generiert. Register und Bitfelder als Typen, z. B. `nrf52833-pac`.\n- **HAL** (*Hardware Abstraction Layer*): sichere API pro Chipfamilie, z. B. `nrf52833-hal`. Implementiert die Traits aus `embedded-hal`.\n- **BSP** (*Board Support Package*): weiss, welcher Pin auf einer bestimmten Platine wohin geht, z. B. `microbit-v2`.\n- **Treiber**: für externe Bausteine wie Sensoren, generisch über `embedded-hal`.\n- **Anwendung**: die Fachlogik."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "schichten-zuordnen",
+      "frage": "Welcher Code gehört in welche Schicht?",
+      "paare": [
+        { "links": "PAC", "rechts": "`p.P0.out.modify(|_, w| w.pin21().high())`" },
+        { "links": "HAL", "rechts": "`gpio.p0_21.into_push_pull_output(Level::Low)`" },
+        { "links": "BSP", "rechts": "`board.display_pins` für die LED-Matrix der Platine" },
+        { "links": "Treiber", "rechts": "`Tmp117::new(i2c, 0x48)` für einen externen Sensor" },
+        { "links": "Anwendung", "rechts": "„Ab 30 °C den Lüfter einschalten“" }
+      ],
+      "erklaerung": "Je höher die Schicht, desto mehr spricht der Code die Sprache der Aufgabe statt der Register. Das PAC und den HAL schreibt man fast nie selbst, sondern nutzt die Crates der Community, etwa aus den Organisationen `nrf-rs` oder `stm32-rs`. Die Details zu PACs und HAL-Crates kennst du aus Phase 6."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "cargo-tree",
+      "frage": "Ein Projekt hängt nur vom BSP `microbit-v2` ab. Welche Aussage passt zu diesem Baum?",
+      "terminal": {
+        "befehl": "cargo tree -e normal --depth 3",
+        "ausgabe": [
+          "blinky v0.1.0 (/home/user/blinky)",
+          "└── microbit-v2 v0.16.0",
+          "    └── microbit-common v0.16.0",
+          "        ├── embedded-hal v1.0.0",
+          "        ├── nrf52833-hal v0.19.0",
+          "        └── tiny-led-matrix v1.0.2"
+        ]
+      },
+      "optionen": [
+        "Das BSP baut auf dem HAL `nrf52833-hal` auf. Das PAC liegt noch tiefer und taucht erst bei grösserer Tiefe auf",
+        "Das BSP greift direkt auf die Register zu und braucht keinen HAL",
+        "`embedded-hal` ist der HAL für den nRF52833",
+        "Die Anwendung muss das PAC selbst als Abhängigkeit eintragen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `cargo tree -i nrf52833-pac` sieht man die umgekehrte Richtung: Das PAC wird von `nrf-hal-common` und `nrf52833-hal` benutzt, und über das BSP landet es in der Anwendung. `embedded-hal` ist dagegen kein HAL für einen Chip, sondern ein Crate, das fast nur **Traits** enthält: den Vertrag, den alle HALs erfüllen. Darum geht es in der nächsten Lektion.",
+      "begruendungen": [
+        "Richtig.",
+        "Im Baum steht `nrf52833-hal` direkt unter dem BSP.",
+        "`embedded-hal` ist chipunabhängig und definiert nur Schnittstellen.",
+        "Das PAC kommt transitiv mit. Ein BSP exportiert es oft sogar erneut, z. B. als `microbit::pac`."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "schicht-verletzung",
+      "frage": "Die Fachlogik soll ohne Kenntnis des Chips auskommen. Welche Zeile verletzt die Schichtung?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/regler.rs",
+        "zeilen": [
+          "use embedded_hal::digital::OutputPin;",
+          "",
+          "pub struct Luefter<P: OutputPin> {",
+          "    pin: P,",
+          "}",
+          "",
+          "impl<P: OutputPin> Luefter<P> {",
+          "    pub fn regle(&mut self, milligrad: i32) {",
+          "        if milligrad > 30_000 {",
+          "            unsafe { (*nrf52833_pac::P0::ptr()).outset.write(|w| w.bits(1 << 21)) };",
+          "        } else {",
+          "            let _ = self.pin.set_low();",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 10,
+      "erklaerung": "Mitten in der Fachlogik schreibt der Code direkt in ein Register des PAC, und das am Ownership-Modell vorbei mit `unsafe` und einem rohen Zeiger. Damit ist der Regler an den nRF52833 gebunden, auf dem Host nicht mehr testbar, und Pin 21 kann gleichzeitig von anderem Code benutzt werden. Richtig wäre `self.pin.set_high()` über den Trait aus `embedded-hal`, wie im `else`-Zweig."
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "bootstrap",
+      "frage": "In welcher Reihenfolge entstehen die Objekte typischerweise in `main` eines Embedded-Programms?",
+      "elemente": [
+        "Peripherie einmalig als Singleton holen, z. B. `pac::Peripherals::take()` oder `Board::take()`",
+        "Mit dem HAL Takt, Pins und Busse konfigurieren",
+        "Treiber mit den konfigurierten Bussen und Pins erzeugen",
+        "Anwendungslogik mit den Treibern erzeugen und die Hauptschleife starten"
+      ],
+      "erklaerung": "Das ist Komposition von unten nach oben: Jede Schicht bekommt fertige Objekte der Schicht darunter **übergeben**. Nur `main` kennt alle Schichten und verdrahtet sie. Man nennt diesen Ort auch **Composition Root**. Die Anwendung selbst sieht nur Traits."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "strikt-vs-locker",
+      "frage": "Darf die Anwendung den HAL direkt benutzen, wenn ein BSP dazwischen liegt?",
+      "optionen": [
+        "Ja, das ist eine „lockere“ Schichtung und in Embedded Rust üblich. Wichtig ist nur, dass keine Abhängigkeit nach oben zeigt",
+        "Nein, jede Schicht darf nur die direkt darunterliegende kennen, sonst bricht der Build",
+        "Nur wenn die Anwendung `unsafe` verwendet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei **strikter** Schichtung kennt jede Schicht nur ihre direkte Nachbarin. Das isoliert gut, erzwingt aber viele reine Durchreich-Funktionen. Die meisten BSPs exportieren deshalb den HAL erneut (z. B. `microbit::hal`), und die Anwendung nutzt ihn direkt. Entscheidend ist die Richtung, nicht die Anzahl übersprungener Schichten.",
+      "begruendungen": [
+        "Richtig.",
+        "Cargo kennt keine Schichten, nur Abhängigkeiten. Übersprungene Schichten sind ein Architekturentscheid, kein Build-Fehler.",
+        "Der HAL ist eine sichere API, dafür braucht es kein `unsafe`."
+      ]
+    }
+  ],
+  "praxis": "Beim Einstieg in ein fremdes Embedded-Projekt verschafft `cargo tree` schnell einen Überblick: Welches PAC, welcher HAL, welches BSP, welche Treiber? Im Review prüfst du, ob PAC-Zugriffe (`pac::`, `::ptr()`, `.bits(`) nur in der HAL- oder Board-Schicht vorkommen und nicht in der Fachlogik. Bei einem Chipwechsel wird so nur das untere Drittel neu geschrieben, Treiber und Anwendung bleiben.",
+  "labor": {
+    "titel": "Schichten im Baum finden",
+    "anleitung": "Lege ein leeres Projekt an und füge ein BSP hinzu. Das Bauen für den Mikrocontroller ist nicht nötig, `cargo tree` funktioniert auch so.",
+    "befehle": [
+      "cargo new blinky && cd blinky",
+      "cargo add microbit-v2",
+      "cargo tree -e normal --depth 3",
+      "cargo tree -e normal -i nrf52833-pac"
+    ],
+    "beobachtung": "Der erste Baum zeigt BSP → HAL, der umgekehrte Baum (`-i`) zeigt, wer das PAC benutzt. Du siehst dieselben Schichten wie im Diagramm, nur als echte Crates."
+  },
+  "begriffe": [
+    { "begriff": "Peripheral Access Crate", "englisch": "peripheral access crate (PAC)", "erklaerung": "Aus der SVD-Datei generiertes Crate mit typisiertem Zugriff auf alle Register eines Chips." },
+    { "begriff": "Hardware Abstraction Layer", "englisch": "hardware abstraction layer (HAL)", "erklaerung": "Sichere, höhere API für eine Chipfamilie, die meist die Traits aus `embedded-hal` implementiert." },
+    { "begriff": "Board Support Package", "englisch": "board support package (BSP)", "erklaerung": "Crate für eine konkrete Platine: Pinbelegung, LEDs, Taster, angeschlossene Bausteine." },
+    { "begriff": "Composition Root", "englisch": "composition root", "erklaerung": "Die eine Stelle, meist `main`, an der alle Schichten erzeugt und miteinander verdrahtet werden." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" },
+    { "titel": "microbit-v2 auf docs.rs", "url": "https://docs.rs/microbit-v2" }
+  ]
+}

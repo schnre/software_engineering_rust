@@ -1,0 +1,194 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m2-l2",
+  "phase": 4,
+  "modul": "4.2 Teststrategie",
+  "titel": "TDD, Property-Tests und Abdeckung",
+  "lernziele": [
+    "Den Zyklus Red, Green, Refactor mit schneller Rückmeldung umsetzen",
+    "Eigenschaften formulieren und mit `proptest` prüfen, einschliesslich Shrinking",
+    "Testabdeckung mit `cargo llvm-cov` messen und richtig deuten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "reihenfolge",
+      "id": "tdd-zyklus",
+      "frage": "Bringe einen Zyklus der testgetriebenen Entwicklung (TDD) in die richtige Reihenfolge.",
+      "elemente": [
+        "Einen Test für das nächste kleine Verhalten schreiben",
+        "`cargo test` ausführen und sehen, dass er fehlschlägt (Red)",
+        "Den einfachsten Code schreiben, der den Test bestehen lässt (Green)",
+        "Code und Test aufräumen, während alle Tests grün bleiben (Refactor)"
+      ],
+      "erklaerung": "Der rote Lauf ist kein Ritual: Er beweist, dass der Test überhaupt etwas prüft. Ein Test, der nie rot war, kann auch einen echten Fehler übersehen. In Rust ist schon „kompiliert nicht“ ein Rot. Der Compiler zeigt dir, welche Funktion oder welcher Typ noch fehlt. Für schnelle Rückmeldung startet `cargo watch -x test` (Werkzeug cargo-watch) oder das neuere `bacon` die Tests bei jedem Speichern neu."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "beispiel-vs-eigenschaft",
+      "frage": "Du testest einen Encoder für ein Funkprotokoll mit `kodiere` und `dekodiere`. Welcher Test deckt die meisten Eingaben ab?",
+      "optionen": [
+        "Für viele zufällige Byte-Folgen prüfen: `dekodiere(kodiere(x)) == x`",
+        "Drei handverlesene Beispiele mit `assert_eq!` und den erwarteten Bytes",
+        "Ein Test mit einer sehr langen Folge, die alle 256 Byte-Werte enthält"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beim **Property-Based Testing** beschreibst du eine Eigenschaft, die für **alle** Eingaben gelten muss, und das Framework erzeugt Hunderte zufällige Eingaben. Typische Eigenschaften: Hin- und Rückweg ergibt das Original (Roundtrip), das Ergebnis liegt in einem Bereich, Sortieren ist idempotent, eine einfache Referenzimplementierung liefert dasselbe. Beispieltests bleiben sinnvoll für bekannte Sonderfälle aus dem Datenblatt.",
+      "begruendungen": [
+        "Richtig.",
+        "Prüft genau drei Fälle, und zwar die, an die du schon gedacht hast.",
+        "Viele Werte, aber nur eine Anordnung. Fehler bei bestimmten Folgen bleiben unentdeckt."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "proptest-syntax",
+      "frage": "Ergänze den Property-Test mit der Crate `proptest`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use proptest::prelude::*;",
+          "",
+          "{{?}}! {",
+          "    #[test]",
+          "    fn roundtrip(daten in proptest::collection::vec(any::<u8>(), 0..64)) {",
+          "        {{?}}!(dekodiere(&kodiere(&daten)), daten);",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["proptest"] },
+        { "loesungen": ["prop_assert_eq"] }
+      ],
+      "auswahl": ["proptest", "prop_assert_eq", "quickcheck", "assert_eq", "rstest"],
+      "erklaerung": "Im Makro `proptest!` beschreibt `name in Strategie` eine **Strategie** (strategy), also wie Eingaben erzeugt werden: hier Vektoren mit 0 bis 63 beliebigen Bytes. `prop_assert_eq!` meldet den Fehlschlag an proptest zurück, statt direkt zu panicken. Ein normales `assert_eq!` funktioniert auch, `prop_assert_eq!` ist aber der vorgesehene Weg. Die Alternative quickcheck arbeitet mit dem Trait `Arbitrary` statt mit Strategien."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "shrinking",
+      "frage": "Der Encoder stellt `0x7E` ein Escape-Byte `0x7D` voran, der Decoder entfernt alle `0x7D`. Was sagt dir proptest?",
+      "terminal": {
+        "befehl": "cargo test --test rt",
+        "ausgabe": [
+          "proptest: Saving this and future failures in /home/user/projekt/tests/rt.proptest-regressions",
+          "thread 'roundtrip' (8992) panicked at tests/rt.rs:12:1:",
+          "Test failed: assertion failed: `(left == right)` ",
+          "  left: `[]`,",
+          " right: `[125]` at tests/rt.rs:15.",
+          "minimal failing input: daten = [",
+          "    125,",
+          "]",
+          "\tsuccesses: 10",
+          "\tlocal rejects: 0",
+          "\tglobal rejects: 0"
+        ]
+      },
+      "optionen": [
+        "Schon das einzelne Byte 125 (0x7D) überlebt den Roundtrip nicht: Der Decoder wirft echte Datenbytes 0x7D weg",
+        "Proptest hat zufällig genau das Byte 125 erzeugt, die echte Ursache ist unbekannt",
+        "Nach 10 erfolgreichen Fällen bricht proptest immer ab",
+        "Der Encoder hat das Byte 125 verdoppelt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Nach dem ersten Fehlschlag mit einer langen, zufälligen Folge verkleinert proptest die Eingabe schrittweise, solange der Test noch scheitert. Dieses **Shrinking** liefert die minimale Eingabe: ein einzelnes Datenbyte 0x7D. Der Fehler liegt im Decoder, er muss Escape-Bytes paarweise auswerten, statt jedes 0x7D zu löschen. Die Datei `.proptest-regressions` speichert den Fall, damit er bei jedem künftigen Lauf zuerst geprüft wird. Sie gehört ins Repository.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Eingabe ist das Ergebnis des Shrinkings und zeigt direkt auf die Ursache.",
+        "`successes: 10` zählt die bestandenen Fälle vor dem ersten Fehlschlag. Standard sind 256 Fälle.",
+        "`left` ist leer: Das Byte ging verloren, es wurde nicht verdoppelt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Testabdeckung messen",
+      "text": "**Testabdeckung** (code coverage) misst, welche Zeilen, Funktionen oder Zweige beim Testlauf ausgeführt wurden. In Rust ist **cargo-llvm-cov** das Standardwerkzeug: Es nutzt die Instrumentierung von LLVM (`-C instrument-coverage`), die auch auf stable verfügbar ist.\n\n- `cargo llvm-cov` zeigt eine Tabelle pro Datei\n- `cargo llvm-cov --html` erzeugt einen Bericht mit eingefärbten Zeilen\n- `cargo llvm-cov --lcov --output-path lcov.info` für CI-Dienste\n\n**cargo-tarpaulin** ist eine ältere Alternative, die vor allem unter Linux läuft. Für Firmware misst man die Abdeckung der Logik auf dem Host, nicht auf dem Mikrocontroller."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "abdeckung-deuten",
+      "frage": "Ein Modul hat 100 % Zeilenabdeckung. Welche Aussagen stimmen?",
+      "optionen": [
+        "Jede Zeile wurde mindestens einmal ausgeführt, aber nicht unbedingt jeder Zweig einer Bedingung",
+        "Ein Test kann Zeilen ausführen, ohne das Ergebnis zu prüfen, und trotzdem zur Abdeckung beitragen",
+        "Das Modul ist damit fehlerfrei",
+        "Unbedeckte Zeilen zeigen zuverlässig, wo noch Tests fehlen"
+      ],
+      "korrekt": [0, 1, 3],
+      "erklaerung": "Abdeckung ist ein gutes Werkzeug, um **Lücken** zu finden, aber ein schlechtes Ziel. Wer eine Quote vorschreibt, bekommt Tests, die Code ausführen, ohne etwas zu prüfen. Sinnvoll ist: im Review neue, ungetestete Zweige anschauen, besonders Fehlerpfade (`Err`, `None`), die im Normalbetrieb selten laufen.",
+      "begruendungen": [
+        "Richtig. `if a && b` in einer Zeile zählt als bedeckt, auch wenn `b` nie falsch war.",
+        "Richtig. Ein Test ohne `assert` erhöht die Quote, findet aber nichts.",
+        "Abdeckung sagt nichts darüber, ob die Ergebnisse stimmen.",
+        "Richtig. Was nie ausgeführt wurde, ist sicher ungetestet."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "schwache-eigenschaft",
+      "frage": "`clamp_prozent` soll Werte auf 0 bis 100 begrenzen. Die Eigenschaft ist richtig formuliert, und proptest meldet `minimal failing input: x = -1`. Welche Zeile der Implementierung ist fehlerhaft?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn clamp_prozent(x: i32) -> i32 {",
+          "    if x > 100 { 100 } else { x }",
+          "}",
+          "",
+          "proptest! {",
+          "    #[test]",
+          "    fn nie_ausserhalb(x in any::<i32>()) {",
+          "        let r = clamp_prozent(x);",
+          "        prop_assert!((0..=100).contains(&r));",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 2,
+      "erklaerung": "Zeile 2 begrenzt nur nach oben, negative Werte kommen unverändert durch. Shrinking findet mit `-1` den kleinsten Gegenbeweis. Korrekt wäre `x.clamp(0, 100)`. Ein Beispieltest mit 50 und 150 hätte den Fehler nicht gefunden."
+    }
+  ],
+  "praxis": "Property-Tests lohnen sich besonders für Parser, Serialisierung, Protokoll-Framing, Ringpuffer und Zustandsautomaten: überall dort, wo es eine einfache Eigenschaft und sehr viele mögliche Eingaben gibt. Gefundene Fälle aus `.proptest-regressions` checkst du ein und ergänzt sie oft zusätzlich als lesbaren Beispieltest. Abdeckung mit cargo-llvm-cov läuft in vielen Projekten in der CI und zeigt im Pull Request, welche neuen Zeilen ungetestet sind.",
+  "labor": {
+    "titel": "Ein Fehler, den Beispiele übersehen",
+    "anleitung": "Schreibe den Escape-Encoder aus der Lektion mit dem fehlerhaften Decoder und einen Roundtrip-Test mit proptest. Repariere den Decoder und miss danach die Abdeckung.",
+    "befehle": [
+      "cargo add --dev proptest",
+      "cargo test",
+      "cargo install cargo-llvm-cov && rustup component add llvm-tools-preview",
+      "cargo llvm-cov --html && xdg-open target/llvm-cov/html/index.html"
+    ],
+    "beobachtung": "Proptest schrumpft den Fehlschlag auf ein einzelnes Byte. Im HTML-Bericht siehst du rot eingefärbte Zeilen, die kein Test ausführt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Testgetriebene Entwicklung",
+      "englisch": "test-driven development, TDD",
+      "erklaerung": "Arbeitsweise in kurzen Zyklen: erst ein fehlschlagender Test, dann der Code, dann Aufräumen."
+    },
+    {
+      "begriff": "Property-Based Testing",
+      "englisch": "property-based testing",
+      "erklaerung": "Tests prüfen eine allgemeine Eigenschaft für viele automatisch erzeugte Eingaben."
+    },
+    {
+      "begriff": "Shrinking",
+      "englisch": "shrinking",
+      "erklaerung": "Schrittweises Verkleinern einer fehlschlagenden Eingabe bis zum minimalen Gegenbeispiel."
+    },
+    {
+      "begriff": "Testabdeckung",
+      "englisch": "code coverage",
+      "erklaerung": "Anteil der Zeilen, Funktionen oder Zweige, die beim Testlauf ausgeführt wurden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The proptest Book",
+      "url": "https://proptest-rs.github.io/proptest/"
+    },
+    {
+      "titel": "The rustc Book: Instrumentation-based Code Coverage",
+      "url": "https://doc.rust-lang.org/rustc/instrument-coverage.html"
+    }
+  ]
+}

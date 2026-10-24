@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m1-l2",
+  "phase": 8,
+  "modul": "8.1 Continuous Integration und Deployment",
+  "titel": "Delivery, Artefakte und Releases",
+  "lernziele": [
+    "Continuous Delivery und Continuous Deployment unterscheiden",
+    "Typische Artefakte eines Rust-Projekts nennen, vom Binary bis zum Firmware-Image",
+    "Versionsnummern nach SemVer und Cargos Regeln für `0.x` richtig wählen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was ist der Unterschied zwischen **Continuous Delivery** und **Continuous Deployment**?",
+      "optionen": [
+        "Bei Delivery ist jeder grüne Stand jederzeit auslieferbar, ein Mensch entscheidet über die Freigabe. Bei Deployment geht jeder grüne Stand automatisch in Produktion",
+        "Delivery liefert Bibliotheken auf crates.io aus, Deployment liefert Binaries auf Server",
+        "Es sind zwei Namen für dasselbe Vorgehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beide bauen auf CI auf. **Continuous Delivery** sorgt dafür, dass jeder Stand auf `main` ein fertiges, getestetes Release *sein könnte*. Der letzte Schritt ist ein Knopfdruck. **Continuous Deployment** lässt auch den Knopfdruck weg. Bei Firmware für Geräte im Feld ist Delivery fast immer die realistische Wahl.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Begriffe sagen nichts über die Art des Artefakts.",
+        "Der Unterschied liegt genau in der automatischen Freigabe."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was ein Rust-Projekt ausliefert",
+      "text": "Das **Artefakt** (*artifact*) ist das, was die Pipeline erzeugt und was ausgeliefert wird. Grundregel: **einmal bauen, mehrfach befördern**. Dasselbe Artefakt geht durch Test, Staging und Produktion, statt für jede Stufe neu gebaut zu werden.",
+      "tabelle": {
+        "kopf": ["Projektart", "Typisches Artefakt"],
+        "zeilen": [
+          ["Bibliothek", "`.crate`-Paket auf crates.io oder einer internen Registry (`cargo publish`)"],
+          ["CLI-Werkzeug", "statisch gelinktes Binary pro Target, z. B. als `.tar.gz` im GitHub-Release"],
+          ["Server-Dienst", "Container-Image mit dem Release-Binary"],
+          ["Embedded", "ELF mit Debuginfo plus daraus erzeugtes `.bin`/`.hex` zum Flashen"]
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum archiviert man bei Firmware zusätzlich zum `.bin` auch das ELF mit Debuginfo, obwohl auf dem Gerät nur das `.bin` landet?",
+      "optionen": [
+        "Nur mit dem ELF lassen sich Adressen aus einem Absturz im Feld Funktionen zuordnen und `defmt`-Logs dekodieren",
+        "Das Gerät lädt das ELF nach, wenn das `.bin` beschädigt ist",
+        "Das ELF wird für die nächste Version als Basis des inkrementellen Builds gebraucht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das `.bin` enthält nur die rohen Bytes für den Flash, keine Symbole. Meldet ein Gerät einen HardFault an Adresse `0x0800_1a2c`, braucht man genau das ELF desselben Builds, um daraus Funktion und Zeile zu machen. Auch `defmt` speichert die Format-Strings nur im ELF. Ohne archiviertes ELF ist ein Felddefekt kaum zu analysieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Mikrocontroller kann mit einem ELF nichts anfangen.",
+        "Inkrementelle Builds nutzen `target/`, nicht ausgelieferte Artefakte."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "SemVer in Cargo",
+      "text": "Cargo versteht Versionen als **Semantic Versioning** (SemVer): `MAJOR.MINOR.PATCH`. Ein Patch behebt Fehler, ein Minor fügt rückwärtskompatibel etwas hinzu, ein Major bricht die API.\n\nDie Angabe `serde = \"1.0.200\"` in `Cargo.toml` bedeutet „mindestens 1.0.200, aber unter 2.0.0“ (*caret requirement*). Besonderheit: Vor 1.0 rückt alles eine Stelle nach rechts. `0.4.20` ist kompatibel mit `0.4.21`, aber **nicht** mit `0.5.0`. Ein Wechsel der ersten Nicht-Null-Stelle gilt als Bruch."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Deine Bibliothek ist auf Version `1.4.2`. Welche nächste Version passt zur Änderung?",
+      "paare": [
+        { "links": "Off-by-one-Fehler in `parse()` behoben", "rechts": "`1.4.3`" },
+        { "links": "Neue Funktion `parse_strict()` ergänzt", "rechts": "`1.5.0`" },
+        { "links": "Öffentliche Funktion `parse()` entfernt", "rechts": "`2.0.0`" },
+        { "links": "Dieselbe Bibliothek, aber vor 1.0: Feld eines `pub struct` umbenannt (von `0.4.2` aus)", "rechts": "`0.5.0`" }
+      ],
+      "erklaerung": "Cargo verlässt sich auf diese Disziplin: `cargo update` zieht kompatible Versionen automatisch nach. Ein unangekündigter Bruch in einem Minor-Release zerbricht damit die Builds aller Nutzer. Ein Werkzeug, das das prüft, lernst du in der Lektion über Quality Gates kennen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Build-Skript übernimmt diese Ausgabe in die Firmware als Versionsstring. Was sagt sie?",
+      "terminal": {
+        "befehl": "git describe --tags --dirty",
+        "ausgabe": [
+          "v0.1.0-1-g306b276-dirty"
+        ]
+      },
+      "optionen": [
+        "Ein Commit nach dem Tag `v0.1.0`, Commit `306b276`, und im Arbeitsverzeichnis gibt es nicht committete Änderungen",
+        "Release `v0.1.0`, Build-Nummer 1, gebaut auf dem Rechner `g306b276`",
+        "Version 0.1.0 mit einem fehlgeschlagenen Test"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`-1` zählt die Commits seit dem Tag, `g` steht für Git, danach folgt der gekürzte Hash. `-dirty` ist ein Warnsignal: Diese Firmware lässt sich aus keinem Commit exakt reproduzieren. Ein Release-Artefakt aus der CI darf nie `-dirty` sein. Viele Teams lassen die Pipeline in diesem Fall scheitern.",
+      "begruendungen": [
+        "Richtig.",
+        "`g` ist das Präfix für den Git-Hash, kein Rechnername.",
+        "`git describe` weiss nichts über Tests."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug übernimmt welchen Teil eines Releases?",
+      "paare": [
+        { "links": "`cargo publish`", "rechts": "Lädt das Paket auf crates.io hoch, nachdem es testweise gebaut wurde" },
+        { "links": "`cargo release`", "rechts": "Erhöht die Version lokal, committet, taggt, veröffentlicht und pusht in einem Befehl" },
+        { "links": "`release-plz`", "rechts": "Öffnet in der CI einen Release-Pull-Request mit neuer Version und Changelog; nach dem Merge wird veröffentlicht" },
+        { "links": "`git tag v1.5.0`", "rechts": "Markiert den Commit, aus dem das Release gebaut wurde" }
+      ],
+      "erklaerung": "`cargo release` (Crate *cargo-release*) ist ohne `--execute` ein Probelauf und zeigt nur, was es tun würde. *release-plz* passt zu Continuous Delivery: Die Pipeline bereitet das Release vor, ein Mensch gibt es per Merge frei."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Begriffe.",
+      "text": "Ist jeder grüne Stand auslieferbar und ein Mensch gibt frei, spricht man von Continuous {{?}}. Dasselbe {{?}} wird nur einmal gebaut und dann durch alle Stufen befördert. Vor Version 1.0 bricht in Cargo bereits ein Wechsel der {{?}}-Stelle die Kompatibilität.",
+      "luecken": [
+        { "loesungen": ["Delivery"] },
+        { "loesungen": ["Artefakt"] },
+        { "loesungen": ["Minor"] }
+      ],
+      "auswahl": ["Delivery", "Deployment", "Artefakt", "Image", "Minor", "Patch"],
+      "erklaerung": "Bei `0.x.y` ist die mittlere Stelle die erste Nicht-Null-Stelle und verhält sich wie ein Major. Deshalb sind `0.4` und `0.5` für Cargo zwei verschiedene, inkompatible Versionen, die sogar gleichzeitig im Abhängigkeitsbaum vorkommen können."
+    }
+  ],
+  "praxis": "Frag bei jedem Projekt: Was genau ist das Artefakt, und lässt es sich eindeutig einem Commit zuordnen? Wird es einmal gebaut und befördert? Bei Firmware: Wird das ELF zu jedem ausgelieferten `.bin` archiviert? Und bei Bibliotheken: Hält das Team SemVer wirklich ein, oder verlassen sich Nutzer auf ein Versprechen, das niemand prüft?",
+  "labor": {
+    "titel": "Ein Release proben",
+    "anleitung": "Lege ein Bibliotheks-Crate in einem Git-Repository an und probe die Veröffentlichung, ohne wirklich etwas hochzuladen.",
+    "befehle": [
+      "cargo new --lib messwert && cd messwert && git add -A && git commit -m init",
+      "cargo package --list",
+      "cargo publish --dry-run",
+      "git tag v0.1.0 && git describe --tags --dirty"
+    ],
+    "beobachtung": "`cargo package --list` zeigt, was im `.crate` landet, inklusive `Cargo.toml.orig` und `.cargo_vcs_info.json` mit dem Commit-Hash. `cargo publish --dry-run` warnt vor fehlenden Metadaten wie `license` und `description` und bricht vor dem Upload ab."
+  },
+  "begriffe": [
+    {
+      "begriff": "Continuous Delivery",
+      "englisch": "continuous delivery",
+      "erklaerung": "Jeder Stand auf dem Hauptzweig ist jederzeit auslieferbar; die Freigabe ist eine bewusste Entscheidung."
+    },
+    {
+      "begriff": "Continuous Deployment",
+      "englisch": "continuous deployment",
+      "erklaerung": "Jeder grüne Stand wird ohne manuellen Schritt in Produktion ausgeliefert."
+    },
+    {
+      "begriff": "Artefakt",
+      "englisch": "artifact",
+      "erklaerung": "Ergebnis eines Builds, das ausgeliefert oder weiterverwendet wird, z. B. Binary, Container-Image, `.crate` oder Firmware-Image."
+    },
+    {
+      "begriff": "Semantic Versioning",
+      "englisch": "semantic versioning, SemVer",
+      "erklaerung": "Versionsschema `MAJOR.MINOR.PATCH`, bei dem die Stelle angibt, ob eine Änderung kompatibel ist."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: SemVer Compatibility",
+      "url": "https://doc.rust-lang.org/cargo/reference/semver.html"
+    },
+    {
+      "titel": "The Cargo Book: Publishing on crates.io",
+      "url": "https://doc.rust-lang.org/cargo/reference/publishing.html"
+    },
+    {
+      "titel": "Martin Fowler: Continuous Delivery",
+      "url": "https://martinfowler.com/bliki/ContinuousDelivery.html"
+    }
+  ]
+}

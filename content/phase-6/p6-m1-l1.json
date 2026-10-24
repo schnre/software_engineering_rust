@@ -1,0 +1,175 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m1-l1",
+  "phase": 6,
+  "modul": "6.1 Der Mikrocontroller",
+  "titel": "Aufbau eines Mikrocontrollers",
+  "lernziele": [
+    "Die Bausteine eines Mikrocontrollers und ihre Aufgaben benennen",
+    "Eine Speicherkarte lesen und den passenden Rust-Target-Triple für einen Cortex-M-Kern wählen",
+    "Abschätzen, ob Code und Daten in Flash und RAM passen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "mcu-vs-pc",
+      "frage": "Was unterscheidet einen Mikrocontroller grundsätzlich von der CPU in deinem Laptop?",
+      "optionen": [
+        "CPU-Kern, Flash, RAM und Peripherie wie Timer und Schnittstellen sitzen zusammen auf einem Chip",
+        "Ein Mikrocontroller kann nur in C programmiert werden, Rust braucht ein Betriebssystem",
+        "Ein Mikrocontroller hat immer Linux und eine MMU",
+        "Ein Mikrocontroller hat keinen Arbeitsspeicher, nur Register"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Mikrocontroller** (*microcontroller unit*, MCU) ist ein kompletter kleiner Rechner auf einem Chip: einige hundert KB Flash, einige zehn bis hundert KB RAM, dazu eingebaute Peripherie. Darauf läuft meist kein Betriebssystem, sondern direkt deine Firmware (*bare metal*). Ein **Mikroprozessor** (*microprocessor unit*, MPU) wie ein Cortex-A braucht dagegen externen DRAM und läuft typischerweise mit Linux.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust läuft ohne Betriebssystem, mit `#![no_std]` (nächste Lektion).",
+        "Das beschreibt eher einen Anwendungsprozessor wie Cortex-A. Cortex-M hat keine MMU.",
+        "Jeder Mikrocontroller hat SRAM für Variablen und Stack."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Bausteine",
+      "text": "Ein typischer 32-Bit-Mikrocontroller, z. B. ein STM32F411 mit **Cortex-M4F**, 100 MHz, 512 KB Flash und 128 KB RAM, besteht aus diesen Teilen. Die Peripherie steuerst du über Register an festen Adressen, in Rust meist über ein **PAC** und ein **HAL-Crate** (Modul 6.2 und 6.3).",
+      "tabelle": {
+        "kopf": ["Baustein", "Aufgabe"],
+        "zeilen": [
+          ["CPU-Kern (Cortex-M4F)", "führt die Befehle aus, hier mit FPU für `f32`"],
+          ["Flash", "Programmcode und Konstanten, bleibt ohne Strom erhalten"],
+          ["SRAM", "`static`-Variablen, Stack, evtl. Heap; flüchtig"],
+          ["Peripherie", "GPIO, Timer, UART, SPI, I²C, ADC, DMA …"],
+          ["Busse (AHB, APB)", "verbinden CPU, Speicher und Peripherie"],
+          ["NVIC", "Interrupt-Controller mit Prioritäten"],
+          ["Taktsystem (RCC)", "erzeugt die Takte und schaltet sie pro Peripherie ein"]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "bausteine",
+      "frage": "Ordne die Bausteine ihren Aufgaben zu.",
+      "paare": [
+        { "links": "Flash", "rechts": "Maschinencode und `static`-Konstanten, ohne Strom erhalten" },
+        { "links": "SRAM", "rechts": "Stack und veränderliche `static`s, ohne Strom verloren" },
+        { "links": "Peripherie", "rechts": "Hardwareblöcke wie Timer oder UART, über Register gesteuert" },
+        { "links": "NVIC", "rechts": "Nimmt Interrupts an und entscheidet nach Priorität" },
+        { "links": "AHB und APB", "rechts": "Busse, die CPU, Speicher und Peripherie verbinden" }
+      ],
+      "erklaerung": "Langsame Peripherie hängt meist am APB, schnelle Blöcke wie DMA und GPIO am AHB. Darum musst du für jede Peripherie zuerst ihren Takt auf dem richtigen Bus einschalten. Ein HAL-Crate erledigt das beim `split()` bzw. beim Erzeugen des Treibers für dich (Modul 6.3)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "adresse-zuordnen",
+      "frage": "Beim STM32F4 liegt der Flash ab `0x0800_0000`, der SRAM ab `0x2000_0000` und die Peripherie ab `0x4000_0000`. Wozu gehört die Adresse `0x4002_0014`?",
+      "optionen": ["Zu einem Peripherie-Register", "Zum Flash", "Zum SRAM", "Zum System Control Space des Kerns"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Bei Cortex-M ist der 4-GB-Adressraum in feste Bereiche geteilt, die **Speicherkarte** (*memory map*). `0x4002_0014` ist beim STM32F4 das Ausgangsregister `ODR` von GPIO-Port A. Rust-Literale dürfen Unterstriche enthalten, das macht solche Adressen lesbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Flash beginnt bei `0x0800_0000`.",
+        "SRAM beginnt bei `0x2000_0000`.",
+        "Der System Control Space (NVIC, SysTick) liegt ab `0xE000_0000`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Kern und Target-Triple",
+      "text": "Für jede Kernfamilie gibt es in Rust ein eigenes Ziel (*target triple*). Du installierst es mit `rustup target add` (Modul 1.5). Ein falsch gewähltes Ziel erzeugt Befehle, die der Kern nicht kennt, oder verschenkt die FPU.",
+      "tabelle": {
+        "kopf": ["Kern", "Target", "Besonderheit"],
+        "zeilen": [
+          ["Cortex-M0/M0+", "`thumbv6m-none-eabi`", "kein Divisionsbefehl, kein atomares Lese-Ändere-Schreibe"],
+          ["Cortex-M3", "`thumbv7m-none-eabi`", "mit `LDREX`/`STREX`"],
+          ["Cortex-M4/M7 ohne FPU-Nutzung", "`thumbv7em-none-eabi`", "DSP-Befehle"],
+          ["Cortex-M4F/M7F", "`thumbv7em-none-eabihf`", "Gleitkomma in FPU-Registern"],
+          ["Cortex-M33", "`thumbv8m.main-none-eabihf`", "TrustZone"]
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "target-waehlen",
+      "frage": "Du hast einen STM32F411 (Cortex-M4 **mit** FPU) und einen RP2040 (Cortex-M0+). Ergänze die Befehle.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustup target add {{?}}   # STM32F411",
+          "rustup target add {{?}}   # RP2040"
+        ]
+      },
+      "luecken": [{ "loesungen": ["thumbv7em-none-eabihf"] }, { "loesungen": ["thumbv6m-none-eabi"] }],
+      "auswahl": ["thumbv7em-none-eabihf", "thumbv6m-none-eabi", "thumbv7m-none-eabi", "aarch64-unknown-none"],
+      "erklaerung": "`none` steht für „kein Betriebssystem“, `eabihf` für die Aufrufkonvention mit Gleitkomma in FPU-Registern (*hard float*). `aarch64-unknown-none` wäre ein 64-Bit-Anwendungsprozessor, kein Mikrocontroller."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "ram-passt-nicht",
+      "frage": "Der Mikrocontroller hat 128 KB RAM (131 072 Byte). Was passiert beim Bauen?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "static mut PUFFER: [u32; 40_000] = [0; 40_000];"
+        ]
+      },
+      "optionen": [
+        "Der Linker bricht ab, weil `.bss` mit 160 000 Byte nicht in die RAM-Region aus `memory.x` passt",
+        "Es klappt, 40 000 ist kleiner als 131 072",
+        "Es klappt, denn `static` legt das Array in den Flash",
+        "rustc lehnt Arrays mit mehr als 65 535 Elementen ab"
+      ],
+      "korrekt": 0,
+      "erklaerung": "40 000 Elemente zu je 4 Byte sind 160 000 Byte. Ein mit Nullen initialisiertes, veränderliches `static` landet in `.bss`, also im RAM. Die Grösse der Regionen kennt der Linker aus `memory.x` (Modul 1.4), und er bricht mit einer Meldung ab, dass die Sektion die Region `RAM` überläuft. Rechne immer in Byte und denk an Stack und andere Variablen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Zahl zählt Elemente, nicht Byte. `size_of::<[u32; 40_000]>()` ist 160 000.",
+        "Nur unveränderliche `static`s ohne innere Veränderlichkeit kommen nach `.rodata` im Flash. `static mut` liegt im RAM.",
+        "Diese Grenze gibt es nicht."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "dokumente",
+      "frage": "Du willst wissen, welches Bit im Register `RCC_AHB1ENR` den Takt für GPIOA einschaltet. Wo steht das?",
+      "optionen": [
+        "Im Referenzhandbuch (*reference manual*) der Chipfamilie",
+        "Im Datenblatt (*datasheet*) des konkreten Chips",
+        "Im Errata-Sheet",
+        "In der Dokumentation von `core`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das **Datenblatt** beschreibt einen konkreten Chip: Pins, Gehäuse, elektrische Grenzwerte, Speichergrössen. Das **Referenzhandbuch** beschreibt jede Peripherie der Familie mit allen Registern und Bits. Das **Errata-Sheet** listet bekannte Hardwarefehler. Die Registerbeschreibung steckt maschinenlesbar auch in der SVD-Datei, aus der das PAC erzeugt wird (Modul 6.2).",
+      "begruendungen": [
+        "Richtig.",
+        "Das Datenblatt nennt Pins und elektrische Werte, die Registerbits stehen im Referenzhandbuch.",
+        "Dort stehen nur Abweichungen vom dokumentierten Verhalten.",
+        "`core` kennt keine Hardware eines bestimmten Herstellers."
+      ]
+    }
+  ],
+  "praxis": "Bevor du für einen neuen Chip Rust-Code schreibst, klärst du drei Dinge: welcher Kern (daraus folgt das Target), wie viel Flash und RAM (daraus folgt `memory.x`) und ob es ein PAC und ein HAL-Crate gibt. Bei merkwürdigem Verhalten lohnt sich zuerst ein Blick ins Errata-Sheet, das spart manchmal Tage.",
+  "labor": {
+    "titel": "Targets erkunden",
+    "anleitung": "Lass dir alle Cortex-M-Targets und ihre Eigenschaften anzeigen. Vergleiche ein Ziel mit und ohne FPU.",
+    "befehle": [
+      "rustc --print target-list | grep thumb",
+      "rustc --print cfg --target thumbv6m-none-eabi",
+      "rustc --print cfg --target thumbv7em-none-eabihf"
+    ],
+    "beobachtung": "Bei `thumbv6m-none-eabi` fehlen die Zeilen `target_has_atomic=\"32\"`: Der M0 kann kein atomares Lese-Ändere-Schreibe. Beide Ziele haben `target_os=\"none\"` und `panic=\"abort\"`."
+  },
+  "begriffe": [
+    { "begriff": "Mikrocontroller", "englisch": "microcontroller unit, MCU", "erklaerung": "Chip mit CPU, Flash, RAM und Peripherie, auf dem Firmware meist ohne Betriebssystem läuft." },
+    { "begriff": "Speicherkarte", "englisch": "memory map", "erklaerung": "Aufteilung des Adressraums in Bereiche für Flash, RAM, Peripherie und Systemregister." },
+    { "begriff": "Referenzhandbuch", "englisch": "reference manual", "erklaerung": "Herstellerdokument mit allen Peripherie-Registern einer Chipfamilie." },
+    { "begriff": "Target-Triple", "englisch": "target triple", "erklaerung": "Name des Übersetzungsziels, z. B. `thumbv7em-none-eabihf` für Cortex-M4F ohne Betriebssystem." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" },
+    { "titel": "rustc book: Platform Support", "url": "https://doc.rust-lang.org/rustc/platform-support.html" }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m4-l4",
+  "phase": 10,
+  "modul": "10.4 Entwurfsmuster",
+  "titel": "Adapter, Facade und Singletons",
+  "lernziele": [
+    "`From`/`Into` und Newtype-Wrapper als Adapter einsetzen",
+    "Eine Facade als schmale öffentliche API über mehreren Modulen oder Crates gestalten",
+    "Erklären, warum globale Singletons in Rust schwierig sind, und `OnceLock`, `LazyLock` und `Peripherals::take()` richtig einsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "erklaerung",
+      "titel": "Adapter in Rust",
+      "text": "Ein **Adapter** (adapter) passt eine vorhandene Schnittstelle an eine erwartete an. In Rust gibt es dafür drei übliche Formen:\n\n- **Konvertierung** mit `From`/`Into` oder `TryFrom`, wenn sich ein Typ in einen anderen umwandeln lässt.\n- **Trait-Implementierung**: Ein fremder Typ bekommt den Trait, den dein Code erwartet.\n- **Newtype-Wrapper**: Ist weder Trait noch Typ aus deinem Crate, verbietet die **Orphan Rule** die Implementierung. Dann packt man den fremden Typ in einen eigenen Newtype und implementiert den Trait dafür.\n\nTreiber für `embedded-hal` sind oft solche Adapter: Sie bringen einen HAL-spezifischen Pin unter den gemeinsamen Trait `OutputPin`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Team möchte `Duration` direkt in `u64` (Millisekunden) umwandeln und schreibt `impl From<Duration> for u64`. Was sagt die Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0117]: only traits defined in the current crate can be implemented for primitive types",
+          " --> src/main.rs:2:1",
+          "  |",
+          "2 | impl From<Duration> for u64 {",
+          "  | ^^^^^--------------^^^^^---",
+          "  |      |                  |",
+          "  |      |                  `u64` is not defined in the current crate",
+          "  |      `Duration` is not defined in the current crate",
+          "  |",
+          "  = note: impl doesn't have any local type before any uncovered type parameters",
+          "  = note: define and implement a trait or new type instead"
+        ]
+      },
+      "optionen": [
+        "Trait (`From`) und beide Typen stammen aus fremden Crates. Die Orphan Rule verbietet das. Lösung: ein eigener Newtype wie `struct Millis(u64)`",
+        "`From` darf nur für Structs implementiert werden, nicht für primitive Typen",
+        "Man muss stattdessen `impl Into<u64> for Duration` schreiben",
+        "Die Konvertierung ist verlustbehaftet und muss `TryFrom` heissen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **Orphan Rule** (Waisen-Regel) verlangt, dass bei einer Trait-Implementierung der Trait oder der Typ aus dem eigenen Crate stammt. Sonst könnten zwei Crates widersprüchliche Implementierungen liefern. Mit `struct Millis(u64)` und `impl From<Duration> for Millis` ist der Zieltyp lokal, und alles ist erlaubt. Das ist der Adapter per Newtype.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Standardbibliothek implementiert `From` vielfach für primitive Typen, etwa `From<u8> for u32`.",
+        "Auch dafür gilt dieselbe Regel, `Into` und `Duration` sind beide fremd.",
+        "Ob `TryFrom` passender wäre, ist eine Designfrage, ändert aber nichts an diesem Fehler."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Workspace hat die Crates `antrieb-can`, `antrieb-regelung` und `antrieb-diagnose`. Die Applikation braucht von allen ein paar Funktionen. Was wäre eine **Facade**?",
+      "optionen": [
+        "Ein Crate `antrieb`, das mit `pub use` eine kleine, stabile Auswahl aus den drei Crates re-exportiert und zusätzlich eine einfache Funktion `Antrieb::starten()` bietet",
+        "Ein Crate, das alle Typen aller drei Crates mit `pub use antrieb_can::*` vollständig re-exportiert",
+        "Die drei Crates zu einem einzigen grossen Crate zusammenkopieren",
+        "Ein Trait, den alle drei Crates implementieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine **Facade** (Fassade) bietet eine vereinfachte Schnittstelle zu einem komplexen Subsystem. In Rust ist das oft ein Crate oder Modul, das per `pub use` auswählt, was nach aussen sichtbar ist. Bekannte Beispiele: `tokio` bündelt Laufzeit, I/O und Zeit, `embassy-stm32` bündelt PAC, Takt und Treiber. Die inneren Crates können sich ändern, solange die Facade stabil bleibt.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Glob-Re-Export macht die gesamte innere Struktur öffentlich, die Vereinfachung fehlt.",
+        "Damit verliert man die Trennung, die Facade soll sie gerade verbergen, nicht aufheben.",
+        "Ein gemeinsamer Trait ist eine Abstraktion, keine vereinfachte Zugangsschicht."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim Kompilieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::collections::HashMap;",
+          "",
+          "static KONFIG: HashMap<&str, u32> = HashMap::new();",
+          "",
+          "fn main() {",
+          "    println!(\"{:?}\", KONFIG.get(\"baud\"));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert und gibt `None` aus",
+        "Fehler `E0015`: In einem `static` dürfen nur `const fn` aufgerufen werden, `HashMap::new` ist keine",
+        "Fehler `E0133`: Zugriff auf ein `static` braucht `unsafe`",
+        "Kompiliert, aber die Map wird bei jedem Zugriff neu erzeugt"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Ein `static` wird zur Kompilierzeit initialisiert und landet fertig im Binary. Darum sind nur konstante Ausdrücke erlaubt. rustc schlägt gleich die Lösung vor: `consider wrapping this expression in std::sync::LazyLock::new(|| ...)`. Ein unveränderliches `static` zu lesen ist übrigens sicher, nur `static mut` braucht `unsafe`.",
+      "begruendungen": [
+        "`HashMap::new` ist keine `const fn`, weil sie einen zufälligen Hasher-Seed erzeugt.",
+        "Richtig.",
+        "Lesen eines unveränderlichen `static` ist sicher, `E0133` betrifft `static mut`.",
+        "Ein `static` existiert genau einmal, es wird nie neu erzeugt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Warum Singletons in Rust schwierig sind",
+      "text": "Ein globaler, veränderlicher Zustand ist von überall erreichbar, also auch aus mehreren Threads oder Interrupts gleichzeitig. Rust erlaubt das nur ausdrücklich:\n\n- `static mut` braucht für jeden Zugriff `unsafe`. Seit Edition 2024 ist schon eine Referenz `&ZAEHLER` ein Fehler (`static_mut_refs`).\n- `LazyLock<T>` initialisiert beim ersten Zugriff, threadsicher.\n- `OnceLock<T>` wird genau einmal von aussen gesetzt, z. B. mit Werten aus der Konfiguration.\n- Für Veränderung: `static ZAEHLER: Mutex<u32>` oder ein Atomic.\n\nDie bessere Architektur ist meist trotzdem: kein globaler Zustand, sondern Werte übergeben (Dependency Injection, Modul 9.3).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static KONFIG: LazyLock<HashMap<&str, u32>> =",
+          "    LazyLock::new(|| HashMap::from([(\"baud\", 115_200)]));",
+          "",
+          "static SERIENNUMMER: OnceLock<String> = OnceLock::new();",
+          "",
+          "static ZAEHLER: Mutex<u32> = Mutex::new(0);"
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt die zweite `println!`-Zeile aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static SERIENNUMMER: OnceLock<String> = OnceLock::new();",
+          "",
+          "fn main() {",
+          "    SERIENNUMMER.set(\"A-17\".to_string()).unwrap();",
+          "    println!(\"{:?}\", SERIENNUMMER.set(\"B-2\".to_string()));",
+          "    println!(\"{}\", SERIENNUMMER.get().unwrap());",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`A-17`",
+        "`B-2`",
+        "Nichts, das Programm panickt schon in Zeile 5",
+        "Compilerfehler, weil ein `static` nicht verändert werden darf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der zweite `set` schlägt fehl und gibt den abgelehnten Wert zurück: Zeile 5 druckt `Err(\"B-2\")`. Der gespeicherte Wert bleibt `A-17`. `OnceLock::set` braucht nur `&self`, weil die Synchronisation intern passiert. Deshalb kompiliert es auf einem gewöhnlichen `static`.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein `OnceLock` wird genau einmal gesetzt, der zweite Versuch ändert nichts.",
+        "Der Fehler wird nur ausgegeben, nicht mit `unwrap` behandelt.",
+        "`OnceLock` nutzt innere Veränderbarkeit, `set` nimmt `&self`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Peripherals::take(): das sichere Singleton",
+      "text": "Auf Mikrocontrollern gibt es jede Peripherie genau einmal. PACs, die mit `svd2rust` erzeugt werden, bilden das mit `Peripherals::take()` ab: Der erste Aufruf liefert `Some(Peripherals)`, jeder weitere `None`. Intern prüft ein Flag in einer kritischen Sektion, ob die Peripherie schon vergeben ist.\n\nDanach regelt **Ownership** den Zugriff: Wer `dp.USART1` besitzt, darf den UART benutzen. Gibt man ihn an einen Treiber weiter, kann niemand anders mehr darauf zugreifen. Aus einem globalen Singleton wird so ein Wert, der durch das Programm gereicht wird (Phase 6)."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Ordne die Varianten für einen globalen Wert von „am meisten zu bevorzugen“ bis „am wenigsten zu bevorzugen“.",
+      "elemente": [
+        "Kein globaler Wert, sondern als Parameter übergeben",
+        "`static` mit `const`-Initialisierung, unveränderlich",
+        "`LazyLock` oder `OnceLock` für einmalige Initialisierung",
+        "`static` mit `Mutex` oder Atomic für veränderlichen Zustand",
+        "`static mut` mit `unsafe`"
+      ],
+      "erklaerung": "Je weiter unten, desto mehr verborgene Kopplung und desto mehr muss man über Nebenläufigkeit nachdenken. `static mut` ist in Embedded-Code manchmal unvermeidbar, gehört dann aber in ein kleines Modul mit `SAFETY`-Kommentar. Die meisten Clippy- und Coding-Standards (Modul 10.7) markieren es."
+    }
+  ],
+  "praxis": "Wenn im Review ein `static mut` oder ein `lazy_static!` mit `Mutex` auftaucht, frag nach dem Grund. Oft lässt sich der Wert beim Start erzeugen und weiterreichen, was Tests enorm vereinfacht. Für echte Prozess-Globale wie Logger oder Konfiguration sind `OnceLock` und `LazyLock` aus `std` seit Rust 1.70 bzw. 1.80 die erste Wahl. `once_cell` und `lazy_static` braucht man dafür nicht mehr.",
+  "labor": {
+    "titel": "static mut in Edition 2024",
+    "anleitung": "Lege ein `static mut ZAEHLER: u32 = 0;` an, erhöhe ihn in einem `unsafe`-Block und versuche dann `let r = unsafe { &ZAEHLER };`. Ersetze anschliessend alles durch `static ZAEHLER: AtomicU32`.",
+    "befehle": [
+      "cargo new globals && cd globals",
+      "cargo build",
+      "cargo clippy"
+    ],
+    "beobachtung": "Die Referenz auf das `static mut` ist in Edition 2024 ein Fehler: `creating a shared reference to mutable static`, mit dem Vorschlag `&raw const`. Mit `AtomicU32` und `fetch_add` verschwindet jedes `unsafe`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Adapter",
+      "englisch": "adapter pattern",
+      "erklaerung": "Passt eine vorhandene Schnittstelle an eine erwartete an, in Rust per `From`, Trait-Implementierung oder Newtype."
+    },
+    {
+      "begriff": "Fassade",
+      "englisch": "facade pattern",
+      "erklaerung": "Vereinfachte Schnittstelle zu einem komplexen Subsystem, in Rust oft ein Crate mit gezielten `pub use`."
+    },
+    {
+      "begriff": "Orphan Rule",
+      "englisch": "orphan rule",
+      "erklaerung": "Eine Trait-Implementierung ist nur erlaubt, wenn der Trait oder der Typ aus dem eigenen Crate stammt."
+    },
+    {
+      "begriff": "Singleton",
+      "englisch": "singleton",
+      "erklaerung": "Objekt, das es genau einmal gibt. In Rust per `OnceLock`/`LazyLock` oder, auf Mikrocontrollern, per `take()` und Ownership."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::sync::LazyLock",
+      "url": "https://doc.rust-lang.org/std/sync/struct.LazyLock.html"
+    },
+    {
+      "titel": "std::sync::OnceLock",
+      "url": "https://doc.rust-lang.org/std/sync/struct.OnceLock.html"
+    },
+    {
+      "titel": "Embedded Rust Book: Singletons",
+      "url": "https://docs.rust-embedded.org/book/peripherals/singletons.html"
+    }
+  ]
+}

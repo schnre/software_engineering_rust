@@ -1,0 +1,233 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m5-l1",
+  "phase": 8,
+  "modul": "8.5 GitHub Actions im Vergleich",
+  "titel": "GitHub Actions für Rust",
+  "lernziele": [
+    "Einen GitHub-Actions-Workflow für ein Cargo-Projekt lesen und schreiben",
+    "Toolchain, Matrix, Cache und Artefakte mit gängigen Actions einrichten",
+    "Begriffe aus Jenkins auf GitHub Actions übertragen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was entspricht in GitHub Actions am ehesten einem Jenkins-Agent?",
+      "optionen": [
+        "Der **Runner**: eine frische virtuelle Maschine von GitHub oder ein eigener, selbst betriebener Rechner",
+        "Der Workflow, weil er die ganze Pipeline beschreibt",
+        "Die Action `actions/checkout`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `runs-on: ubuntu-latest` fordert ein Job einen Runner an, so wie ein Jenkinsfile mit `agent { label … }` einen Agent. GitHub-gehostete Runner sind bei jedem Job frisch, ohne Reste vorheriger Builds. Für Hardware-Tests mit Board oder Debugger betreibt man **self-hosted Runner** mit eigenen Labels.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Workflow entspricht eher dem Jenkinsfile.",
+        "Eine Action ist ein wiederverwendbarer Schritt, vergleichbar mit einem Plugin-Schritt oder Library-Baustein."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein Workflow für ein Cargo-Projekt",
+      "text": "Ein Workflow liegt als YAML unter `.github/workflows/`. Er besteht aus **Jobs**, die standardmässig parallel auf eigenen Runnern laufen; jeder Job hat **Steps**.",
+      "code": {
+        "sprache": "yaml",
+        "datei": ".github/workflows/ci.yml",
+        "zeilen": [
+          "name: CI",
+          "on:",
+          "  push:",
+          "    branches: [main]",
+          "  pull_request:",
+          "env:",
+          "  CARGO_TERM_COLOR: always",
+          "jobs:",
+          "  lint:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "      - uses: dtolnay/rust-toolchain@stable",
+          "        with:",
+          "          components: clippy, rustfmt",
+          "      - uses: Swatinem/rust-cache@v2",
+          "      - run: cargo fmt --all --check",
+          "      - run: cargo clippy --all-targets --locked -- -D warnings"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Auslöser: Push auf `main` und jeder Pull Request." },
+          { "zeile": 13, "text": "Installiert die Toolchain; der Teil nach `@` wählt die Version (`stable`, `nightly`, `1.85`)." },
+          { "zeile": 16, "text": "Cached Registry, Git-Abhängigkeiten und `target/` zwischen Läufen." }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was entspricht sich in Jenkins und GitHub Actions?",
+      "paare": [
+        { "links": "Jenkinsfile", "rechts": "Workflow-Datei unter `.github/workflows/`" },
+        { "links": "`stage`", "rechts": "Job (oder eine Gruppe von Steps)" },
+        { "links": "`agent { label 'rust' }`", "rechts": "`runs-on: [self-hosted, rust]`" },
+        { "links": "`when { branch 'main' }`", "rechts": "`if: github.ref == 'refs/heads/main'`" },
+        { "links": "`archiveArtifacts`", "rechts": "`actions/upload-artifact`" },
+        { "links": "Shared Library", "rechts": "Wiederverwendbare Workflows und eigene Actions" }
+      ],
+      "erklaerung": "Ein wichtiger Unterschied: In Jenkins laufen Stages standardmässig **nacheinander** auf einem Agent. In GitHub Actions laufen Jobs standardmässig **parallel** auf getrennten Runnern. Abhängigkeiten drückt man mit `needs:` aus, Dateien wandern über Artefakte von einem Job zum nächsten."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Welche Jobs starten sofort, wenn der Workflow beginnt?",
+      "code": {
+        "sprache": "yaml",
+        "zeilen": [
+          "jobs:",
+          "  lint:",
+          "    runs-on: ubuntu-latest",
+          "    steps: [ ... ]",
+          "  test:",
+          "    runs-on: ubuntu-latest",
+          "    steps: [ ... ]",
+          "  firmware:",
+          "    needs: [lint, test]",
+          "    runs-on: ubuntu-latest",
+          "    steps: [ ... ]",
+          "  msrv:",
+          "    runs-on: ubuntu-latest",
+          "    steps: [ ... ]"
+        ]
+      },
+      "optionen": [
+        "`lint`, `test` und `msrv`",
+        "Nur `lint`, die anderen folgen der Reihe nach",
+        "Alle vier gleichzeitig"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `needs` laufen Jobs parallel. `firmware` wartet, bis `lint` und `test` erfolgreich sind; scheitert einer davon, wird `firmware` übersprungen. So entsteht ein Graph statt einer Kette.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Reihenfolge in der Datei bestimmt nicht die Ausführungsreihenfolge.",
+        "`firmware` hat ein `needs` und wartet."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Matrix über Toolchains und Targets",
+      "code": {
+        "sprache": "yaml",
+        "zeilen": [
+          "  build:",
+          "    strategy:",
+          "      fail-fast: false",
+          "      matrix:",
+          "        toolchain: [stable, \"1.85\"]",
+          "        target: [x86_64-unknown-linux-gnu, thumbv7em-none-eabihf]",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "      - uses: dtolnay/rust-toolchain@master",
+          "        with:",
+          "          toolchain: ${{ matrix.toolchain }}",
+          "          targets: ${{ matrix.target }}",
+          "      - run: cargo build --locked --target ${{ matrix.target }}",
+          "      - uses: actions/upload-artifact@v4",
+          "        with:",
+          "          name: build-${{ matrix.toolchain }}-${{ matrix.target }}",
+          "          path: target/${{ matrix.target }}/debug/"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Ein fehlschlagender Eintrag bricht die anderen nicht ab." },
+          { "zeile": 10, "text": "Mit `@master` wird die Version über `toolchain:` übergeben statt im Namen." },
+          { "zeile": 17, "text": "Artefaktnamen müssen pro Lauf eindeutig sein, deshalb die Matrixwerte im Namen." }
+        ]
+      },
+      "text": "Die Matrix erzeugt vier Jobs. In Jenkins entspricht das der `matrix`-Direktive mit zwei Achsen."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Workflow: Er soll bei Pull Requests laufen, die Toolchain installieren und die Tests ausführen.",
+      "code": {
+        "sprache": "yaml",
+        "zeilen": [
+          "{{?}}:",
+          "  pull_request:",
+          "jobs:",
+          "  test:",
+          "    {{?}}: ubuntu-latest",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "      - uses: dtolnay/rust-toolchain@stable",
+          "      - {{?}}: cargo test --locked"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["on"] },
+        { "loesungen": ["runs-on"] },
+        { "loesungen": ["run"] }
+      ],
+      "auswahl": ["on", "trigger", "runs-on", "agent", "run", "sh"],
+      "erklaerung": "`uses:` ruft eine Action auf, `run:` führt einen Shell-Befehl aus. Endet der Befehl mit einem Exit-Code ungleich 0, ist der Step und damit der Job rot, genau wie `sh` in Jenkins."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum empfiehlt GitHub, fremde Actions auf einen vollständigen Commit-Hash festzulegen (`uses: Swatinem/rust-cache@<40-stelliger Hash>`) statt auf `@v2`?",
+      "optionen": [
+        "Ein Tag wie `v2` kann jederzeit auf anderen Code zeigen. Wird das fremde Repository kompromittiert, läuft sonst neuer, fremder Code mit den Rechten des Workflows",
+        "Weil Tags in GitHub Actions nicht unterstützt werden",
+        "Weil Commit-Hashes schneller geladen werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Action ist fremder Code, der im Runner läuft und an Tokens und Quellcode kommt. Nur ein Commit-Hash ist unveränderlich. Dasselbe Prinzip wie `Cargo.lock` und `cargo deny check sources`: festlegen, was in den Build eingeht. Werkzeuge wie Dependabot halten gepinnte Hashes aktuell.",
+      "begruendungen": [
+        "Richtig.",
+        "Tags funktionieren, sie sind nur veränderlich.",
+        "Um Geschwindigkeit geht es nicht."
+      ]
+    }
+  ],
+  "praxis": "Für die meisten Open-Source-Crates ist GitHub Actions heute der Standard: Checkout, `dtolnay/rust-toolchain`, `Swatinem/rust-cache`, dann die bekannten `cargo`-Befehle. Jenkins bleibt stark, wo eigene Infrastruktur, Hardware-Prüfstände und strenge Netzwerktrennung zählen. Die Konzepte sind dieselben; wer eines versteht, liest das andere schnell.",
+  "labor": {
+    "titel": "Einen Workflow lokal prüfen",
+    "anleitung": "Lege in einem Rust-Repository `.github/workflows/ci.yml` wie oben an. Prüfe die Datei mit `actionlint` und führe die `run`-Befehle einmal lokal aus.",
+    "befehle": [
+      "actionlint .github/workflows/ci.yml",
+      "cargo fmt --all --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked"
+    ],
+    "beobachtung": "`actionlint` findet Tippfehler in Schlüsseln und Ausdrücken wie `${{ matrix.toolchian }}`, bevor ein Lauf auf GitHub scheitert. Laufen die Befehle lokal grün, sind Fehler in der CI meist Umgebungsfragen (Toolchain, Cache, Targets)."
+  },
+  "begriffe": [
+    {
+      "begriff": "Workflow",
+      "englisch": "workflow",
+      "erklaerung": "YAML-Datei unter `.github/workflows/`, die Auslöser und Jobs beschreibt."
+    },
+    {
+      "begriff": "Runner",
+      "englisch": "runner",
+      "erklaerung": "Maschine, die einen Job ausführt; von GitHub gehostet oder selbst betrieben."
+    },
+    {
+      "begriff": "Action",
+      "englisch": "action",
+      "erklaerung": "Wiederverwendbarer Schritt, mit `uses:` eingebunden, z. B. `actions/checkout`."
+    },
+    {
+      "begriff": "Self-hosted Runner",
+      "englisch": "self-hosted runner",
+      "erklaerung": "Eigener Rechner, der Jobs für GitHub Actions ausführt, z. B. mit angeschlossener Hardware."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "GitHub Docs: Understanding GitHub Actions",
+      "url": "https://docs.github.com/en/actions/about-github-actions/understanding-github-actions"
+    },
+    {
+      "titel": "dtolnay/rust-toolchain",
+      "url": "https://github.com/dtolnay/rust-toolchain"
+    },
+    {
+      "titel": "Swatinem/rust-cache",
+      "url": "https://github.com/Swatinem/rust-cache"
+    }
+  ]
+}

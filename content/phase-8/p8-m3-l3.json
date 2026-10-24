@@ -1,0 +1,209 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m3-l3",
+  "phase": 8,
+  "modul": "8.3 Jenkins",
+  "titel": "Jenkins für Embedded-Rust",
+  "lernziele": [
+    "Einen reproduzierbaren Build-Agent als Docker-Image mit rustup und Targets beschreiben",
+    "Mehrere Targets mit einer parallelen Matrix bauen",
+    "Hardware-in-the-Loop-Tests mit probe-rs sicher in die Pipeline einbinden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Auf Agent A baut die Firmware, auf Agent B scheitert sie mit „can't find crate for `core`“. Was ist die nachhaltige Lösung?",
+      "optionen": [
+        "Die Build-Umgebung als Docker-Image beschreiben, das Toolchain-Version und Targets festlegt, und alle Builds darin ausführen",
+        "Auf Agent B von Hand `rustup target add thumbv7em-none-eabihf` ausführen",
+        "Den Build mit `label 'agent-a'` fest auf Agent A legen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Meldung bedeutet, dass auf B das Target fehlt. Von Hand nachinstallieren behebt das Symptom, bis der nächste Agent dazukommt oder sich die Toolchain-Version unterscheidet. Ein Image macht die Umgebung zu Code: versioniert, reviewbar und auf jedem Agent identisch.",
+      "begruendungen": [
+        "Richtig.",
+        "Hilft heute, aber die Agents laufen wieder auseinander.",
+        "Macht Agent A zum Engpass und zum einzigen Ausfallpunkt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein Build-Image für Embedded-Rust",
+      "text": "Das Image enthält alles, was ein Build braucht, und sonst nichts. Die Version kommt aus `rust-toolchain.toml` im Repository, damit lokal und in der CI derselbe Compiler läuft.",
+      "code": {
+        "sprache": "text",
+        "datei": "ci/Dockerfile",
+        "zeilen": [
+          "FROM rust:1.97-slim",
+          "RUN rustup component add clippy rustfmt llvm-tools \\",
+          " && rustup target add thumbv7em-none-eabihf thumbv6m-none-eabi",
+          "RUN cargo install flip-link cargo-binutils --locked",
+          "ENV CARGO_TERM_COLOR=always"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Offizielles Image mit fester Version; nie `latest`." },
+          { "zeile": 3, "text": "Vorkompilierte `core`-Bibliotheken für Cortex-M4F und Cortex-M0+." },
+          { "zeile": 4, "text": "Linker-Wrapper gegen Stack Overflow und `cargo objcopy` für `.bin`-Dateien." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert, wenn diese Pipeline startet?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "Jenkinsfile",
+        "zeilen": [
+          "pipeline {",
+          "    agent {",
+          "        dockerfile {",
+          "            filename 'ci/Dockerfile'",
+          "            label 'docker'",
+          "        }",
+          "    }",
+          "    stages {",
+          "        stage('Build') {",
+          "            steps { sh 'cargo build --release --locked --target thumbv7em-none-eabihf' }",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Jenkins wählt einen Agent mit Label `docker`, baut dort das Image aus `ci/Dockerfile` und führt alle Schritte im Container aus",
+        "Jenkins lädt `ci/Dockerfile` als fertiges Image aus Docker Hub herunter",
+        "Der Build läuft auf dem Agent selbst, das Dockerfile dient nur zur Dokumentation"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `agent { dockerfile … }` braucht der Agent nur Docker, keine Rust-Toolchain. Jenkins baut das Image (dank Docker-Cache meist in Sekunden) und mountet den Workspace in den Container. Ändert jemand das Dockerfile in einem Pull Request, baut genau dieser PR mit der neuen Umgebung. Alternativ verweist `agent { docker { image '…' } }` auf ein vorab gebautes Image aus einer Registry.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Dockerfile ist eine Bauanleitung, kein Image.",
+        "Die Schritte laufen im Container."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Mehrere Targets parallel",
+      "text": "Eine Firmware-Familie läuft oft auf mehreren Mikrocontrollern. Die `matrix`-Direktive erzeugt eine Stage pro Wert und führt sie parallel aus:",
+      "code": {
+        "sprache": "groovy",
+        "zeilen": [
+          "stage('Firmware') {",
+          "    matrix {",
+          "        axes {",
+          "            axis {",
+          "                name 'TARGET'",
+          "                values 'thumbv7em-none-eabihf', 'thumbv6m-none-eabi'",
+          "            }",
+          "        }",
+          "        stages {",
+          "            stage('Build') {",
+          "                steps { sh 'cargo build --release --locked --target $TARGET' }",
+          "            }",
+          "        }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Der Achsenname wird zur Umgebungsvariable in jeder Zelle." },
+          { "zeile": 11, "text": "Einfache Anführungszeichen: Die Shell setzt `$TARGET` ein, nicht Groovy." }
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Hardware-in-the-Loop (HIL): Ein Agent mit dem Label `hil-stm32` hat ein Nucleo-Board per USB-Debugger angeschlossen. Welche Aussage über diesen Agent stimmt?",
+      "optionen": [
+        "Er sollte genau einen Executor haben, weil zwei gleichzeitige Builds dasselbe Board flashen würden",
+        "Er sollte möglichst viele Executors haben, damit HIL-Tests schnell durchlaufen",
+        "Er braucht keine Labels, weil Jenkins angeschlossene Hardware selbst erkennt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Board ist eine exklusive Ressource. Zwei Builds, die gleichzeitig flashen, stören sich gegenseitig und erzeugen zufällige Fehlschläge. Ein Executor pro Board oder das Plugin *Lockable Resources* mit `lock('nucleo-1')` verhindern das. Mehr Durchsatz bekommt man nur mit mehr Boards.",
+      "begruendungen": [
+        "Richtig.",
+        "Mehr Executors heisst hier nur mehr Kollisionen am selben Board.",
+        "Jenkins weiss nichts über USB-Geräte; dafür gibt es Labels."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Stages einer Embedded-Pipeline mit HIL-Test in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "`cargo fmt --check` und `cargo clippy` im Container",
+        "Host-Tests der Logik mit `cargo test` (ohne Hardware)",
+        "Firmware für alle Targets bauen (Matrix)",
+        "ELF und `.bin` mit `stash` an den HIL-Agent übergeben",
+        "Auf dem HIL-Agent mit probe-rs flashen und Tests auf dem Board ausführen"
+      ],
+      "erklaerung": "Teure, knappe Ressourcen kommen zuletzt. Ein Board ist pro Minute viel teurer als ein Container. Mit `stash`/`unstash` wandert das fertige Artefakt zum HIL-Agent, der dann nichts mehr kompilieren muss. So testet die Hardware genau das Binary, das vorher gebaut wurde."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die HIL-Stage. Sie läuft auf dem Agent mit Board und führt die Tests aus dem `tests/`-Ordner auf der Hardware aus.",
+      "code": {
+        "sprache": "groovy",
+        "zeilen": [
+          "stage('HIL') {",
+          "    agent { label '{{?}}' }",
+          "    options { timeout(time: 10, unit: 'MINUTES') }",
+          "    steps {",
+          "        unstash 'firmware'",
+          "        sh 'cargo test --target thumbv7em-none-eabihf --test hil'",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["hil-stm32"] }
+      ],
+      "auswahl": ["hil-stm32", "docker", "linux && rust", "built-in"],
+      "erklaerung": "Damit `cargo test` auf dem Board läuft, steht in `.cargo/config.toml` des Projekts ein Runner wie `runner = \"probe-rs run --chip STM32F411RETx\"`. Cargo baut den Test und ruft probe-rs auf, das flasht, das Programm startet und die Ausgabe per RTT zurückliefert. Frameworks wie `defmt-test` oder `embedded-test` liefern dazu den Test-Rahmen auf dem Target. Das Timeout ist hier Pflicht: Ein hängendes Board darf den Agent nicht ewig blockieren. Details zu probe-rs in Phase 7."
+    }
+  ],
+  "praxis": "Embedded-Pipelines scheitern selten an Rust, sondern an der Umgebung: unterschiedliche Toolchains auf Agents, zwei Builds am selben Board, ein Board, das nach einem HardFault nicht mehr reagiert. Halte die Umgebung im Image fest, behandle Boards als exklusive Ressourcen mit Timeout, und plane einen Weg ein, ein Board aus der Pipeline heraus zurückzusetzen (z. B. über `probe-rs reset` oder eine schaltbare Stromversorgung).",
+  "labor": {
+    "titel": "Das Build-Image lokal testen",
+    "anleitung": "Baue das Dockerfile aus dieser Lektion und führe den Firmware-Build darin aus, genau wie Jenkins es tun würde.",
+    "befehle": [
+      "docker build -t firmware-ci -f ci/Dockerfile .",
+      "docker run --rm -v \"$PWD\":/w -w /w firmware-ci cargo build --release --locked --target thumbv7em-none-eabihf",
+      "docker run --rm firmware-ci rustup target list --installed"
+    ],
+    "beobachtung": "Der Build im Container braucht keine lokale Rust-Installation. `rustup target list --installed` zeigt genau die Targets aus dem Dockerfile. Das ist dieselbe Umgebung, die jeder Jenkins-Agent bekommt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Build-Image",
+      "englisch": "build image",
+      "erklaerung": "Container-Image, das die gesamte Build-Umgebung festlegt: Toolchain, Targets und Werkzeuge."
+    },
+    {
+      "begriff": "Hardware-in-the-Loop",
+      "englisch": "hardware-in-the-loop, HIL",
+      "erklaerung": "Tests, bei denen die Firmware auf echter Zielhardware läuft, gesteuert von der Pipeline."
+    },
+    {
+      "begriff": "Matrix",
+      "englisch": "matrix",
+      "erklaerung": "Jenkins-Direktive, die eine Stage für jede Kombination von Achsenwerten parallel ausführt."
+    },
+    {
+      "begriff": "stash",
+      "englisch": "stash / unstash",
+      "erklaerung": "Jenkins-Schritte, die Dateien innerhalb eines Pipeline-Laufs von einem Agent zu einem anderen weitergeben."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Jenkins: Using Docker with Pipeline",
+      "url": "https://www.jenkins.io/doc/book/pipeline/docker/"
+    },
+    {
+      "titel": "probe-rs: Dokumentation",
+      "url": "https://probe.rs/"
+    }
+  ]
+}

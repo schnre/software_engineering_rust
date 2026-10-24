@@ -1,0 +1,255 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m3-l2",
+  "phase": 2,
+  "modul": "2.3 Move, Copy und Lebenszeiten",
+  "titel": "Copy und Clone",
+  "lernziele": [
+    "Sagen, welche Typen `Copy` sind und warum `String` es nicht sein kann",
+    "`Clone` und `Copy` mit `derive` korrekt einsetzen",
+    "Unnötige und teure Klone mit Clippy finden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Nach `let b = a;` ist `a` weiterhin benutzbar. Für welche Typen von `a` gilt das?",
+      "optionen": [
+        "`(u8, char, bool)`",
+        "`[u32; 4]`",
+        "`Vec<u32>`",
+        "`&str`"
+      ],
+      "korrekt": [
+        0,
+        1,
+        3
+      ],
+      "erklaerung": "Diese Typen sind **`Copy`**: Ihre Bytes vollständig zu kopieren ergibt einen korrekten, unabhängigen Wert. Dann bleibt die Quelle nach einer Zuweisung gültig. `Copy` sind alle Ganzzahlen, Gleitkommazahlen, `bool`, `char`, geteilte Referenzen `&T` sowie Tupel, Arrays und `Option`, wenn alle Bestandteile `Copy` sind. `Vec`, `String`, `Box` und `&mut T` sind es nicht.",
+      "begruendungen": [
+        "Richtig. Ein Tupel ist `Copy`, wenn alle Elemente es sind.",
+        "Richtig. Auch bei grossen Arrays, dann kann die Kopie allerdings teuer werden.",
+        "Ein `Vec` besitzt einen Heap-Puffer. Zwei Bitkopien würden ihn doppelt freigeben.",
+        "Richtig. Geteilte Referenzen darf man beliebig vervielfältigen. `&mut T` dagegen ist nicht `Copy`, sonst gäbe es zwei exklusive Referenzen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Copy und Clone",
+      "text": "**`Clone`** ist ein gewöhnlicher Trait mit der Methode `clone()`. Er darf beliebig viel tun, z. B. Heap-Speicher anfordern, und wird immer **explizit** aufgerufen. Eine teure Kopie ist im Code also sichtbar.\n\n**`Copy`** ist ein **Marker-Trait** ohne Methoden. Er sagt dem Compiler: Eine Bitkopie genügt, die Quelle bleibt gültig. Kopiert wird dann **implizit**, bei jeder Zuweisung und Übergabe. `Copy` setzt `Clone` voraus, deshalb schreibt man immer beides: `#[derive(Clone, Copy)]`. Ein selbst geschriebenes `Copy` mit eigenem Verhalten gibt es nicht."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Warum lehnt rustc dieses `derive` ab?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Clone, Copy)]",
+          "struct Messung {",
+          "    wert: f32,",
+          "    einheit: String,",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0204]: the trait `Copy` cannot be implemented for this type",
+          " --> src/main.rs:2:8",
+          "  |",
+          "1 | #[derive(Clone, Copy)]",
+          "  |                 ---- in this derive macro expansion",
+          "2 | struct Messung {",
+          "  |        ^^^^^^^",
+          "3 |     wert: f32,",
+          "4 |     einheit: String,",
+          "  |     --------------- this field does not implement `Copy`"
+        ]
+      },
+      "optionen": [
+        "Ein Struct kann nur `Copy` sein, wenn alle Felder `Copy` sind, und `String` ist es nicht",
+        "Structs mit Gleitkommafeldern dürfen nicht `Copy` sein",
+        "`Copy` muss vor `Clone` stehen",
+        "`Copy` kann man nur von Hand implementieren, nicht mit `derive`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Bitkopie von `Messung` würde den Heap-Zeiger von `einheit` verdoppeln. Zwei Besitzer desselben Puffers, zwei Freigaben: genau das verhindert die Regel. Abhilfe: Nur `#[derive(Clone)]` und bei Bedarf explizit `.clone()`, oder die Einheit als `&'static str` bzw. als Enum `Einheit { Grad, Pascal }` mit `Copy` modellieren.",
+      "begruendungen": [
+        "Richtig, die Meldung zeigt direkt auf das schuldige Feld.",
+        "`f32` und `f64` sind `Copy`.",
+        "Die Reihenfolge in `derive` spielt keine Rolle.",
+        "`derive(Copy)` ist der übliche Weg."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Kompiliert dieser Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Clone, Copy)]",
+          "struct Handle(u32);",
+          "",
+          "impl Drop for Handle {",
+          "    fn drop(&mut self) {",
+          "        schliesse(self.0);",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nein, E0184: Ein Typ mit `Drop` darf nicht `Copy` sein",
+        "Ja, `drop` läuft dann für jede Kopie",
+        "Ja, `drop` läuft nur für das Original"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Copy` und `Drop` schliessen sich aus. Ein Typ, der beim Droppen etwas aufräumt, besitzt eine Ressource. Würde er implizit kopiert, liefe das Aufräumen mehrfach, hier würde dasselbe Handle zweimal geschlossen. rustc meldet: „the trait `Copy` cannot be implemented for this type; the type has a destructor“.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau dieses doppelte Schliessen soll verhindert werden.",
+        "Nach einer Bitkopie gibt es kein „Original“ mehr, beide Werte sind gleichwertig."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Ableitung passt?",
+      "paare": [
+        {
+          "links": "`struct Punkt { x: f32, y: f32 }`",
+          "rechts": "`#[derive(Clone, Copy)]`: klein und reine Daten"
+        },
+        {
+          "links": "`struct Konfig { name: String, ports: Vec<u16> }`",
+          "rechts": "`#[derive(Clone)]`: Kopie ist möglich, aber teuer und soll sichtbar sein"
+        },
+        {
+          "links": "`struct Uart { /* besitzt die Peripherie */ }`",
+          "rechts": "Weder `Clone` noch `Copy`: Es darf nur einen Besitzer geben"
+        },
+        {
+          "links": "`struct Puffer([u8; 4096])`",
+          "rechts": "Nur `Clone`, obwohl `Copy` möglich wäre: 4 KiB sollen nicht unbemerkt kopiert werden"
+        }
+      ],
+      "erklaerung": "`Copy` ist auch ein **API-Versprechen**: Entfernt man es später, bricht Code der Nutzer. Für Treiber-Typen in embedded-hal ist das Fehlen von `Clone` Absicht. So stellt das Typsystem sicher, dass nur eine Stelle im Programm einen Pin oder UART steuert (Phase 6)."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Clippy wurde mit einem zusätzlichen Lint aufgerufen. Was soll man an Zeile 7 ändern?",
+      "terminal": {
+        "befehl": "cargo clippy -- -W clippy::redundant_clone",
+        "ausgabe": [
+          "warning: redundant clone",
+          " --> src/main.rs:7:15",
+          "  |",
+          "7 |     sende(text.clone());",
+          "  |               ^^^^^^^^ help: remove this",
+          "  |",
+          "note: this value is dropped without further use",
+          " --> src/main.rs:7:11",
+          "  |",
+          "7 |     sende(text.clone());",
+          "  |           ^^^^",
+          "",
+          "warning: using `clone` on type `u32` which implements the `Copy` trait",
+          " --> src/main.rs:9:14",
+          "  |",
+          "9 |     let z2 = zahl.clone();",
+          "  |              ^^^^^^^^^^^^ help: try removing the `clone` call: `zahl`"
+        ]
+      },
+      "optionen": [
+        "`.clone()` weglassen: `text` wird danach nicht mehr gebraucht und kann direkt verschoben werden",
+        "`text.clone()` durch `text.to_owned()` ersetzen",
+        "`sende` muss `&String` statt `String` nehmen",
+        "Nichts, die Warnung betrifft nur Debug-Builds"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`redundant_clone` erkennt Klone, deren Original direkt danach ungenutzt gedroppt wird. Ein Move hätte genügt, die Allokation ist verschwendet. Der Lint gehört zur Gruppe `clippy::nursery` und ist nicht standardmässig aktiv. `clone_on_copy` (zweite Warnung) ist dagegen immer an: Bei `Copy`-Typen ist `.clone()` nur Rauschen.",
+      "begruendungen": [
+        "Richtig.",
+        "`to_owned()` alloziert genauso.",
+        "Möglich, aber nicht das, was Clippy hier meldet. Wenn schon, dann `&str` statt `&String`.",
+        "Clippy-Warnungen gelten unabhängig vom Build-Profil."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Regeln.",
+      "text": "`Copy` kopiert {{?}}, `Clone` nur bei einem {{?}} Aufruf. Ein Typ mit eigenem `Drop` kann {{?}} `Copy` sein.",
+      "luecken": [
+        {
+          "loesungen": [
+            "implizit"
+          ]
+        },
+        {
+          "loesungen": [
+            "expliziten"
+          ]
+        },
+        {
+          "loesungen": [
+            "nie"
+          ]
+        }
+      ],
+      "auswahl": [
+        "implizit",
+        "expliziten",
+        "nie",
+        "immer",
+        "virtuellen"
+      ],
+      "erklaerung": "Merksatz: `Copy` für kleine, ressourcenfreie Werte wie Zahlen, Koordinaten, IDs und Flags. Alles mit Heap, Handles oder Eindeutigkeit bekommt höchstens `Clone`."
+    }
+  ],
+  "praxis": "`.clone()` ist der schnellste Weg, den Borrow Checker zum Schweigen zu bringen, und deshalb in Reviews ein Warnsignal. Frage bei jedem Klon in einer Schleife oder einem heissen Pfad: Würde eine Referenz reichen? Kann die Funktion den Besitz übernehmen? Bei grossen geteilten Daten ist `Arc<T>` (Phase 3) billiger zu klonen, weil nur ein Zähler erhöht wird. Wer Klone systematisch suchen will, aktiviert in der CI zusätzlich `clippy::redundant_clone`.",
+  "labor": {
+    "titel": "Klone aufspüren",
+    "anleitung": "Schreibe eine Funktion `sende(nachricht: String)` und rufe sie mit `text.clone()` auf, obwohl `text` danach nicht mehr gebraucht wird. Füge ein `.clone()` auf einem `u32` hinzu. Lass Clippy einmal mit Standard-Lints und einmal mit `redundant_clone` laufen. Versuche danach, `#[derive(Clone, Copy)]` auf ein Struct mit `String`-Feld und auf ein Struct mit `Drop` zu setzen.",
+    "befehle": [
+      "cargo new klone && cd klone",
+      "cargo clippy",
+      "cargo clippy -- -W clippy::redundant_clone",
+      "rustc --explain E0184"
+    ],
+    "beobachtung": "Standard-Clippy meldet nur `clone_on_copy`. Mit dem zusätzlichen Lint kommt `redundant clone` dazu. Die beiden `derive`-Versuche enden mit E0204 bzw. E0184."
+  },
+  "begriffe": [
+    {
+      "begriff": "Copy",
+      "englisch": "`Copy` trait",
+      "erklaerung": "Marker-Trait: Der Typ wird bei Zuweisung implizit bitweise kopiert, die Quelle bleibt gültig."
+    },
+    {
+      "begriff": "Clone",
+      "englisch": "`Clone` trait",
+      "erklaerung": "Trait für explizite, möglicherweise teure Kopien über `.clone()`."
+    },
+    {
+      "begriff": "Marker-Trait",
+      "englisch": "marker trait",
+      "erklaerung": "Trait ohne Methoden, der dem Compiler eine Eigenschaft des Typs mitteilt, z. B. `Copy`, `Send`, `Sync`."
+    },
+    {
+      "begriff": "Lint",
+      "englisch": "lint",
+      "erklaerung": "Prüfregel des Compilers oder von Clippy, die verdächtigen, aber gültigen Code meldet."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::marker::Copy",
+      "url": "https://doc.rust-lang.org/std/marker/trait.Copy.html"
+    },
+    {
+      "titel": "std::clone::Clone",
+      "url": "https://doc.rust-lang.org/std/clone/trait.Clone.html"
+    },
+    {
+      "titel": "The Clippy Book",
+      "url": "https://doc.rust-lang.org/clippy/"
+    }
+  ]
+}

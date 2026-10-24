@@ -1,0 +1,199 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m5-l2",
+  "phase": 4,
+  "modul": "4.5 Statische Analyse",
+  "titel": "rustfmt und Prüfwerkzeuge für Abhängigkeiten",
+  "lernziele": [
+    "Code mit `cargo fmt` einheitlich formatieren und in der CI mit `--check` prüfen",
+    "Abhängigkeiten mit cargo-audit, cargo-deny und cargo-udeps überwachen",
+    "Mit cargo-semver-checks versehentliche Bruchänderungen einer API erkennen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "fmt-check",
+      "frage": "Die CI ruft `cargo fmt --check` auf. Was bedeutet diese Ausgabe?",
+      "terminal": {
+        "befehl": "cargo fmt --check; echo \"exit=$?\"",
+        "ausgabe": [
+          "Diff in /home/user/projekt/src/main.rs:1:",
+          "-fn skaliere(roh:u32)->u16{ u16::try_from(roh/16).unwrap_or(u16::MAX) }",
+          "+fn skaliere(roh: u32) -> u16 {",
+          "+    u16::try_from(roh / 16).unwrap_or(u16::MAX)",
+          "+}",
+          " ",
+          " fn main() {",
+          "-    let werte = vec![1,2,3];",
+          "-        println!(\"{}\", skaliere(werte.iter().sum()));",
+          "+    let werte = vec![1, 2, 3];",
+          "+    println!(\"{}\", skaliere(werte.iter().sum()));",
+          " }",
+          "exit=1"
+        ]
+      },
+      "optionen": [
+        "Die Datei ist nicht formatiert. `--check` ändert nichts, zeigt den Unterschied und endet mit Exit-Code 1, sodass die CI rot wird",
+        "rustfmt hat die Datei bereits umgeschrieben, der Commit muss nur noch gepusht werden",
+        "Der Code enthält einen Syntaxfehler in Zeile 1",
+        "rustfmt meldet Lint-Warnungen wie Clippy"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**rustfmt** formatiert Rust-Code nach einem festen, offiziellen Stil. `cargo fmt` schreibt die Dateien um, `cargo fmt --check` prüft nur und liefert bei Abweichungen einen Exit-Code ungleich 0. Das Diff ist so zu lesen: Zeilen mit `-` sind der aktuelle Stand, Zeilen mit `+` das, was rustfmt daraus machen würde. Weil alle denselben Stil nutzen, gibt es im Review keine Diskussionen über Leerzeichen.",
+      "begruendungen": [
+        "Richtig.",
+        "Mit `--check` schreibt rustfmt nichts um.",
+        "Der Code ist gültig, nur unformatiert. Bei Syntaxfehlern meldet rustfmt einen Fehler statt eines Diffs.",
+        "rustfmt ändert nur die Form, nie die Bedeutung, und kennt keine Lints."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "rustfmt-toml",
+      "frage": "Ergänze: Die Konfiguration von rustfmt liegt in einer eigenen Datei im Projektverzeichnis, und die CI soll die Formatierung nur prüfen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "# Datei {{?}} im Projektverzeichnis:",
+          "#   max_width = 80",
+          "#   edition = \"2024\"",
+          "cargo fmt --all -- {{?}}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["rustfmt.toml"] },
+        { "loesungen": ["--check"] }
+      ],
+      "auswahl": ["rustfmt.toml", "--check", "clippy.toml", "--fix", "Cargo.toml"],
+      "erklaerung": "rustfmt liest `rustfmt.toml` oder `.rustfmt.toml`. Auf stable sind nur die stabilen Optionen erlaubt, etwa `max_width`, `edition`, `hard_tabs` oder `newline_style`. Die meisten Projekte ändern fast nichts und übernehmen den Standardstil. `--all` formatiert alle Pakete im Workspace. Hilfreich ist ausserdem „Format on Save“ im Editor mit rust-analyzer."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Werkzeuge für die Lieferkette",
+      "text": "Ein typisches Rust-Projekt hat Dutzende bis Hunderte indirekte Abhängigkeiten. Dafür gibt es eigene Prüfwerkzeuge, alle per `cargo install`:\n\n- **cargo-audit** gleicht `Cargo.lock` mit der **RustSec Advisory Database** ab, einer öffentlichen Sammlung von Sicherheitsmeldungen zu Crates.\n- **cargo-deny** prüft nach Regeln in `deny.toml`: Lizenzen, Sicherheitsmeldungen, verbotene Crates, doppelte Versionen und erlaubte Quellen.\n- **cargo-udeps** findet Abhängigkeiten in `Cargo.toml`, die nicht benutzt werden (braucht nightly). Eine stable-Alternative mit einfacherer Heuristik ist **cargo-machete**.\n- **cargo-semver-checks** vergleicht die öffentliche API mit der zuletzt veröffentlichten Version und meldet Bruchänderungen, die eine neue Hauptversion erfordern würden."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeug-frage",
+      "frage": "Welches Werkzeug beantwortet welche Frage?",
+      "paare": [
+        { "links": "Hat eine unserer Abhängigkeiten eine bekannte Sicherheitslücke?", "rechts": "`cargo audit`" },
+        { "links": "Ist irgendwo eine GPL-Lizenz in unser proprietäres Produkt gerutscht?", "rechts": "`cargo deny check licenses`" },
+        { "links": "Steht in `Cargo.toml` eine Crate, die keiner mehr benutzt?", "rechts": "`cargo +nightly udeps`" },
+        { "links": "Darf diese Änderung als 1.4.1 statt 2.0.0 erscheinen?", "rechts": "`cargo semver-checks`" },
+        { "links": "Ist der Code einheitlich formatiert?", "rechts": "`cargo fmt --check`" }
+      ],
+      "erklaerung": "`cargo deny check` ohne Argument prüft alle Kategorien auf einmal: `advisories`, `licenses`, `bans` und `sources`. Viele Teams setzen deshalb cargo-deny statt cargo-audit ein, weil es die Sicherheitsmeldungen ebenfalls aus der RustSec-Datenbank liest."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "advisory-reaktion",
+      "frage": "`cargo audit` meldet eine Sicherheitslücke in einer indirekten Abhängigkeit, und es gibt eine korrigierte Version mit derselben Hauptversion. Was ist der erste Schritt?",
+      "optionen": [
+        "`cargo update -p <crate>` ausführen, damit `Cargo.lock` die korrigierte Version verwendet, dann Tests laufen lassen",
+        "Die Abhängigkeit aus `Cargo.toml` löschen",
+        "Die Meldung in der Konfiguration ignorieren, weil es nur eine indirekte Abhängigkeit ist",
+        "Auf eine neue Version der direkten Abhängigkeit warten, die die Lücke behebt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Weil Cargo Versionsbereiche nach SemVer auflöst, reicht bei einer kompatiblen Korrektur meist ein Update in `Cargo.lock`. Erst wenn die Korrektur eine neue Hauptversion braucht, muss die direkte Abhängigkeit nachziehen. Ignorieren ist nur nach Prüfung vertretbar, etwa wenn die betroffene Funktion gar nicht benutzt wird. Dann dokumentiert man das mit Begründung in `deny.toml` oder `audit.toml`.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine indirekte Abhängigkeit steht gar nicht in deiner `Cargo.toml`.",
+        "Auch indirekte Abhängigkeiten landen im ausgelieferten Binary.",
+        "Nicht nötig, solange die Korrektur innerhalb des erlaubten Versionsbereichs liegt."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "deny-toml",
+      "frage": "Die Firma liefert proprietäre Firmware aus und erlaubt nur permissive Lizenzen. Welche Zeile in der `deny.toml` widerspricht dieser Regel?",
+      "code": {
+        "sprache": "toml",
+        "datei": "deny.toml",
+        "zeilen": [
+          "[licenses]",
+          "allow = [",
+          "    \"MIT\",",
+          "    \"Apache-2.0\",",
+          "    \"BSD-3-Clause\",",
+          "    \"GPL-3.0-only\",",
+          "    \"Unicode-3.0\",",
+          "]",
+          "",
+          "[bans]",
+          "multiple-versions = \"warn\""
+        ]
+      },
+      "fehlerZeile": 6,
+      "erklaerung": "GPL-3.0 ist eine **Copyleft**-Lizenz: Wer so lizenzierten Code in sein Programm linkt und es weitergibt, muss das gesamte Programm unter derselben Lizenz offenlegen. In der Erlaubnisliste hat sie bei proprietärer Firmware nichts verloren. Da Rust standardmässig statisch linkt, landet jede Abhängigkeit im Binary. MIT, Apache-2.0, BSD und Unicode-3.0 sind permissiv."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "semver",
+      "frage": "Du entfernst in deiner Bibliothek eine öffentliche Funktion und willst als 1.4.1 veröffentlichen. Was meldet `cargo semver-checks`?",
+      "optionen": [
+        "Eine Bruchänderung (`function_missing`): Das Entfernen eines `pub`-Items verlangt eine neue Hauptversion",
+        "Nichts, weil Patch-Versionen beliebige Änderungen erlauben",
+        "Einen Kompilierfehler in der eigenen Bibliothek"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Nach **SemVer** (semantische Versionierung) darf man in einer Patch- oder Minor-Version nichts entfernen, was Nutzer verwenden könnten. cargo-semver-checks erzeugt dazu die öffentliche API beider Versionen mit rustdoc und vergleicht sie mit einer Liste bekannter Bruchregeln. Viele Projekte lassen es vor jedem Release in der CI laufen.",
+      "begruendungen": [
+        "Richtig.",
+        "Patch-Versionen dürfen nur rückwärtskompatible Fehlerkorrekturen enthalten.",
+        "Die eigene Bibliothek kompiliert. Kaputt gehen würden die Programme der Nutzer."
+      ]
+    }
+  ],
+  "praxis": "Eine solide CI für ein Rust-Projekt hat neben `cargo test` diese Schritte: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo deny check` und für Bibliotheken `cargo semver-checks` vor dem Release. Für Produkte mit Sicherheitsanforderungen läuft `cargo audit` zusätzlich nachts gegen den Hauptzweig, weil neue Meldungen auch ohne Codeänderung erscheinen. Als Senior legst du diese Regeln am Anfang eines Projekts fest, nachträglich ist das deutlich mühsamer.",
+  "labor": {
+    "titel": "Die Lieferkette prüfen",
+    "anleitung": "Nimm ein Projekt mit einigen Abhängigkeiten. Prüfe Formatierung, Sicherheitsmeldungen und Lizenzen. Erzeuge mit `cargo deny init` eine Vorlage und passe die Lizenzliste an.",
+    "befehle": [
+      "cargo fmt --check",
+      "cargo install cargo-audit cargo-deny",
+      "cargo audit",
+      "cargo deny init && cargo deny check licenses",
+      "cargo tree -d"
+    ],
+    "beobachtung": "`cargo deny check licenses` listet jede Crate, deren Lizenz nicht erlaubt ist. `cargo tree -d` zeigt Crates, die in mehreren Versionen im Build stecken. Das macht Builds langsamer und Binaries grösser."
+  },
+  "begriffe": [
+    {
+      "begriff": "rustfmt",
+      "englisch": "rustfmt",
+      "erklaerung": "Offizielles Werkzeug, das Rust-Code nach einem einheitlichen Stil formatiert."
+    },
+    {
+      "begriff": "RustSec Advisory Database",
+      "englisch": "RustSec Advisory Database",
+      "erklaerung": "Öffentliche Datenbank mit Sicherheitsmeldungen zu Crates, genutzt von cargo-audit und cargo-deny."
+    },
+    {
+      "begriff": "Semantische Versionierung",
+      "englisch": "semantic versioning, SemVer",
+      "erklaerung": "Versionsschema MAJOR.MINOR.PATCH, bei dem nur eine neue Hauptversion inkompatible Änderungen enthalten darf."
+    },
+    {
+      "begriff": "Copyleft",
+      "englisch": "copyleft",
+      "erklaerung": "Lizenzbedingung, nach der abgeleitete Werke unter derselben Lizenz weitergegeben werden müssen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "RustSec Advisory Database",
+      "url": "https://rustsec.org/"
+    },
+    {
+      "titel": "cargo-deny Book",
+      "url": "https://embarkstudios.github.io/cargo-deny/"
+    },
+    {
+      "titel": "The Cargo Book: SemVer Compatibility",
+      "url": "https://doc.rust-lang.org/cargo/reference/semver.html"
+    }
+  ]
+}

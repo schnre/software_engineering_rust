@@ -1,0 +1,215 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m1-l3",
+  "phase": 10,
+  "modul": "10.1 Prinzipien",
+  "titel": "Komposition statt Vererbung",
+  "lernziele": [
+    "Erklären, wie Rust ohne Vererbung Wiederverwendung und Polymorphie erreicht",
+    "Komposition, Delegation und Default-Methoden gezielt einsetzen",
+    "Klassenhierarchien in Enums oder Trait-Objekte übersetzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "keine-vererbung",
+      "frage": "Ein C++-Team portiert `class Led : public Gpio` nach Rust. Was gibt es in Rust dafür?",
+      "optionen": [
+        "Keine Vererbung von Daten: `Led` enthält ein `Gpio`-Feld (Komposition) und nutzt Traits für gemeinsames Verhalten",
+        "`struct Led: Gpio { … }` erbt alle Felder und Methoden",
+        "`impl Gpio for Led` übernimmt die Felder von `Gpio`",
+        "Das Attribut `#[derive(Gpio)]`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust kennt keine Vererbung zwischen Structs. Daten werden **komponiert** (ein Typ enthält einen anderen), Verhalten wird über **Traits** geteilt. Das vermeidet bekannte Probleme tiefer Hierarchien: die fragile Basisklasse, bei der eine Änderung oben unerwartet unten bricht, und die Diamant-Vererbung.",
+      "begruendungen": [
+        "Richtig.",
+        "Diese Syntax gibt es für Structs nicht. Bei Traits bedeutet `trait A: B` einen Supertrait, das vererbt aber keine Daten.",
+        "`impl Trait for Typ` geht nur mit Traits, und Traits haben keine Felder.",
+        "`derive` erzeugt Trait-Implementierungen per Makro, es übernimmt keine Felder."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Drei Werkzeuge statt Vererbung",
+      "text": "- **Komposition**: `struct Led { gpio: Gpio, an: bool }`. `Led` besitzt ein `Gpio` und benutzt es.\n- **Delegation**: `Led` bietet eigene Methoden an, die intern an `self.gpio` weiterreichen. Nur was `Led` wirklich anbieten will, wird nach aussen sichtbar.\n- **Default-Methoden**: Ein Trait kann Methoden mit Rumpf mitliefern. Jeder Implementierer bekommt sie geschenkt und kann sie bei Bedarf überschreiben.\n\nDazu kommen **Enums** für geschlossene Familien von Varianten. Zusammen decken sie praktisch alles ab, wofür man in C++ eine Klassenhierarchie baut."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "e0599",
+      "frage": "`Led` enthält ein Feld `gpio: Gpio`, und `Gpio` hat die Methode `setze`. Was bedeutet diese Ausgabe für `led.setze(false)`?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0599]: no method named `setze` found for struct `Led` in the current scope",
+          "  --> src/main.rs:27:9",
+          "   |",
+          "11 | struct Led {",
+          "   | ---------- method `setze` not found for this struct",
+          "...",
+          "27 |     led.setze(false);",
+          "   |         ^^^^^ method not found in `Led`",
+          "   |",
+          "help: one of the expressions' fields has a method of the same name",
+          "   |",
+          "27 |     led.gpio.setze(false);",
+          "   |         +++++"
+        ]
+      },
+      "optionen": [
+        "Methoden eines Feldes werden nicht automatisch übernommen. `Led` muss selbst eine Methode anbieten oder der Aufrufer greift über das Feld zu",
+        "`setze` ist privat und muss `pub` werden",
+        "Rust braucht `use Gpio;`, damit die Methode sichtbar ist",
+        "Die Methode existiert nur bei `&mut Led`, nicht bei `Led`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist Absicht: Komposition übernimmt keine Schnittstelle. Der Vorschlag des Compilers `led.gpio.setze(false)` funktioniert, verletzt aber das Gesetz von Demeter aus der letzten Lektion. Meist ist eine eigene, fachlich benannte Methode wie `led.umschalten()` besser. Delegation schreibt man in Rust von Hand, oder für viele Methoden mit Hilfs-Crates wie `delegate`.",
+      "begruendungen": [
+        "Richtig.",
+        "Alles liegt im selben Modul, Sichtbarkeit ist hier nicht das Problem.",
+        "`use` betrifft Namen von Modulen, Typen und Traits, nicht inhärente Methoden eines Feldes.",
+        "Die Meldung spricht von „no method named“, nicht von einem Problem mit der Referenzart."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "default-methode",
+      "frage": "Ergänze den Trait so, dass jeder Sensor `lies_millivolt` geschenkt bekommt und nur `lies_roh` selbst implementieren muss.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Sensor {",
+          "    fn lies_roh(&mut self) -> u16{{?}}",
+          "",
+          "    fn lies_millivolt(&mut self) -> u32 {",
+          "        {{?}}.lies_roh() as u32 * 3300 / 4095",
+          "    }",
+          "}",
+          "",
+          "struct Poti;",
+          "",
+          "impl Sensor for Poti {",
+          "    fn lies_roh(&mut self) -> u16 {",
+          "        4095",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": [";"] },
+        { "loesungen": ["self"] }
+      ],
+      "auswahl": [";", "{}", "self", "Self", "super"],
+      "erklaerung": "Eine Methode ohne Rumpf (mit `;`) muss jeder Implementierer liefern. Eine Methode mit Rumpf ist eine **Default-Methode**, die auf den Pflichtmethoden aufbauen kann. `Poti.lies_millivolt()` ergibt hier 3300. Das ist das Muster „Template Method“ ohne Basisklasse. Die Standardbibliothek nutzt es massiv: `Iterator` verlangt nur `next`, alle anderen Methoden wie `map` oder `sum` sind Defaults."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "e0407",
+      "frage": "Ein Entwickler will in `Poti` zusätzlich eine Methode `kalibriere` „überschreiben“. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl Sensor for Poti {",
+          "    fn lies_roh(&mut self) -> u16 {",
+          "        4095",
+          "    }",
+          "",
+          "    fn kalibriere(&mut self) {}",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0407: `kalibriere` ist kein Mitglied des Traits `Sensor`",
+        "Es kompiliert, `kalibriere` wird eine neue Methode von `Poti`",
+        "Es kompiliert mit einer Warnung wegen unbenutzter Methode",
+        "Fehler E0046, weil `lies_millivolt` fehlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In einem `impl Trait for Typ`-Block dürfen nur Methoden stehen, die der Trait deklariert. Das verhindert einen klassischen C++-Fehler: Ein Tippfehler im Namen erzeugt still eine neue Methode statt eine Überschreibung (dort hilft nur `override`). Eigene Zusatzmethoden gehören in einen separaten `impl Poti { … }`-Block.",
+      "begruendungen": [
+        "Richtig.",
+        "Neue Methoden gehören in einen inhärenten `impl Poti`-Block, nicht in den Trait-Block.",
+        "Es ist ein harter Fehler, keine Warnung.",
+        "`lies_millivolt` hat einen Default und muss nicht implementiert werden."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Hierarchie als Enum",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "enum Sensor {",
+          "    Can { id: u16 },",
+          "    I2c { adresse: u8 },",
+          "    Spi,",
+          "}",
+          "",
+          "fn bus(s: &Sensor) -> &'static str {",
+          "    match s {",
+          "        Sensor::Can { .. } => \"CAN\",",
+          "        Sensor::I2c { .. } => \"I2C\",",
+          "        Sensor::Spi => \"SPI\",",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Statt Basisklasse plus drei Unterklassen: ein Enum mit drei Varianten, jede mit eigenen Daten." },
+          { "zeile": 8, "text": "Fehlt hier ein Arm, bricht der Build mit E0004 (non-exhaustive patterns) ab." }
+        ]
+      },
+      "text": "Ist die Menge der Varianten bekannt und unter deiner Kontrolle, ist ein Enum oft einfacher als eine Trait-Hierarchie: kein Heap, keine dynamische Bindung, und der Compiler prüft jedes `match` auf Vollständigkeit. Sollen Dritte neue Varianten hinzufügen können, ist ein Trait die bessere Wahl."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeug-waehlen",
+      "frage": "Welches Werkzeug passt zu welcher Anforderung?",
+      "paare": [
+        { "links": "Mehrere Typen teilen eine berechnete Methode", "rechts": "Default-Methode im Trait" },
+        { "links": "Ein Typ nutzt einen anderen intern", "rechts": "Komposition mit privatem Feld" },
+        { "links": "Feste Menge von Gerätearten mit eigenen Daten", "rechts": "Enum mit `match`" },
+        { "links": "Plugins aus fremden Crates in einer Liste", "rechts": "`Vec<Box<dyn Trait>>`" }
+      ],
+      "erklaerung": "Die Wahl zwischen Enum und `dyn Trait` ist eine echte Abwägung zwischen geschlossener und offener Erweiterbarkeit. Modul 10.5 vertieft das mit Kosten für Binärgrösse und Laufzeit."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "supertrait",
+      "frage": "Was bedeutet `trait Aktor: Geraet { … }`?",
+      "optionen": [
+        "Wer `Aktor` implementiert, muss auch `Geraet` implementieren. Es wird kein Code und kein Feld geerbt",
+        "`Aktor` erbt alle Felder von `Geraet`",
+        "`Aktor` überschreibt alle Methoden von `Geraet`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Supertrait** ist eine Voraussetzung, keine Vererbung von Implementierungen. Innerhalb von `Aktor` darf man Methoden von `Geraet` aufrufen, weil sie garantiert vorhanden sind. Jeder Typ muss aber beide `impl`-Blöcke selbst schreiben (oder per Blanket-Impl bekommen, Modul 3.1).",
+      "begruendungen": [
+        "Richtig.",
+        "Traits haben keine Felder, also gibt es auch keine zu erben.",
+        "Es entsteht keine Überschreibung, beide Traits stehen nebeneinander."
+      ]
+    }
+  ],
+  "praxis": "Bei der Portierung von C++ nach Rust ist das Nachbauen von Klassenhierarchien einer der häufigsten Stolpersteine. Gute Fragen im Design-Review: Ist die Menge der Varianten geschlossen (Enum) oder offen (Trait)? Braucht der äussere Typ wirklich alle Methoden des inneren, oder nur zwei davon (Delegation)? Wer `Deref` missbraucht, um Vererbung nachzuahmen, bekommt verwirrende Methodenauflösung. Die Rust-Dokumentation rät ausdrücklich davon ab.",
+  "labor": {
+    "titel": "Default-Methoden in der Standardbibliothek",
+    "anleitung": "Schreibe einen eigenen Iterator, der nur `next` implementiert, und nutze danach `map`, `filter` und `sum`, ohne sie zu implementieren. Lass dir dann die Dokumentation öffnen und zähle die bereitgestellten Methoden.",
+    "befehle": [
+      "cargo new komposition && cd komposition",
+      "cargo run",
+      "rustup doc std::iter::Iterator"
+    ],
+    "beobachtung": "Mit einer einzigen Pflichtmethode stehen dir Dutzende Methoden zur Verfügung. Das ist Wiederverwendung über Default-Methoden, ganz ohne Basisklasse."
+  },
+  "begriffe": [
+    { "begriff": "Komposition", "englisch": "composition", "erklaerung": "Ein Typ enthält andere Typen als Felder und benutzt sie, statt von ihnen zu erben." },
+    { "begriff": "Delegation", "englisch": "delegation", "erklaerung": "Eine Methode reicht den Aufruf an ein enthaltenes Feld weiter." },
+    { "begriff": "Default-Methode", "englisch": "default method", "erklaerung": "Trait-Methode mit Rumpf, die Implementierer übernehmen oder überschreiben können." },
+    { "begriff": "Supertrait", "englisch": "supertrait", "erklaerung": "Trait, den ein Typ implementieren muss, bevor er einen anderen Trait implementieren darf." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Traits", "url": "https://doc.rust-lang.org/reference/items/traits.html" },
+    { "titel": "The Rust Programming Language, Kapitel 10.2: Traits", "url": "https://doc.rust-lang.org/book/ch10-02-traits.html" }
+  ]
+}

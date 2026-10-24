@@ -1,0 +1,257 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m8-l2",
+  "phase": 2,
+  "modul": "2.8 Eine fremde Codebase lesen",
+  "titel": "Rust-Code systematisch verstehen",
+  "lernziele": [
+    "Trait-Implementierungen und inferierte Typen in fremdem Code finden",
+    "Generische Signaturen mit `where`-Klauseln lesen",
+    "unsafe-Stellen zählen und Tests als Dokumentation nutzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Im fremden Code steht `let zaehler = woerter.iter().fold(HashMap::new(), |mut m, w| { … });`. Welchen Typ hat `zaehler`, und wie findest du es ohne Raten heraus?",
+      "optionen": [
+        "Mit dem Inlay-Hint oder Hover von rust-analyzer, oder mit dem Trick `let _: () = zaehler;`, dessen Fehlermeldung den Typ nennt",
+        "Es gibt keinen festen Typ, Rust ist hier dynamisch typisiert",
+        "Nur durch Ausführen des Programms mit `dbg!`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust inferiert Typen oft über viele Zeilen hinweg. rust-analyzer zeigt sie direkt im Editor an. Ohne IDE hilft der absichtliche Typfehler: rustc meldet *expected `()`, found `HashMap<&str, usize>`*. Danach die Zeile wieder löschen.",
+      "begruendungen": [
+        "Richtig.",
+        "Jeder Wert hat einen statischen Typ, er steht nur nicht im Quelltext.",
+        "`dbg!` zeigt den Wert, nicht den Typ, und braucht einen Programmlauf."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "So sieht der Trick aus. Was ist der Typ von `zaehler`?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0308]: mismatched types",
+          " --> sensor-cli/src/main.rs:9:17",
+          "  |",
+          "9 |     let _: () = zaehler;",
+          "  |            --   ^^^^^^^ expected `()`, found `HashMap<&str, usize>`",
+          "  |            |",
+          "  |            expected due to this"
+        ]
+      },
+      "optionen": [
+        "`HashMap<&str, usize>`",
+        "`()`",
+        "`HashMap<String, i32>`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "*found* ist der tatsächliche Typ, *expected* der, den du vorgegeben hast. Die Schlüssel sind `&str`, weil `woerter` ein Array von String-Literalen ist, die Werte `usize`, weil im Code `or_insert(0usize)` steht.",
+      "begruendungen": [
+        "Richtig.",
+        "`()` ist der Typ, den wir absichtlich falsch vorgegeben haben.",
+        "Ohne Angabe würde eine Ganzzahl zu `i32`, hier legt aber `0usize` den Typ fest."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Signaturen lesen",
+      "text": "In fremden Bibliotheken stecken die Regeln oft in der Signatur. Lies sie von aussen nach innen: Welche Typparameter gibt es? Was verlangt die `where`-Klausel von ihnen? Was kommt zurück?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn mittelwert<I, T>(werte: I) -> Option<f64>",
+          "where",
+          "    I: IntoIterator<Item = T>,",
+          "    T: Into<f64>,",
+          "{"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "Zwei Typparameter. `Option`: Bei leerer Eingabe gibt es keinen Mittelwert."
+          },
+          {
+            "zeile": 3,
+            "text": "`werte` muss sich durchlaufen lassen und liefert Elemente vom Typ `T`: `Vec`, Array, Iterator …"
+          },
+          {
+            "zeile": 4,
+            "text": "Jedes Element muss sich verlustfrei in `f64` umwandeln lassen."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Welche Aufrufe von `mittelwert` (Signatur oben) kompilieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "mittelwert(vec![1u8, 2, 3]);   // A",
+          "mittelwert([1.5f32, 2.5]);     // B",
+          "mittelwert(vec![1i64, 2]);     // C",
+          "mittelwert(&[1u16, 2]);        // D"
+        ]
+      },
+      "optionen": [
+        "A und B",
+        "A, B und C",
+        "Alle vier",
+        "Nur A"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`f64` implementiert `From<u8>` und `From<f32>`, aber nicht `From<i64>`, denn nicht jedes `i64` passt exakt in ein `f64`. Bei D liefert der Iterator über `&[u16; 2]` Referenzen `&u16`, und für `&u16` gibt es kein `Into<f64>`. rustc meldet in beiden Fällen E0277 (*the trait `From<i64>` is not implemented for `f64`* bzw. `From<&u16>`).",
+      "begruendungen": [
+        "Richtig.",
+        "`i64` → `f64` kann Genauigkeit verlieren, deshalb gibt es kein `From`.",
+        "C und D scheitern an der `where`-Klausel.",
+        "Auch B erfüllt alle Bedingungen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Du suchst Trait-Implementierungen. Welche Suche findet was?",
+      "paare": [
+        {
+          "links": "`rg 'impl.*Drop for' src/`",
+          "rechts": "Typen mit eigenem Aufräumcode"
+        },
+        {
+          "links": "`rg 'impl.*fmt::Debug for' src/`",
+          "rechts": "Handgeschriebene Debug-Ausgaben (statt `#[derive(Debug)]`)"
+        },
+        {
+          "links": "rust-analyzer: *Go to Implementations* auf einem Trait",
+          "rechts": "Alle Typen, die diesen Trait implementieren, auch per `derive` oder Blanket-Impl"
+        },
+        {
+          "links": "Abschnitt *Trait Implementations* in `cargo doc`",
+          "rechts": "Alle Traits, die ein bestimmter Typ implementiert"
+        }
+      ],
+      "erklaerung": "Textsuche findet nur, was wörtlich dasteht. Implementierungen durch `#[derive]`, Makros oder Blanket-Impls (`impl<T: Display> ToString for T`) sieht nur der Compiler, also rust-analyzer und `cargo doc`. Für einen ersten Überblick ist `rg` trotzdem unschlagbar schnell."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du prüfst `heapless`, bevor dein Team es einsetzt. Was sagt dir diese Zählung?",
+      "terminal": {
+        "befehl": "rg -c 'unsafe \\{' src/ | sort -t: -k2 -nr | head -3; rg -c '// SAFETY' src/ | sort -t: -k2 -nr | head -3",
+        "ausgabe": [
+          "src/vec/mod.rs:35",
+          "src/deque.rs:27",
+          "src/spsc.rs:23",
+          "src/vec/mod.rs:11",
+          "src/spsc.rs:9",
+          "src/c_string.rs:9"
+        ]
+      },
+      "optionen": [
+        "Das `unsafe` konzentriert sich auf die Datenstrukturen mit eigener Speicherverwaltung. Dort lohnt sich ein genauer Blick, und längst nicht jeder Block hat einen SAFETY-Kommentar",
+        "Die Crate ist unsicher und darf nicht verwendet werden",
+        "Die Zahlen sind ohne Bedeutung, weil `unsafe` in Bibliotheken nicht zählt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`unsafe` ist bei Containern ohne Heap normal: Sie verwalten Speicher mit `MaybeUninit` selbst. Die Zählung zeigt, **wo** ein Review ansetzen sollte. Werkzeuge wie `cargo geiger` zählen unsafe-Stellen über den ganzen Abhängigkeitsbaum. Zusätzlich hilft ein Blick, ob die Crate in der CI unter Miri getestet wird.",
+      "begruendungen": [
+        "Richtig.",
+        "`unsafe` ist kein Ausschlusskriterium, es kommt auf Begründung und Prüfung an.",
+        "Gerade `unsafe` in Abhängigkeiten kann UB in deinem Programm verursachen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Tests sind die beste Dokumentation, wie eine Funktion gemeint ist. Ergänze den Doctest und den Test-Block.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "/// Rechnet einen 12-Bit-Rohwert in Millivolt um.",
+          "///",
+          "/// ```",
+          "/// assert_eq!(sensor_core::millivolt(4095), 3300);",
+          "/// ```",
+          "pub fn millivolt(roh: u16) -> u32 {",
+          "    roh as u32 * 3300 / 4095",
+          "}",
+          "",
+          "#[{{?}}(test)]",
+          "mod tests {",
+          "    use super::*;",
+          "    #[{{?}}]",
+          "    fn null_bleibt_null() { assert_eq!(millivolt(0), 0); }",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "cfg"
+          ]
+        },
+        {
+          "loesungen": [
+            "test"
+          ]
+        }
+      ],
+      "auswahl": [
+        "cfg",
+        "test",
+        "derive",
+        "inline"
+      ],
+      "erklaerung": "`#[cfg(test)]` kompiliert das Modul nur für `cargo test`, `#[test]` markiert eine Testfunktion. Der Codeblock im `///`-Kommentar ist ein **Doctest**: Er erscheint in `cargo doc` als Beispiel und wird von `cargo test` ausgeführt, kann also nicht veralten. `cargo test -- --list` listet alle Tests auf, ein schneller Überblick über das, was die Autoren für wichtig hielten. Mehr in Phase 4."
+    }
+  ],
+  "praxis": "Bevor du eine neue Abhängigkeit einführst oder fremden Code änderst, lohnt sich eine halbe Stunde dieser Analyse: öffentliche API in `cargo doc`, unsafe-Stellen zählen, Tests und Beispiele lesen, ein paar Signaturen mit `where`-Klauseln wirklich verstehen. Das ist auch die Grundlage für ein fundiertes Review: Wer weiss, welche Traits ein Typ implementiert und welche Annahmen die unsafe-Blöcke treffen, findet die echten Probleme.",
+  "labor": {
+    "titel": "heapless untersuchen",
+    "anleitung": "Untersuche den Quellcode von `heapless` in deinem Cargo-Registry-Cache: unsafe-Stellen, Drop-Implementierungen und Tests.",
+    "befehle": [
+      "cargo new erkunden && cd erkunden && cargo add heapless && cargo fetch",
+      "cd ~/.cargo/registry/src/*/heapless-*/",
+      "rg -c 'unsafe \\{' src/ | sort -t: -k2 -nr | head",
+      "rg -n 'impl.* Drop for' src/",
+      "cargo install cargo-geiger && cargo geiger"
+    ],
+    "beobachtung": "Die meisten unsafe-Blöcke liegen in `vec`, `deque` und `spsc`, also dort, wo Speicher von Hand verwaltet wird. Fast jeder Container hat ein eigenes `Drop`, das nur die tatsächlich belegten Elemente freigibt. `cargo geiger` braucht ein eigenes Projekt als Startpunkt und zählt dann über alle Abhängigkeiten."
+  },
+  "begriffe": [
+    {
+      "begriff": "Typinferenz",
+      "englisch": "type inference",
+      "erklaerung": "Der Compiler leitet Typen aus der Verwendung ab, sodass sie nicht im Quelltext stehen müssen."
+    },
+    {
+      "begriff": "where-Klausel",
+      "englisch": "where clause",
+      "erklaerung": "Teil einer Signatur, der Bedingungen an Typparameter stellt, z. B. `T: Into<f64>`."
+    },
+    {
+      "begriff": "Blanket-Implementierung",
+      "englisch": "blanket implementation",
+      "erklaerung": "Implementierung eines Traits für alle Typen, die eine Bedingung erfüllen, z. B. `impl<T: Display> ToString for T`."
+    },
+    {
+      "begriff": "Doctest",
+      "englisch": "doctest",
+      "erklaerung": "Codebeispiel in einem `///`-Kommentar, das `cargo test` kompiliert und ausführt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Generic Types, Traits, and Lifetimes",
+      "url": "https://doc.rust-lang.org/book/ch10-00-generics.html"
+    },
+    {
+      "titel": "The rustdoc Book",
+      "url": "https://doc.rust-lang.org/rustdoc/"
+    },
+    {
+      "titel": "heapless auf docs.rs",
+      "url": "https://docs.rs/heapless"
+    }
+  ]
+}

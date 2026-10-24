@@ -1,0 +1,252 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m4-l2",
+  "phase": 10,
+  "modul": "10.4 Entwurfsmuster",
+  "titel": "Observer, Callbacks und Kanäle",
+  "lernziele": [
+    "Callbacks als `Box<dyn FnMut>` speichern und die nötigen Lebenszeiten verstehen",
+    "Erklären, warum Rückreferenzen zwischen Subjekt und Beobachter `Weak` brauchen",
+    "Kanäle als oft einfachere Alternative zum klassischen Observer einsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In C++ speichert ein Sensor oft rohe Zeiger auf seine Beobachter (`std::vector<Listener*>`). Welches Problem verhindert Rust bei der direkten Übertragung dieses Musters?",
+      "optionen": [
+        "Ein Beobachter könnte freigegeben werden, während der Sensor noch einen Verweis auf ihn hält. Rust verlangt, dass gespeicherte Referenzen nachweislich lange genug leben",
+        "Rust kennt keine Funktionszeiger",
+        "Rust erlaubt keine `Vec` mit Trait-Objekten",
+        "Rust verbietet, dass zwei Objekte voneinander wissen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der klassische Observer ist eine Quelle für hängende Zeiger (dangling pointers): Der Beobachter wird zerstört, vergisst die Abmeldung, und der nächste Aufruf greift auf freigegebenen Speicher zu. In Rust muss man die Besitzverhältnisse ausdrücklich machen: Der Sensor **besitzt** seine Callbacks, oder er hält eine **schwache** Referenz.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust kennt `fn`-Zeiger und Closures.",
+        "`Vec<Box<dyn Trait>>` ist völlig normal.",
+        "Gegenseitige Kenntnis ist erlaubt, sie muss nur über Besitz oder `Weak` geregelt sein."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Callbacks besitzen",
+      "text": "Die idiomatische Form: Das Subjekt **besitzt** die Callbacks als `Vec<Box<dyn FnMut(i32)>>`. Eine **Closure** (Funktionsabschluss) bringt ihre Daten mit. Mit `move` übernimmt sie den Besitz der erfassten Variablen, damit sie die aufrufende Funktion überleben kann.\n\n`Box<dyn FnMut(i32)>` ohne Lebenszeit bedeutet dabei `+ 'static`: Die Closure darf keine geliehenen Referenzen auf lokale Variablen enthalten. Für einen Sensor, der lange lebt, ist das genau richtig.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Sensor {",
+          "    beobachter: Vec<Box<dyn FnMut(i32)>>,",
+          "}",
+          "",
+          "impl Sensor {",
+          "    fn anmelden(&mut self, f: impl FnMut(i32) + 'static) {",
+          "        self.beobachter.push(Box::new(f));",
+          "    }",
+          "    fn melden(&mut self, wert: i32) {",
+          "        for b in self.beobachter.iter_mut() {",
+          "            b(wert);",
+          "        }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Heterogene Closures, jede in ihrer eigenen Box." },
+          { "zeile": 6, "text": "`impl FnMut` nimmt jede passende Closure, `'static` verbietet Leihgaben." },
+          { "zeile": 10, "text": "`iter_mut`, weil `FnMut` beim Aufruf `&mut` braucht." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "In `main` wird ein Callback ohne `move` angemeldet, der die lokalen Variablen `grenze` und `name` benutzt. Was meldet rustc, und wie behebt man es?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0373]: closure may outlive the current function, but it borrows `name`, which is owned by the current function",
+          "  --> src/main.rs:15:16",
+          "   |",
+          "15 |     s.anmelden(|wert| {",
+          "   |                ^^^^^^ may outlive borrowed value `name`",
+          "16 |         if wert > grenze {",
+          "17 |             println!(\"{name}: {wert}\");",
+          "   |                        ---- `name` is borrowed here",
+          "   |",
+          "note: function requires argument type to outlive `'static`",
+          "help: to force the closure to take ownership of `name` (and any other referenced variables), use the `move` keyword",
+          "   |",
+          "15 |     s.anmelden(move |wert| {",
+          "   |                ++++"
+        ]
+      },
+      "optionen": [
+        "Die Closure leiht `name` nur aus, muss aber `'static` sein. Mit `move` übernimmt sie den Besitz",
+        "`name` ist ein `String` und darf in Closures grundsätzlich nicht vorkommen",
+        "Man muss `Box<dyn FnMut>` durch `fn(i32)` ersetzen",
+        "`anmelden` muss `&self` statt `&mut self` nehmen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `move` erfasst die Closure `name` per Referenz. Weil `anmelden` `'static` verlangt, könnte die Closure länger leben als `main`s lokale Variable. Mit `move` wandert `name` in die Closure und lebt so lange wie sie. Der Compiler schlägt die Lösung gleich selbst vor.",
+      "begruendungen": [
+        "Richtig.",
+        "Closures dürfen beliebige Werte erfassen, nur nicht geliehen über `'static` hinaus.",
+        "Ein `fn`-Zeiger kann gar keine Daten erfassen, das Problem wäre nur verschoben.",
+        "Das ändert nichts an der Lebenszeit der erfassten Variablen."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt dieses Programm mit dem `Sensor` von oben aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let mut s = Sensor { beobachter: Vec::new() };",
+          "    let mut alarme = 0;",
+          "    s.anmelden(move |wert| {",
+          "        if wert > 80 {",
+          "            alarme += 1;",
+          "            println!(\"Alarm Nr. {alarme}\");",
+          "        }",
+          "    });",
+          "    s.melden(90);",
+          "    s.melden(95);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`Alarm Nr. 1` und danach `Alarm Nr. 2`",
+        "Zweimal `Alarm Nr. 1`, weil `move` die Variable bei jedem Aufruf neu kopiert",
+        "Compilerfehler, weil `alarme` nach `move` nicht mehr verändert werden darf",
+        "Compilerfehler, weil die Closure `FnMut` und nicht `Fn` ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`move` kopiert `alarme` (ein `i32` ist `Copy`) **einmal** in die Closure. Die Closure besitzt danach ihren eigenen Zähler und verändert ihn bei jedem Aufruf. Darum ist sie `FnMut`, was `anmelden` erlaubt. Das `alarme` in `main` bleibt übrigens 0.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Kopie entsteht beim Erzeugen der Closure, nicht bei jedem Aufruf.",
+        "Die Closure besitzt ihre Kopie und darf sie verändern.",
+        "`anmelden` verlangt `FnMut`, genau das ist diese Closure."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Rückreferenzen mit Weak",
+      "text": "Manchmal muss ein Beobachter sein Subjekt kennen, etwa eine Anzeige ihren Sensor. Halten sich beide gegenseitig mit `Rc`, entsteht ein **Referenzzyklus**: Die Zähler fallen nie auf null, der Speicher wird nie freigegeben.\n\nDie Lösung ist eine klare Richtung: Der Besitzer hält `Rc`, die Rückreferenz ist `Weak`. Ein `Weak` zählt nicht als Besitz. Mit `upgrade()` bekommt man ein `Option<Rc<T>>`, das `None` ist, wenn das Ziel schon freigegeben wurde. Für Threads gilt dasselbe mit `Arc` und `sync::Weak`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Anzeige { quelle: RefCell<Weak<Sensor>> }",
+          "struct Sensor { anzeigen: RefCell<Vec<Rc<Anzeige>>> }",
+          "",
+          "if let Some(sensor) = anzeige.quelle.borrow().upgrade() {",
+          "    // Sensor lebt noch",
+          "}"
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze das Programm so, dass kein Zyklus entsteht und die Ausgabe am Ende `quelle lebt: false` lautet.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let s = Rc::new(Sensor { anzeigen: RefCell::new(Vec::new()) });",
+          "let a = Rc::new(Anzeige { quelle: RefCell::new(Weak::new()) });",
+          "*a.quelle.borrow_mut() = Rc::{{?}}(&s);",
+          "s.anzeigen.borrow_mut().push(Rc::{{?}}(&a));",
+          "drop(s);",
+          "println!(\"quelle lebt: {}\", a.quelle.borrow().{{?}}().is_some());"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["downgrade"] },
+        { "loesungen": ["clone"] },
+        { "loesungen": ["upgrade"] }
+      ],
+      "auswahl": ["downgrade", "clone", "upgrade", "new", "into_inner"],
+      "erklaerung": "`Rc::downgrade` erzeugt die schwache Rückreferenz, `Rc::clone` den starken Verweis vom Sensor auf die Anzeige. Nach `drop(s)` fällt der starke Zähler des Sensors auf null, er wird freigegeben, und `upgrade()` liefert `None`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Oft besser: Kanäle statt Observer",
+      "text": "Ein Observer ruft fremden Code **synchron** im eigenen Kontext auf. Das koppelt stark: Ein langsamer Beobachter bremst den Sensor, und Callbacks, die das Subjekt verändern wollen, kollidieren mit dem Borrow-Checker.\n\nEin **Kanal** (channel) entkoppelt: Der Sensor sendet Nachrichten, Empfänger holen sie ab, wann sie wollen. `std::sync::mpsc` (multi producer, single consumer) gibt es in der Standardbibliothek, `crossbeam-channel` und `tokio::sync::broadcast` bieten mehr. Auf Mikrocontrollern übernehmen `embassy_sync::channel` oder eine `heapless::spsc::Queue` diese Rolle (Phase 7)."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug passt zu welcher Situation?",
+      "paare": [
+        { "links": "`Vec<Box<dyn FnMut(T)>>`", "rechts": "Wenige Callbacks im selben Thread, die kurz und schnell reagieren" },
+        { "links": "`mpsc::channel`", "rechts": "Mehrere Threads melden Ereignisse an einen zentralen Verarbeiter" },
+        { "links": "`Weak<T>`", "rechts": "Beobachter muss sein Subjekt kennen, darf es aber nicht am Leben halten" },
+        { "links": "`broadcast`-Kanal", "rechts": "Jede Nachricht soll mehrere unabhängige Empfänger erreichen" }
+      ],
+      "erklaerung": "In Rust ist der Kanal oft die erste Wahl, weil er Besitz sauber übergibt: Die Nachricht gehört nach dem Senden dem Empfänger. Callbacks lohnen sich, wenn die Reaktion sofort und im selben Kontext passieren muss."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Thread sendet `Meldung`-Werte über `tx`, ein anderer liest mit `for m in rx { … }`. Wann endet die Schleife?",
+      "optionen": [
+        "Sobald alle Sender (`tx` und alle Klone) gedroppt sind und die Warteschlange leer ist",
+        "Nach der ersten Nachricht",
+        "Nie, ein Empfänger blockiert für immer",
+        "Nach einer festen Zeitspanne ohne Nachricht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Iterator über `rx` ruft intern `recv()` auf. Das liefert einen Fehler, sobald kein Sender mehr existiert und keine Nachricht mehr wartet. Damit endet die Schleife. Auch das ist Ownership: Das Ende der Kommunikation ergibt sich daraus, dass die Sender verschwinden.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Schleife liest so lange, wie Nachrichten kommen können.",
+        "Nur, solange noch ein Sender lebt, etwa ein vergessener Klon von `tx`.",
+        "Einen Timeout gibt es nur mit `recv_timeout`."
+      ]
+    }
+  ],
+  "praxis": "In Reviews fallen Observer-Implementierungen auf, die mit `Rc<RefCell<…>>` in beide Richtungen arbeiten. Frag dann: Wer besitzt wen? Meist lässt sich das Problem lösen, indem das Subjekt die Callbacks besitzt, Rückreferenzen `Weak` werden, oder ganz auf einen Kanal umgestellt wird. In Embedded-Firmware mit Embassy ist ein `Channel` zwischen Tasks das übliche Mittel, um Sensorwerte zu verteilen.",
+  "labor": {
+    "titel": "Zyklus sichtbar machen",
+    "anleitung": "Baue `Sensor` und `Anzeige` mit `Rc` in beide Richtungen und implementiere `Drop` für `Sensor` mit einer Ausgabe. Ersetze dann die Rückreferenz durch `Weak` und gib `Rc::strong_count` und `Rc::weak_count` aus.",
+    "befehle": [
+      "cargo new beobachter && cd beobachter",
+      "cargo run"
+    ],
+    "beobachtung": "Mit `Rc` in beide Richtungen erscheint die `Drop`-Ausgabe nie, der Speicher leckt. Mit `Weak` zeigt das Programm `stark=1 schwach=1`, danach `Sensor freigegeben` und `quelle lebt: false`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Beobachter-Muster",
+      "englisch": "observer pattern",
+      "erklaerung": "Ein Subjekt benachrichtigt angemeldete Beobachter über Änderungen."
+    },
+    {
+      "begriff": "Closure",
+      "englisch": "closure",
+      "erklaerung": "Anonyme Funktion, die Variablen aus ihrer Umgebung erfasst, per Referenz oder mit `move` per Wert."
+    },
+    {
+      "begriff": "Schwache Referenz",
+      "englisch": "weak reference",
+      "erklaerung": "`Weak<T>` verweist auf ein `Rc`/`Arc`-Ziel, ohne es am Leben zu halten. `upgrade()` prüft, ob es noch existiert."
+    },
+    {
+      "begriff": "Kanal",
+      "englisch": "channel",
+      "erklaerung": "Warteschlange zwischen Sender und Empfänger, über die Nachrichten samt Besitz übergeben werden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::rc::Weak",
+      "url": "https://doc.rust-lang.org/std/rc/struct.Weak.html"
+    },
+    {
+      "titel": "std::sync::mpsc",
+      "url": "https://doc.rust-lang.org/std/sync/mpsc/index.html"
+    },
+    {
+      "titel": "The Rust Programming Language",
+      "url": "https://doc.rust-lang.org/book/"
+    }
+  ]
+}

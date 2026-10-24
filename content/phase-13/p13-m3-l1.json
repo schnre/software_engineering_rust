@@ -1,0 +1,174 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m3-l1",
+  "phase": 13,
+  "modul": "13.3 Schätzen und Planen",
+  "titel": "Ehrlich schätzen",
+  "lernziele": [
+    "Schätzungen als Bandbreiten mit Drei-Punkt-Schätzung angeben",
+    "Die Lernkurve beim Umstieg auf Rust realistisch einplanen",
+    "Mit Referenzklassen und Zerlegen die Unsicherheit verkleinern"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum liegen Software-Schätzungen meistens zu **niedrig**?",
+      "optionen": [
+        "Man denkt an den glatten Weg und vergisst Tests, Review, Integration und Unbekanntes",
+        "Entwickler arbeiten langsamer, als sie könnten",
+        "Schätzungen liegen zufällig mal zu hoch, mal zu niedrig"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beim Schätzen stellt man sich vor, wie die Aufgabe läuft, wenn alles klappt. Dieser **Planungsfehlschluss** (planning fallacy) ist gut belegt. Die Fehler sind nicht symmetrisch: Eine Aufgabe kann selten viel schneller gehen als gedacht, aber leicht doppelt oder dreimal so lange dauern.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Problem liegt in der Schätzung, nicht im Tempo.",
+        "Die Abweichungen sind deutlich einseitig nach oben."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Besser schätzen",
+      "text": "- **Zerlegen**: Grosse Aufgaben in Teile von höchstens ein bis zwei Tagen. Kleine Teile schätzt man genauer.\n- **Alles einrechnen**: Tests, Review, Nacharbeit, Dokumentation, Integration auf der Zielhardware.\n- **Bandbreiten statt Punktwerte**: „3 bis 6 Tage“ ist ehrlicher als „4 Tage“.\n- **Drei-Punkt-Schätzung**: optimistisch (a), wahrscheinlich (m), pessimistisch (b). Nach PERT ergibt sich der Erwartungswert (a + 4m + b) / 6.\n- **Referenzklasse** (reference class): Wie lange haben ähnliche Aufgaben bei uns *wirklich* gedauert? Das Ticketsystem ist dafür eine Fundgrube."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Für einen neuen I²C-Treiber mit `embedded-hal` schätzt du: optimistisch 3 Tage, wahrscheinlich 5 Tage, pessimistisch 13 Tage. Was ergibt die PERT-Formel?",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "Erwartungswert = (a + 4·m + b) / 6"
+        ]
+      },
+      "optionen": [
+        "6 Tage",
+        "5 Tage",
+        "7 Tage",
+        "13 Tage"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "(3 + 4·5 + 13) / 6 = 36 / 6 = 6 Tage. Der Erwartungswert liegt über dem wahrscheinlichsten Wert, weil die pessimistische Seite viel weiter reicht. Kommuniziert wird trotzdem die Bandbreite: „wahrscheinlich 5 bis 8 Tage, im schlechten Fall bis 13“.",
+      "begruendungen": [
+        "Richtig.",
+        "5 Tage ist der wahrscheinlichste Wert, nicht der Erwartungswert.",
+        "Nachrechnen: (3 + 20 + 13) / 6.",
+        "Das ist der pessimistische Wert."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein erfahrenes C++-Team startet sein erstes Rust-Projekt. Wie planst du die Lernkurve ein?",
+      "optionen": [
+        "Für die ersten Wochen deutlich mehr Zeit pro Aufgabe einplanen, eine einfache, nicht kritische Komponente zuerst angehen und Schulung sowie Pairing mit Rust-Erfahrenen fest vorsehen",
+        "Gar nicht, gute C++-Entwickler sind in Rust sofort gleich produktiv",
+        "Ein halbes Jahr Schulung, bevor die erste Zeile Produktcode entsteht",
+        "Die Schätzungen aus C++ pauschal verdoppeln, für die ganze Projektdauer"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wer aus C++ kommt, kennt die Konzepte hinter Ownership schon, muss aber lernen, sie dem Borrow-Checker zu beweisen, und kennt Cargo, Traits und das Ökosystem noch nicht. Erfahrungsberichte grosser Firmen sprechen von einigen Monaten, bis Teams ähnlich produktiv sind wie vorher. Der Aufschlag sinkt also mit der Zeit, er bleibt nicht konstant.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Borrow-Checker und das Ökosystem kosten am Anfang spürbar Zeit.",
+        "Ohne echte Aufgaben bleibt das Gelernte abstrakt. Lernen am Projekt mit Unterstützung ist wirksamer.",
+        "Die Lernkurve flacht ab, ein fester Faktor würde spätere Phasen überschätzen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Begriffe zu.",
+      "paare": [
+        { "links": "Referenzklasse", "rechts": "Tatsächliche Dauer ähnlicher, abgeschlossener Aufgaben als Grundlage" },
+        { "links": "Drei-Punkt-Schätzung", "rechts": "Optimistischer, wahrscheinlicher und pessimistischer Wert" },
+        { "links": "Zerlegen", "rechts": "Aufgabe in Teile von höchstens ein bis zwei Tagen aufteilen" },
+        { "links": "Spike", "rechts": "Zeitlich begrenzte Untersuchung, um eine Unbekannte zu klären" }
+      ],
+      "erklaerung": "Die Referenzklasse wirkt gegen den Planungsfehlschluss, weil sie nicht von der eigenen Vorstellung ausgeht, sondern von Daten. Für das erste Rust-Projekt fehlt die eigene Referenzklasse noch. Deshalb lohnt es sich, ab dem ersten Tag Schätzung und tatsächliche Dauer festzuhalten."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Du sollst schätzen, wie lange die Portierung eines CAN-Protokollstacks von C nach Rust dauert. Bringe die Schritte in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Den Umfang klären: Was gehört dazu, was ausdrücklich nicht?",
+        "In Teilaufgaben von höchstens zwei Tagen zerlegen",
+        "Für die grösste Unbekannte einen kurzen Spike machen",
+        "Jede Teilaufgabe mit drei Punkten schätzen und mit früheren Aufgaben vergleichen",
+        "Als Bandbreite mit den wichtigsten Annahmen und Risiken kommunizieren"
+      ],
+      "erklaerung": "Die grösste Unbekannte könnte hier sein, ob es für euren CAN-Controller schon ein brauchbares HAL-Crate gibt. Ein halber Tag Recherche und ein kleiner Test auf dem Board können die Schätzung um Wochen verändern. Die Annahmen gehören zur Schätzung dazu: Ändert sich eine, ändert sich die Zahl."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Die Projektleitung fragt: „Wie lange dauert die Rust-Portierung des Bootloaders?“ Die Anforderungen sind noch unklar. Was antwortest du?",
+      "optionen": [
+        "„Grob 4 bis 10 Wochen. Die grösste Unsicherheit ist die Update-Verschlüsselung. Nach einem Spike von drei Tagen kann ich die Bandbreite deutlich verkleinern.“",
+        "„6 Wochen.“",
+        "„Das kann man nicht schätzen.“",
+        "„Sag mir, wann es fertig sein muss, dann schaffen wir es.“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine gute Antwort ist ehrlich über die Unsicherheit, nennt deren Ursache und zeigt, wie man sie verkleinert. Die Bandbreite gibt der Projektleitung trotzdem etwas zum Planen. Eine Punktschätzung bei unklaren Anforderungen wird fast sicher als Zusage verstanden und dann verfehlt.",
+      "begruendungen": [
+        "Richtig.",
+        "Klingt präzise, ist es aber nicht, und wird als Zusage gehört.",
+        "Die Projektleitung muss planen. Eine grobe Bandbreite mit Begründung hilft ihr mehr als gar nichts.",
+        "Das verwechselt Schätzung mit Ziel. Es führt zu Abstrichen an Qualität und Tests."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Fachbegriffe.",
+      "text": "Die Neigung, den eigenen Aufwand systematisch zu unterschätzen, heisst {{?}}. Dagegen hilft die {{?}}: der Blick auf die tatsächliche Dauer ähnlicher Aufgaben.",
+      "luecken": [
+        { "loesungen": ["Planungsfehlschluss"] },
+        { "loesungen": ["Referenzklasse"] }
+      ],
+      "auswahl": ["Planungsfehlschluss", "Referenzklasse", "Lernkurve", "Monomorphisierung", "Punktschätzung"],
+      "erklaerung": "Der Planungsfehlschluss wurde von Daniel Kahneman und Amos Tversky beschrieben. Selbst wer davon weiss, unterschätzt weiter, solange er nur von seiner Vorstellung ausgeht. Erst der Blick von aussen auf echte Daten korrigiert ihn."
+    }
+  ],
+  "praxis": "Schätzungen sind Kommunikation über Unsicherheit, keine Versprechen. Als Senior gibst du Bandbreiten statt Punkten, nennst die Annahmen und schlägst Spikes vor, wenn die Unsicherheit zu gross ist. Beim Einstieg in Rust planst du die Lernkurve offen ein und sammelst ab dem ersten Tag eigene Daten, damit das Team beim nächsten Projekt eine echte Referenzklasse hat.",
+  "labor": {
+    "titel": "Die eigene Referenzklasse",
+    "anleitung": "Suche in eurem Git-Verlauf zwei bis drei abgeschlossene, ähnliche Aufgaben, z. B. neue Treiber. Bestimme, wie lange sie vom ersten bis zum letzten Commit gedauert haben, und vergleiche mit der ursprünglichen Schätzung im Ticket.",
+    "befehle": [
+      "git log --oneline --reverse -- src/treiber/i2c_sensor.rs | head -1",
+      "git log --oneline -- src/treiber/i2c_sensor.rs | head -1",
+      "git log --format='%ad %s' --date=short -- src/treiber/i2c_sensor.rs | tail -1"
+    ],
+    "beobachtung": "Die tatsächliche Dauer liegt fast immer über der Schätzung, oft um einen ähnlichen Faktor. Dieser Faktor ist deine persönliche Korrektur. Halte ihn fest und vergleiche nach dem ersten Rust-Projekt erneut."
+  },
+  "begriffe": [
+    {
+      "begriff": "Drei-Punkt-Schätzung",
+      "englisch": "three-point estimation",
+      "erklaerung": "Schätzung mit optimistischem, wahrscheinlichem und pessimistischem Wert. Nach PERT: (a + 4m + b) / 6."
+    },
+    {
+      "begriff": "Referenzklasse",
+      "englisch": "reference class forecasting",
+      "erklaerung": "Schätzung anhand der tatsächlichen Dauer vergleichbarer, abgeschlossener Vorhaben."
+    },
+    {
+      "begriff": "Planungsfehlschluss",
+      "englisch": "planning fallacy",
+      "erklaerung": "Die gut belegte Neigung, den Aufwand eigener Vorhaben zu unterschätzen."
+    },
+    {
+      "begriff": "Lernkurve",
+      "englisch": "learning curve",
+      "erklaerung": "Wie schnell die Produktivität beim Lernen einer neuen Sprache oder Technik steigt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Wikipedia: Three-point estimation",
+      "url": "https://en.wikipedia.org/wiki/Three-point_estimation"
+    },
+    {
+      "titel": "Wikipedia: Reference class forecasting",
+      "url": "https://en.wikipedia.org/wiki/Reference_class_forecasting"
+    }
+  ]
+}

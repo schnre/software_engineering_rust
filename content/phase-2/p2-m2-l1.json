@@ -1,0 +1,268 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m2-l1",
+  "phase": 2,
+  "modul": "2.2 Ownership und Borrowing",
+  "titel": "Die Ownership-Regeln",
+  "lernziele": [
+    "Die drei Ownership-Regeln nennen und an Beispielen anwenden",
+    "Erkennen, wann eine Zuweisung oder ein Funktionsaufruf einen Wert verschiebt",
+    "Die Fehlermeldung E0382 lesen und passend auflösen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim Kompilieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let s = String::from(\"Sensor\");",
+          "    let t = s;",
+          "    println!(\"{s}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Compilerfehler E0382: `s` wurde nach `t` verschoben und ist nicht mehr benutzbar",
+        "Es gibt `Sensor` aus, weil `t` eine Kopie ist",
+        "Es gibt einen leeren String aus, weil `s` geleert wurde",
+        "Laufzeitfehler (Panic) beim Zugriff auf `s`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`let t = s;` **verschiebt** (move) den `String`: Der Besitz des Heap-Puffers geht an `t` über, `s` gilt ab sofort als nicht initialisiert. Der Compiler verbietet jeden weiteren Zugriff schon beim Übersetzen. Zur Laufzeit gibt es dafür keinerlei Prüfung und keine Kosten.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Kopie gibt es nur mit `s.clone()` oder bei `Copy`-Typen wie `u32`.",
+        "So verhält sich ein verschobener `std::string` in C++. In Rust ist `s` gar nicht mehr zugreifbar.",
+        "Die Prüfung passiert vollständig zur Compilezeit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Drei Regeln",
+      "text": "Rust verwaltet Speicher ohne Garbage Collector und ohne manuelles `free`, mit drei Regeln:\n\n1. Jeder Wert hat genau einen **Besitzer** (owner), eine Variable oder ein Feld.\n2. Es gibt zu jedem Zeitpunkt nur einen Besitzer. Zuweisung, Parameterübergabe und Rückgabe **verschieben** den Besitz.\n3. Endet der Gültigkeitsbereich (scope) des Besitzers, wird der Wert **gedroppt**: Rust ruft den Destruktor auf und gibt Heap-Speicher frei.\n\nDie Prüfung übernimmt der **Borrow Checker** im Compiler. Für Typen wie `u32`, die nur aus Bits bestehen, gibt es eine Ausnahme: Sie sind `Copy` (Modul 2.3)."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was ist in Zeile 5 passiert?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "fn sende(daten: Vec<u8>) { /* … */ }",
+          "fn main() {",
+          "    let paket = vec![0xAA, 0x55];",
+          "    for _ in 0..3 {",
+          "        sende(paket);",
+          "    }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0382]: use of moved value: `paket`",
+          " --> src/main.rs:5:15",
+          "  |",
+          "3 |     let paket = vec![0xAA, 0x55];",
+          "  |         ----- move occurs because `paket` has type `Vec<u8>`, which does not implement the `Copy` trait",
+          "4 |     for _ in 0..3 {",
+          "  |     ------------- inside of this loop",
+          "5 |         sende(paket);",
+          "  |               ^^^^^ value moved here, in previous iteration of loop",
+          "  |",
+          "note: consider changing this parameter type in function `sende` to borrow instead if owning the value isn't necessary",
+          " --> src/main.rs:1:17",
+          "  |",
+          "1 | fn sende(daten: Vec<u8>) { /* … */ }",
+          "  |    -----        ^^^^^^^ this parameter takes ownership of the value",
+          "help: consider cloning the value if the performance cost is acceptable",
+          "  |",
+          "5 |         sende(paket.clone());",
+          "  |                    ++++++++"
+        ]
+      },
+      "optionen": [
+        "Im ersten Durchlauf geht `paket` an `sende` über, im zweiten gibt es nichts mehr zu übergeben",
+        "Die Schleife darf grundsätzlich keine Vektoren enthalten",
+        "`sende` gibt den Vektor frei, bevor die Schleife ihn erneut liest, das wäre ein Use-after-free zur Laufzeit",
+        "`Vec<u8>` braucht eine explizite Lebenszeit-Annotation"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Parameter vom Typ `Vec<u8>` **übernimmt den Besitz**. Nach dem ersten Aufruf gehört der Vektor `sende`, die Funktion droppt ihn an ihrem Ende. rustc schlägt zwei Lösungen vor, und die erste ist meist die bessere: `fn sende(daten: &[u8])` leiht die Daten nur aus. `clone()` würde bei jedem Durchlauf neuen Heap-Speicher anfordern.",
+      "begruendungen": [
+        "Richtig: „value moved here, in previous iteration of loop“.",
+        "Vektoren in Schleifen sind normal. Das Problem ist das Verschieben.",
+        "Genau dieses Szenario verhindert Rust, bevor das Programm überhaupt entsteht.",
+        "Lebenszeiten betreffen Referenzen, nicht besitzende Typen wie `Vec`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche dieser Zeilen verschieben den Wert von `name: String`?",
+      "optionen": [
+        "`let kopie = name;`",
+        "`registriere(name);` mit `fn registriere(n: String)`",
+        "`laenge(&name);` mit `fn laenge(n: &str) -> usize`",
+        "`println!(\"{name}\");`"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "Ein Wert wird verschoben, wenn er **als Wert** an eine neue Stelle geht: Zuweisung, Parameter vom Typ `String`, Rückgabe, Einfügen in einen Container. `&name` erzeugt dagegen nur eine Referenz, das Ausleihen (borrowing) ist Thema der nächsten Lektion. `println!` nimmt seine Argumente intern immer per Referenz.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Die Funktion besitzt den String danach.",
+        "`&name` leiht nur aus. `name` bleibt danach benutzbar.",
+        "Formatierungsmakros leihen die Argumente aus und verschieben nichts."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Besitz zurückgeben",
+      "text": "Eine Funktion kann den Besitz auch wieder zurückgeben. Das ist idiomatisch für Konstruktoren und Builder, für reines Lesen aber umständlich. Die Signatur sagt sofort, was mit einem Wert passiert:",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn neu() -> String { String::from(\"ok\") }",
+          "fn verbrauche(s: String) { /* droppt s */ }",
+          "fn bearbeite(mut s: String) -> String { s.push('!'); s }",
+          "fn lies(s: &str) -> usize { s.len() }",
+          "fn aendere(s: &mut String) { s.push('!'); }"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "Gibt Besitz an den Aufrufer, kein Kopieren des Heap-Puffers."
+          },
+          {
+            "zeile": 2,
+            "text": "Übernimmt Besitz. Am Ende der Funktion wird `s` freigegeben."
+          },
+          {
+            "zeile": 3,
+            "text": "Nimmt und gibt zurück: `let s = bearbeite(s);`"
+          },
+          {
+            "zeile": 4,
+            "text": "Leiht nur aus, der Aufrufer behält den Besitz."
+          },
+          {
+            "zeile": 5,
+            "text": "Leiht veränderbar aus (nächste Lektion)."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile meldet rustc als Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn speichere(log: Vec<String>) {",
+          "    println!(\"{} Einträge\", log.len());",
+          "}",
+          "",
+          "fn main() {",
+          "    let mut log = Vec::new();",
+          "    log.push(String::from(\"Start\"));",
+          "    speichere(log);",
+          "    log.push(String::from(\"Ende\"));",
+          "}"
+        ]
+      },
+      "fehlerZeile": 9,
+      "erklaerung": "rustc meldet `error[E0382]: borrow of moved value: log` an Zeile 9 und markiert Zeile 8 als „value moved here“. Die Ursache ist die Signatur in Zeile 1: `speichere` will den Vektor besitzen, obwohl sie ihn nur liest. Mit `fn speichere(log: &[String])` und `speichere(&log);` kompiliert alles.",
+      "hinweis": "Gefragt ist die Zeile, an der der Fehler gemeldet wird, nicht die Ursache."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "`main` enthält `let a = baue(); let b = a; println!(\"{:?}\", b);`, und `baue()` gibt `vec![1, 2, 3]` zurück. Bringe die Ereignisse in die richtige Reihenfolge.",
+      "elemente": [
+        "`baue` fordert Heap-Speicher an und gibt den Besitz zurück",
+        "`a` wird Besitzer des Vektors",
+        "Der Besitz geht von `a` an `b` über",
+        "`println!` leiht `b` aus",
+        "Am Ende von `main` wird `b` gedroppt und der Heap-Speicher freigegeben"
+      ],
+      "erklaerung": "Für `a` erzeugt der Compiler am Ende keinen Drop, weil der Wert verschoben wurde. Genau ein Besitzer, genau eine Freigabe: So vermeidet Rust doppeltes `free` (double free) ohne Laufzeitkosten."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Regeln.",
+      "text": "Jeder Wert hat genau einen {{?}}. Eine Zuweisung `let b = a;` mit einem `String` {{?}} den Wert. Verlässt der Besitzer seinen Scope, wird der Wert {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "Besitzer"
+          ]
+        },
+        {
+          "loesungen": [
+            "verschiebt"
+          ]
+        },
+        {
+          "loesungen": [
+            "gedroppt"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Besitzer",
+        "verschiebt",
+        "gedroppt",
+        "kopiert",
+        "Referenzzähler"
+      ],
+      "erklaerung": "„Kopiert“ wäre nur bei `Copy`-Typen richtig. Einen Referenzzähler gibt es erst, wenn man ihn ausdrücklich mit `Rc` oder `Arc` anfordert."
+    }
+  ],
+  "praxis": "Die häufigste E0382-Ursache im Alltag ist eine zu gierige Signatur: Eine Funktion nimmt `String` oder `Vec<T>`, obwohl `&str` oder `&[T]` genügen würde. Bevor du `.clone()` einfügst, wie es der Compiler anbietet, frage: Braucht die Funktion den Wert wirklich für sich, etwa um ihn in einem Struct zu speichern? Wenn nicht, ändere die Signatur.",
+  "labor": {
+    "titel": "E0382 provozieren und erklären lassen",
+    "anleitung": "Baue das Schleifenbeispiel nach und lies die Ausgabe von `cargo build` vollständig. Lass dir die ausführliche Erklärung des Fehlercodes anzeigen. Behebe den Fehler danach einmal mit `clone()` und einmal mit einer geliehenen Signatur.",
+    "befehle": [
+      "cargo new besitz && cd besitz",
+      "cargo build",
+      "rustc --explain E0382"
+    ],
+    "beobachtung": "`rustc --explain` zeigt ein Beispiel und typische Lösungen. Die Variante mit `&[u8]` kommt ohne zusätzliche Allokation aus, die `clone()`-Variante fordert pro Durchlauf neuen Heap-Speicher an."
+  },
+  "begriffe": [
+    {
+      "begriff": "Besitz",
+      "englisch": "ownership",
+      "erklaerung": "Verantwortung für einen Wert und seine Freigabe. Jeder Wert hat genau einen Besitzer."
+    },
+    {
+      "begriff": "Verschieben",
+      "englisch": "move",
+      "erklaerung": "Übergabe des Besitzes an eine andere Variable oder Funktion. Die alte Variable ist danach unbenutzbar."
+    },
+    {
+      "begriff": "Droppen",
+      "englisch": "drop",
+      "erklaerung": "Zerstören eines Werts am Ende des Scopes seines Besitzers, inklusive Freigabe seiner Ressourcen."
+    },
+    {
+      "begriff": "Borrow Checker",
+      "englisch": "borrow checker",
+      "erklaerung": "Teil des Compilers, der Ownership-, Borrowing- und Lebenszeitregeln prüft."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: What Is Ownership?",
+      "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"
+    },
+    {
+      "titel": "Rust Compiler Error Index: E0382",
+      "url": "https://doc.rust-lang.org/error_codes/E0382.html"
+    }
+  ]
+}

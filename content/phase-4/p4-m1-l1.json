@@ -1,0 +1,309 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m1-l1",
+  "phase": 4,
+  "modul": "4.1 Unit-Tests mit cargo test",
+  "titel": "Der erste Test mit cargo test",
+  "lernziele": [
+    "Unit-Tests mit `#[test]` in einem `#[cfg(test)]`-Modul schreiben",
+    "`assert!`, `assert_eq!`, `#[should_panic]` und Tests mit `Result` gezielt einsetzen",
+    "Die Ausgabe von `cargo test` lesen und Tests filtern"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "wo-unit-tests",
+      "frage": "Wo schreibt man in Rust üblicherweise die Unit-Tests für die Funktionen in `src/lib.rs`?",
+      "optionen": [
+        "In derselben Datei, in einem Modul `mod tests` mit `#[cfg(test)]`",
+        "In einem separaten Testprojekt, das die Bibliothek als Abhängigkeit einbindet",
+        "In einer Datei `src/lib_test.rs`, die Cargo anhand des Namens automatisch findet",
+        "In `main.rs`, weil nur ein Binary Tests ausführen kann"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust bringt das Test-Framework gleich mit. Unit-Tests stehen direkt neben dem Code, den sie prüfen. Weil das Testmodul ein Kindmodul ist, sieht es mit `use super::*;` auch private Funktionen. `#[cfg(test)]` sorgt dafür, dass der Testcode nur bei `cargo test` kompiliert wird und nicht im ausgelieferten Binary landet.",
+      "begruendungen": [
+        "Richtig. Das ist die Konvention aus dem Rust-Buch.",
+        "So arbeitet man in C++ oft mit GoogleTest. In Rust braucht es kein separates Projekt.",
+        "Eine solche Namenskonvention gibt es in Cargo nicht. Separate Testdateien gehören nach `tests/` und sind Integrationstests.",
+        "Auch Bibliotheken haben Tests. `cargo test` baut dafür ein eigenes Test-Binary."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau eines Testmoduls",
+      "text": "Ein Test ist eine gewöhnliche Funktion mit dem Attribut `#[test]`. Sie gilt als bestanden, wenn sie ohne **Panic** (Programmabbruch durch einen nicht behandelten Fehler) zurückkehrt. Die Makros `assert!`, `assert_eq!` und `assert_ne!` lösen bei einer verletzten Bedingung einen Panic aus und zeigen dabei die beiden Werte an.\n\n`cargo test` baut ein eigenes **Test-Binary** (test harness): Es sammelt alle `#[test]`-Funktionen und führt sie standardmässig parallel in mehreren Threads aus.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub fn teile(a: i32, b: i32) -> i32 {",
+          "    if b == 0 {",
+          "        panic!(\"Division durch null\");",
+          "    }",
+          "    a / b",
+          "}",
+          "",
+          "#[cfg(test)]",
+          "mod tests {",
+          "    use super::*;",
+          "",
+          "    #[test]",
+          "    fn teilt_ganzzahlig() {",
+          "        assert_eq!(teile(7, 2), 3);",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 8, "text": "Das Modul existiert nur im Test-Build." },
+          { "zeile": 10, "text": "Holt alles aus dem Elternmodul, auch private Funktionen." },
+          { "zeile": 14, "text": "Bei Abweichung: Panic mit `left` und `right`." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "left-right",
+      "frage": "Jemand hat den Test auf `assert_eq!(teile(7, 2), 4)` geändert. Was sagt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo test",
+        "ausgabe": [
+          "running 4 tests",
+          "test tests::port_lesen ... ok",
+          "test tests::null_panikt - should panic ... ok",
+          "test tests::teilt_ganzzahlig ... FAILED",
+          "test tests::teilt_gerade ... ok",
+          "",
+          "failures:",
+          "",
+          "---- tests::teilt_ganzzahlig stdout ----",
+          "",
+          "thread 'tests::teilt_ganzzahlig' (1133) panicked at src/lib.rs:18:9:",
+          "assertion `left == right` failed",
+          "  left: 3",
+          " right: 4",
+          "",
+          "failures:",
+          "    tests::teilt_ganzzahlig",
+          "",
+          "test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ]
+      },
+      "optionen": [
+        "`teile(7, 2)` lieferte 3 (`left`), erwartet war 4 (`right`). Zu klären ist, ob Code oder Erwartung falsch ist",
+        "`teile` hat einen Panic ausgelöst, weil durch null geteilt wurde",
+        "Der Test ist abgestürzt, deshalb wurden die anderen drei nicht ausgeführt",
+        "`left` ist der erwartete Wert, `right` das Ergebnis von `teile`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`assert_eq!(a, b)` nennt das erste Argument `left` und das zweite `right`. Rust schreibt nicht vor, welche Seite der erwartete Wert ist. Üblich ist `assert_eq!(tatsaechlich, erwartet)`. Ein Panic in einem Test beendet nur diesen Test, die anderen laufen weiter. Ganzzahlige Division schneidet in Rust wie in C ab, also ist 3 richtig und die Erwartung falsch.",
+      "begruendungen": [
+        "Richtig. Ein roter Test heisst nicht automatisch, dass der Code falsch ist.",
+        "Dann stünde dort `Division durch null` als Panic-Meldung.",
+        "Jeder Test läuft in einem eigenen Thread. Die drei anderen sind `ok`.",
+        "Umgekehrt: `left` ist das erste Argument, hier also `teile(7, 2)`."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "attribute",
+      "frage": "Ergänze die Attribute: Das Modul soll nur im Test-Build existieren, und der zweite Test erwartet einen Panic mit einer bestimmten Meldung.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[{{?}}]",
+          "mod tests {",
+          "    use super::*;",
+          "",
+          "    #[test]",
+          "    #[{{?}}(expected = \"Division durch null\")]",
+          "    fn null_panikt() {",
+          "        teile(1, 0);",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["cfg(test)"] },
+        { "loesungen": ["should_panic"] }
+      ],
+      "auswahl": ["cfg(test)", "should_panic", "test", "ignore", "cfg(debug_assertions)"],
+      "erklaerung": "`#[cfg(test)]` ist bedingte Kompilierung: Nur wenn rustc mit `--test` aufgerufen wird, ist `test` gesetzt. `#[should_panic]` dreht die Logik um: Der Test besteht nur, wenn ein Panic kommt. Mit `expected` muss die Panic-Meldung den Text als Teilzeichenkette enthalten. Ohne `expected` würde auch ein ganz anderer Panic den Test grün machen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "should-panic-text",
+      "frage": "Der Test hat `#[should_panic(expected = \"durch Null\")]`. Warum schlägt er fehl?",
+      "terminal": {
+        "befehl": "cargo test null_panikt",
+        "ausgabe": [
+          "---- null_panikt stdout ----",
+          "",
+          "thread 'null_panikt' (20860) panicked at src/lib.rs:3:9:",
+          "Division durch null",
+          "note: panic did not contain expected string",
+          "      panic message: \"Division durch null\"",
+          " expected substring: \"durch Null\""
+        ]
+      },
+      "optionen": [
+        "Der Vergleich unterscheidet Gross- und Kleinschreibung: „Null“ steht nicht in der Meldung",
+        "`teile(1, 0)` hat gar keinen Panic ausgelöst",
+        "`expected` muss die vollständige Meldung enthalten, nicht nur einen Teil"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Es gab einen Panic, aber mit einer anderen Meldung als erwartet. `expected` prüft auf eine Teilzeichenkette und unterscheidet Gross- und Kleinschreibung. Kommt gar kein Panic, meldet das Test-Binary stattdessen `note: test did not panic as expected`.",
+      "begruendungen": [
+        "Richtig.",
+        "Doch, die Zeile `panicked at …` zeigt den Panic.",
+        "Ein Teil genügt. „durch null“ hätte gepasst."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "float-vergleich",
+      "frage": "Besteht dieser Test?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[test]",
+          "fn summe() {",
+          "    assert_eq!(0.1 + 0.2, 0.3);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nein, er schlägt mit `left: 0.30000000000000004` fehl",
+        "Ja, die Summe ist genau 0.3",
+        "Compilerfehler: `f64` implementiert `PartialEq` nicht"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "0.1 und 0.2 sind binär nicht exakt darstellbar. `assert_eq!` vergleicht mit `==`, also bitgenau. Für Gleitkommazahlen prüft man mit einer fachlich begründeten Toleranz, z. B. `assert!((a - b).abs() < 1e-9)`, oder nimmt eine Hilfs-Crate wie `approx`.",
+      "begruendungen": [
+        "Richtig.",
+        "Mathematisch ja, als `f64` nicht.",
+        "`f64` implementiert `PartialEq`, nur nicht `Eq`. `assert_eq!` braucht `PartialEq` und `Debug`."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "test-result",
+      "frage": "Ein Test darf auch `Result` zurückgeben. Was passiert hier?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[test]",
+          "fn port_lesen() -> Result<(), std::num::ParseIntError> {",
+          "    let port: u16 = \"abc\".parse()?;",
+          "    assert_eq!(port, 8080);",
+          "    Ok(())",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Der Test schlägt fehl, `?` gibt den `Err` zurück, und die Ausgabe zeigt `Error: ParseIntError { … }`",
+        "Der Test besteht, weil der Fehler mit `?` sauber behandelt wurde",
+        "Compilerfehler: Testfunktionen müssen `()` zurückgeben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Gibt ein Test `Err` zurück, gilt er als fehlgeschlagen, und das Test-Binary druckt den Fehler mit `Debug`. Das ist praktisch, weil man im Test `?` statt `unwrap()` schreiben kann. Ein Nachteil: Die Meldung zeigt keine Zeilennummer. Wo es auf die Stelle ankommt, ist `.expect(\"…\")` oft aussagekräftiger.",
+      "begruendungen": [
+        "Richtig.",
+        "`?` behandelt den Fehler nicht, es reicht ihn nach oben weiter. Für den Test heisst das: fehlgeschlagen.",
+        "Seit Rust 2018 dürfen Tests jeden Typ zurückgeben, der `Termination` implementiert, also auch `Result<(), E: Debug>`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "cargo test steuern",
+      "text": "Argumente vor `--` gehen an Cargo, Argumente danach an das Test-Binary. Filter sind Teilzeichenketten des Testnamens inklusive Modulpfad.",
+      "tabelle": {
+        "kopf": ["Befehl", "Wirkung"],
+        "zeilen": [
+          ["`cargo test teilt`", "Nur Tests, deren Name `teilt` enthält"],
+          ["`cargo test -- --exact tests::teilt_gerade`", "Genau dieser eine Test"],
+          ["`cargo test -- --nocapture`", "`println!` sofort zeigen, auch bei bestandenen Tests"],
+          ["`cargo test -- --show-output`", "Ausgabe bestandener Tests am Ende anzeigen"],
+          ["`cargo test -- --test-threads=1`", "Tests nacheinander statt parallel"],
+          ["`cargo test -- --list`", "Nur auflisten, nicht ausführen"]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "filter",
+      "frage": "Was bedeutet `1 filtered out`?",
+      "terminal": {
+        "befehl": "cargo test teilt",
+        "ausgabe": [
+          "     Running unittests src/lib.rs (target/debug/deps/rechner-1e2cdc407df3fba9)",
+          "",
+          "running 2 tests",
+          "test tests::teilt_ganzzahlig ... ok",
+          "test tests::teilt_gerade ... ok",
+          "",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s"
+        ]
+      },
+      "optionen": [
+        "Ein Test passte nicht auf den Filter `teilt` und wurde nicht ausgeführt",
+        "Ein Test ist fehlgeschlagen, wurde aber ausgeblendet",
+        "Ein Test war mit `#[ignore]` markiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Filter wirkt auf den vollständigen Namen wie `tests::teilt_gerade`. Der dritte Test `tests::rundet_ab` enthält „teilt“ nicht. Ignorierte Tests zählen in der Spalte `ignored`. Achtung: Ein Filter, der nichts trifft, liefert `0 passed` und trotzdem `ok`. Ein Tippfehler im Filter sieht also aus wie ein grüner Lauf.",
+      "begruendungen": [
+        "Richtig.",
+        "Fehlgeschlagene Tests werden nie ausgeblendet, sie stehen unter `failures`.",
+        "Dafür gibt es die eigene Spalte `ignored`."
+      ]
+    }
+  ],
+  "praxis": "In der CI liest du vor allem die Zeilen `panicked at Datei:Zeile` und `left`/`right`. Lokal arbeitest du mit Filtern: `cargo test parser` während du am Parser sitzt, danach der volle Lauf. Im Review achtest du darauf, dass Testnamen das erwartete Verhalten beschreiben, `#[should_panic]` immer ein `expected` hat und Gleitkommazahlen nicht mit `assert_eq!` verglichen werden.",
+  "labor": {
+    "titel": "Ein erstes Testmodul",
+    "anleitung": "Lege eine Bibliothek an, übernimm `teile` mit dem Testmodul aus der Lektion und probiere Filter und Ausgabeoptionen aus. Baue absichtlich einen falschen Erwartungswert ein.",
+    "befehle": [
+      "cargo new --lib rechner && cd rechner",
+      "cargo test",
+      "cargo test teilt -- --nocapture",
+      "cargo test -- --list",
+      "cargo test -- --test-threads=1"
+    ],
+    "beobachtung": "Ohne `--nocapture` siehst du `println!`-Ausgaben nur bei fehlgeschlagenen Tests. Die Testreihenfolge in der Ausgabe wechselt zwischen Läufen, weil die Tests parallel laufen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Testmodul",
+      "englisch": "test module",
+      "erklaerung": "Kindmodul `mod tests` mit `#[cfg(test)]`, das die Unit-Tests einer Datei enthält und auch private Funktionen sieht."
+    },
+    {
+      "begriff": "Test-Binary",
+      "englisch": "test harness",
+      "erklaerung": "Von `cargo test` erzeugtes Programm, das alle `#[test]`-Funktionen sammelt, parallel ausführt und das Ergebnis meldet."
+    },
+    {
+      "begriff": "Panic",
+      "englisch": "panic",
+      "erklaerung": "Abbruch des aktuellen Threads wegen eines nicht behandelten Fehlers. In einem Test bedeutet ein Panic „fehlgeschlagen“."
+    },
+    {
+      "begriff": "Bedingte Kompilierung",
+      "englisch": "conditional compilation",
+      "erklaerung": "Code, der nur unter bestimmten Bedingungen kompiliert wird, z. B. mit `#[cfg(test)]` nur im Test-Build."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Writing Automated Tests",
+      "url": "https://doc.rust-lang.org/book/ch11-00-testing.html"
+    },
+    {
+      "titel": "The Cargo Book: cargo test",
+      "url": "https://doc.rust-lang.org/cargo/commands/cargo-test.html"
+    }
+  ]
+}

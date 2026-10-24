@@ -1,0 +1,164 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m5-l1",
+  "phase": 11,
+  "modul": "11.5 Automotive und Robotik",
+  "titel": "AUTOSAR und Rust im Fahrzeug",
+  "lernziele": [
+    "AUTOSAR Classic und Adaptive mit ihren Schichten und Kommunikationsformen unterscheiden",
+    "Einordnen, an welchen Stellen Rust heute in Fahrzeugsoftware passt",
+    "Den öffentlich bekannten Stand von Rust in der Automobilindustrie vorsichtig bewerten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Wozu dient **AUTOSAR**?",
+      "optionen": [
+        "Ein Standard der Automobilindustrie für die Software-Architektur von Steuergeräten, damit Software zwischen Herstellern, Zulieferern und Hardware wiederverwendbar ist",
+        "Eine Programmiersprache für Fahrzeuge",
+        "Das Betriebssystem eines einzelnen Herstellers",
+        "Ein Rust-Framework für Mikrocontroller"
+      ],
+      "korrekt": 0,
+      "erklaerung": "AUTOSAR (*AUTomotive Open System ARchitecture*) legt Schichten, Schnittstellen und eine Methodik fest. **Classic** ist für Steuergeräte (ECUs) auf Mikrocontrollern mit harter Echtzeit gedacht, statisch konfiguriert, in der Praxis meist in C. **Adaptive** ist für leistungsfähige Rechner mit POSIX-Betriebssystem gedacht, serviceorientiert, mit einer C++-Schnittstelle (*ara::com*).",
+      "begruendungen": [
+        "Richtig.",
+        "AUTOSAR ist sprachunabhängig spezifiziert, Implementierungen sind meist C oder C++.",
+        "Es ist ein offener Standard mit Implementierungen mehrerer Anbieter.",
+        "AUTOSAR ist älter als Rust und nicht an eine Sprache gebunden."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Schichten von AUTOSAR Classic von oben nach unten in die richtige Reihenfolge.",
+      "elemente": [
+        "Application Layer: Software-Komponenten (SWCs) mit der Funktionslogik",
+        "RTE (Runtime Environment): generierte Verbindungsschicht",
+        "Basic Software: Kommunikation, Speicher, Diagnose, Betriebssystem",
+        "Microcontroller Abstraction Layer (MCAL) mit Peripherietreibern",
+        "Mikrocontroller-Hardware"
+      ],
+      "erklaerung": "Eine konsequente Schichtenarchitektur wie bei embedded-hal (Phase 10). SWCs lesen und schreiben Signale über Ports und wissen nicht, ob ein Signal lokal, über CAN oder Ethernet ankommt. RTE und Basic Software werden aus ARXML-Konfiguration generiert."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Classic oder Adaptive? Ordne zu.",
+      "paare": [
+        { "links": "Signale über Sender-Receiver-Ports, aus ARXML generierte RTE", "rechts": "AUTOSAR Classic" },
+        { "links": "Services, die zur Laufzeit gefunden und abonniert werden", "rechts": "AUTOSAR Adaptive" },
+        { "links": "SOME/IP", "rechts": "Serviceorientiertes Protokoll über Ethernet mit Service Discovery" },
+        { "links": "OSEK-basiertes, statisch konfiguriertes Betriebssystem", "rechts": "Echtzeit-Tasks mit festen Prioritäten im Steuergerät" }
+      ],
+      "erklaerung": "**SOME/IP** (*Scalable service-Oriented MiddlewarE over IP*) überträgt Methodenaufrufe, Events und Felder zwischen Services. Es wird von Adaptive genutzt, kann aber auch Classic-Steuergeräte an Ethernet anbinden. Für Rust gibt es Crates zum Parsen und Senden (z. B. `someip_parse`), aber keinen Standard-Stack, den AUTOSAR vorgibt."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wo lässt sich Rust in einer bestehenden AUTOSAR-Classic-Software am natürlichsten einsetzen?",
+      "optionen": [
+        "Als Implementierung einzelner SWCs oder Bibliotheken hinter einer C-Schnittstelle: Die RTE ruft `extern \"C\"`-Runnables auf, die in Rust geschrieben sind",
+        "Indem man die gesamte Basic Software in Rust neu schreibt, bevor man anfängt",
+        "Gar nicht, weil AUTOSAR Rust verbietet",
+        "Nur im Infotainment, nie in Steuergeräten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Weil RTE und Basic Software C-Schnittstellen haben, kann eine SWC über FFI in Rust implementiert werden, typischerweise als `no_std`-Bibliothek mit `#[unsafe(no_mangle)] extern \"C\"`-Funktionen. Mehrere Anbieter aus dem Steuergeräte-Umfeld haben angekündigt, genau diese Integration für ihre Plattformen zu unterstützen. So wächst der Rust-Anteil schrittweise, ohne die Werkzeugkette zu ersetzen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein kompletter Neubau ist teuer und unnötig, die Integration geht schrittweise.",
+        "AUTOSAR schreibt keine Sprache vor.",
+        "Rust wird gerade auch für Steuergeräte erprobt und eingesetzt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Öffentlich bekannter Stand",
+      "text": "Ein paar belegbare Eckpunkte (Stand 2026, vorsichtig formuliert):\n\n- **Ferrocene**, eine Rust-Toolchain von Ferrous Systems, wurde 2023 von TÜV SÜD für ISO 26262 (bis ASIL D) und IEC 61508 (bis SIL 4) qualifiziert. Der Quellcode ist offen.\n- **AUTOSAR** hat 2022 in der Arbeitsgruppe Safety eine Untergruppe gestartet, die den Einsatz von Rust im Adaptive-Kontext untersucht.\n- **Volvo Cars** hat in Vorträgen und Interviews berichtet, Rust in Steuergeräten von Serienfahrzeugen einzusetzen, genannt wurden EX90 und Polestar 3.\n- **Renault/Ampere** hat auf Konferenzen erklärt, Rust für einen Teil der Software vorzuschreiben und in Fahrzeugen ab 2026 einzusetzen.\n\nDas sind Herstelleraussagen, keine Zahlen über den Anteil von Rust im Fahrzeug."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was ist das für eine Funktion?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "#![no_std]",
+          "",
+          "unsafe extern \"C\" {",
+          "    fn Rte_Read_PP_Geschwindigkeit_Wert(wert: *mut f32) -> u8;",
+          "    fn Rte_Write_PP_Antriebsmoment_Wert(wert: f32) -> u8;",
+          "}",
+          "",
+          "#[unsafe(no_mangle)]",
+          "pub extern \"C\" fn Tempomat_Run10ms() {",
+          "    let mut ist = 0.0f32;",
+          "    if unsafe { Rte_Read_PP_Geschwindigkeit_Wert(&mut ist) } != 0 {",
+          "        return;",
+          "    }",
+          "    let moment = regler::schritt(SOLL, ist);",
+          "    unsafe { Rte_Write_PP_Antriebsmoment_Wert(moment) };",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "In Edition 2024 müssen `extern`-Blöcke als `unsafe extern` geschrieben werden" },
+          { "zeile": 11, "text": "Rückgabewert ungleich 0 bedeutet hier: Signal ungültig" }
+        ]
+      },
+      "optionen": [
+        "Ein in Rust geschriebenes Runnable einer SWC, das die generierten C-Funktionen der RTE aufruft. Die Reglerlogik in `regler::schritt` ist sicherer Rust-Code",
+        "Ein Treiber für die CAN-Hardware",
+        "Ein Unit-Test für die RTE",
+        "Ein Rust-Ersatz für die RTE"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das `unsafe` bleibt auf die dünne Schicht zur RTE beschränkt. Die eigentliche Logik ist reines, testbares Rust ohne Abhängigkeit von AUTOSAR. Das entspricht dem Ports-&-Adapters-Gedanken aus Phase 10.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Funktion kennt keinen Bus, sie nutzt nur RTE-Ports.",
+        "Es ist Produktivcode, der von der RTE alle 10 ms aufgerufen wird.",
+        "Die RTE bleibt generierter C-Code, Rust ruft sie nur auf."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was spricht heute **noch gegen** einen schnellen Umstieg ganzer Steuergeräte auf Rust?",
+      "optionen": [
+        "Bestehende Werkzeugketten, Generatoren, zertifizierte Bibliotheken und Prozesse sind auf C ausgelegt, und für Safety braucht es qualifizierte Werkzeuge sowie Richtlinien und Nachweise",
+        "Rust kann keine Mikrocontroller ansprechen",
+        "Rust-Programme sind grundsätzlich langsamer als C",
+        "Rust erlaubt keine harte Echtzeit"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Hürden sind organisatorisch und prozessbezogen, nicht technisch. Mehr zu Werkzeugqualifizierung, Coding Guidelines und Nachweisen in Phase 12.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust läuft auf vielen Mikrocontrollern, auch auf Automotive-Familien.",
+        "Rust erreicht vergleichbare Leistung wie C.",
+        "RTIC und Embassy zeigen, dass vorhersagbare Echtzeit möglich ist."
+      ]
+    }
+  ],
+  "praxis": "Im Automotive-Umfeld wirst du Rust zunächst an den Rändern einsetzen: neue Komponenten hinter C-Schnittstellen, Werkzeuge, Tests, Gateways auf Linux. Prüfe Aussagen über Rust in Fahrzeugen immer an der Quelle (Hersteller, Vortrag, Zertifikat), denn Marketing und Realität liegen hier oft auseinander.",
+  "labor": {
+    "titel": "Eine C-Schnittstelle in Rust bauen",
+    "anleitung": "Lege eine Bibliothek mit `crate-type = [\"staticlib\"]` an, schreibe ein `extern \"C\"`-Runnable wie in der Lektion und eine Fake-RTE in C, die es aufruft. Linke beides mit gcc.",
+    "befehle": [
+      "cargo new --lib tempomat && cd tempomat",
+      "cargo build --release",
+      "gcc rte_fake.c target/release/libtempomat.a -o test && ./test",
+      "nm target/release/libtempomat.a | grep Tempomat"
+    ],
+    "beobachtung": "`nm` zeigt `Tempomat_Run10ms` mit dem Typ `T`, ohne Name Mangling. Genau so findet eine generierte RTE das Runnable."
+  },
+  "begriffe": [
+    { "begriff": "AUTOSAR Classic", "englisch": "AUTOSAR Classic Platform", "erklaerung": "Standardisierte, statisch konfigurierte Architektur für Steuergeräte auf Mikrocontrollern." },
+    { "begriff": "AUTOSAR Adaptive", "englisch": "AUTOSAR Adaptive Platform", "erklaerung": "Serviceorientierte Plattform für leistungsfähige Fahrzeugrechner mit POSIX-Betriebssystem." },
+    { "begriff": "SOME/IP", "englisch": "Scalable service-Oriented MiddlewarE over IP", "erklaerung": "Protokoll für serviceorientierte Kommunikation im Fahrzeug über Ethernet." },
+    { "begriff": "RTE", "englisch": "runtime environment", "erklaerung": "Generierte Schicht, die SWCs untereinander und mit der Basic Software verbindet." }
+  ],
+  "weiterlesen": [
+    { "titel": "AUTOSAR: Classic Platform", "url": "https://www.autosar.org/standards/classic-platform" },
+    { "titel": "Ferrocene", "url": "https://ferrous-systems.com/ferrocene/" },
+    { "titel": "Ferrous Systems: Officially Qualified – Ferrocene", "url": "https://ferrous-systems.com/blog/officially-qualified-ferrocene/" }
+  ]
+}

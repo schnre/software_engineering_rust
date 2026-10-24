@@ -1,0 +1,252 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m2-l3",
+  "phase": 2,
+  "modul": "2.2 Ownership und Borrowing",
+  "titel": "Drop und RAII",
+  "lernziele": [
+    "Den `Drop`-Trait implementieren und die Drop-Reihenfolge vorhersagen",
+    "RAII-Typen wie `MutexGuard` und `File` gezielt einsetzen und vorzeitig mit `drop` beenden",
+    "Erklären, warum Speicherlecks in Rust „safe“ sind"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt das Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Laut(&'static str);",
+          "impl Drop for Laut {",
+          "    fn drop(&mut self) { println!(\"drop {}\", self.0); }",
+          "}",
+          "",
+          "fn main() {",
+          "    let _a = Laut(\"a\");",
+          "    let _b = Laut(\"b\");",
+          "    let _ = Laut(\"c\");",
+          "    println!(\"ende\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`drop c`, `ende`, `drop b`, `drop a`",
+        "`ende`, `drop a`, `drop b`, `drop c`",
+        "`ende`, `drop c`, `drop b`, `drop a`",
+        "`drop c`, `ende`, `drop a`, `drop b`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Lokale Variablen werden am Ende des Scopes in **umgekehrter** Deklarationsreihenfolge gedroppt, wie in C++. Die Falle ist `let _ = …`: Das Muster `_` bindet nichts, der Wert ist ein Temporärwert und wird sofort am Ende der Anweisung gedroppt. `let _b` dagegen ist eine normale Variable, deren Name nur die „unused“-Warnung unterdrückt.",
+      "begruendungen": [
+        "Richtig. Mit rustc 1.97 nachgeprüft.",
+        "Die Reihenfolge am Scope-Ende ist umgekehrt, und `c` lebt nicht bis dahin.",
+        "`_` hält den Wert nicht fest, er stirbt schon in Zeile 9.",
+        "Am Ende wird zuerst die zuletzt deklarierte Variable gedroppt, also `b` vor `a`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "RAII mit Drop",
+      "text": "**RAII** (Resource Acquisition Is Initialization) heisst: Eine Ressource gehört einem Objekt, und das Ende des Objekts gibt sie frei. In Rust übernimmt das der Trait `Drop` mit der Methode `fn drop(&mut self)`, das Gegenstück zum C++-Destruktor.\n\nNach deinem `drop` droppt Rust automatisch alle Felder, in **Deklarationsreihenfolge**. Elemente eines `Vec` werden von vorne nach hinten gedroppt. Weil es nur einen Besitzer gibt, läuft `drop` für jeden Wert **genau einmal**. Verschobene Werte droppt der neue Besitzer. Ob ein Wert bedingt verschoben wurde, merkt sich der Compiler bei Bedarf mit einem versteckten **Drop-Flag**."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Ressource gibt der Drop dieses Typs frei?",
+      "paare": [
+        {
+          "links": "`std::sync::MutexGuard<T>`",
+          "rechts": "Entsperrt den Mutex"
+        },
+        {
+          "links": "`std::fs::File`",
+          "rechts": "Schliesst den Dateideskriptor"
+        },
+        {
+          "links": "`Box<T>`, `Vec<T>`, `String`",
+          "rechts": "Gibt den Heap-Speicher frei"
+        },
+        {
+          "links": "`std::rc::Rc<T>`",
+          "rechts": "Verringert den Zähler, beim letzten Besitzer auch den Wert"
+        }
+      ],
+      "erklaerung": "Weil Rust kein `unlock()` und kein `close()` braucht, kann man sie auch nicht vergessen. Fehler beim Schliessen einer Datei gehen im `Drop` von `File` allerdings verloren. Wer sie sehen will, ruft vorher `sync_all()` auf."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Dieses Programm hängt und muss mit `timeout` abgebrochen werden. Warum?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::sync::Mutex;",
+          "fn main() {",
+          "    let zaehler = Mutex::new(0);",
+          "    let mut g = zaehler.lock().unwrap();",
+          "    *g += 1;",
+          "    let g2 = zaehler.lock().unwrap();",
+          "    println!(\"{}\", *g2);",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "timeout 3 cargo run -q; echo \"exit $?\"",
+        "ausgabe": [
+          "exit 124"
+        ]
+      },
+      "optionen": [
+        "Der erste `MutexGuard` `g` lebt bis zum Ende von `main`, der zweite `lock()` wartet auf sich selbst",
+        "`Mutex::new` muss in einem eigenen Thread laufen",
+        "NLL beendet `g` nach Zeile 5, der Fehler liegt woanders",
+        "`unwrap()` blockiert, bis der Mutex vergiftet ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "NLL verkürzt nur **Ausleihen**, nicht die Lebenszeit von Werten mit `Drop`. Ein Guard lebt bis zum Ende seines Scopes, egal ob er noch benutzt wird. Lösung: nach Zeile 5 `drop(g);` einfügen oder Zeile 4 und 5 in einen eigenen Block `{ … }` setzen. Exit-Code 124 bedeutet, dass `timeout` das Programm beenden musste. Ein Deadlock ist kein Undefined Behavior, deshalb erlaubt Safe Rust ihn.",
+      "begruendungen": [
+        "Richtig. Ein Klassiker, der auch in grossem Code passiert, etwa wenn eine Hilfsfunktion denselben Mutex sperrt.",
+        "Ein Mutex funktioniert auch in einem einzigen Thread, er schützt dann eben nichts.",
+        "Genau das ist der Irrtum: NLL gilt für Referenzen, Drop-Zeitpunkte bleiben lexikalisch.",
+        "Vergiftet (poisoned) wird ein Mutex nur, wenn ein Thread mit gesperrtem Guard paniert."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie beendest du die Lebenszeit eines Werts `g` vorzeitig?",
+      "optionen": [
+        "`drop(g);`",
+        "`g.drop();`",
+        "`std::mem::forget(g);`",
+        "`let g = ();` (Shadowing)"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`std::mem::drop` (im Prelude als `drop`) ist eine leere Funktion: `pub fn drop<T>(_x: T) {}`. Sie übernimmt den Besitz, und an ihrem Ende wird der Wert gedroppt. Direkt `g.drop()` aufzurufen verbietet rustc mit E0040 („explicit destructor calls not allowed“), weil der Wert sonst danach ein zweites Mal gedroppt würde.",
+      "begruendungen": [
+        "Richtig.",
+        "E0040. rustc schlägt selbst `drop(g)` vor.",
+        "`forget` verschiebt den Wert und ruft **nie** `drop` auf. Ein `MutexGuard` bliebe für immer gesperrt.",
+        "Shadowing versteckt nur den Namen. Der alte Wert lebt weiter bis zum Ende des Scopes."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Lecks sind safe",
+      "text": "Rust garantiert **Speichersicherheit**, nicht Leckfreiheit. `std::mem::forget` ist deshalb eine normale, sichere Funktion, und `Box::leak` macht aus einer Box absichtlich einen `&'static mut T`. Auch ohne diese Funktionen kann Speicher verloren gehen: Zwei `Rc`, die über `RefCell` aufeinander zeigen, halten ihre Zähler gegenseitig auf 2 und werden nie freigegeben. Gegen Zyklen hilft `Weak` (Phase 3).\n\nFür unsafe Code heisst das: Er darf sich **nie** darauf verlassen, dass ein `drop` läuft."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt das Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Laut(&'static str);",
+          "impl Drop for Laut {",
+          "    fn drop(&mut self) { println!(\"drop {}\", self.0); }",
+          "}",
+          "",
+          "fn main() {",
+          "    let a = Laut(\"a\");",
+          "    let b = Laut(\"b\");",
+          "    std::mem::forget(a);",
+          "    drop(b);",
+          "    println!(\"ende\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`drop b`, `ende`",
+        "`drop b`, `ende`, `drop a`",
+        "`drop a`, `drop b`, `ende`",
+        "Compilerfehler, weil `forget` `unsafe` ist"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`forget(a)` verschiebt `a` in die Funktion und unterdrückt dort den Drop. Am Ende von `main` gibt es nichts mehr zu droppen: `a` wurde verschoben, `b` ebenfalls. `drop a` erscheint nie.",
+      "begruendungen": [
+        "Richtig.",
+        "`a` gehört nach `forget` niemandem mehr, also droppt ihn auch niemand.",
+        "`forget` ist das Gegenteil von `drop`.",
+        "`mem::forget` ist seit Rust 1.0 eine sichere Funktion."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Drop-Regeln.",
+      "text": "Lokale Variablen werden in {{?}} Reihenfolge gedroppt, die Felder eines Structs in {{?}}. Ein Leck ist in Rust {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "umgekehrter"
+          ]
+        },
+        {
+          "loesungen": [
+            "Deklarationsreihenfolge"
+          ]
+        },
+        {
+          "loesungen": [
+            "kein Undefined Behavior"
+          ]
+        }
+      ],
+      "auswahl": [
+        "umgekehrter",
+        "Deklarationsreihenfolge",
+        "kein Undefined Behavior",
+        "zufälliger",
+        "ein Compilerfehler"
+      ],
+      "erklaerung": "Bei Feldern unterscheidet sich Rust von C++: Dort werden Member in umgekehrter Reihenfolge zerstört. Hängt ein Feld vom anderen ab, ordnet man die Felder in Rust entsprechend oder wickelt eines in `ManuallyDrop` (Phase 3)."
+    }
+  ],
+  "praxis": "Im Review lohnt sich der Blick auf Guards: Wird ein `MutexGuard` über ein `.await`, einen langen Funktionsaufruf oder eine Schleife gehalten? Dann gehört er in einen eigenen Block oder wird mit `drop` vorher beendet. Clippy hilft mit `clippy::await_holding_lock`. Auf Mikrocontrollern ist RAII dasselbe Muster für Critical Sections: `critical_section::with(|cs| …)` sperrt Interrupts nur für die Dauer der Closure.",
+  "labor": {
+    "titel": "Drop-Reihenfolge beobachten",
+    "anleitung": "Baue den Typ `Laut` nach und probiere: lokale Variablen, `let _ = …`, ein Struct mit zwei `Laut`-Feldern, einen `Vec<Laut>`, `drop(x)` und `mem::forget(x)`. Baue danach den Mutex-Deadlock und löse ihn mit einem Block.",
+    "befehle": [
+      "cargo new drops && cd drops",
+      "cargo run",
+      "timeout 3 cargo run; echo \"exit $?\"",
+      "rustc --explain E0040"
+    ],
+    "beobachtung": "Struct-Felder und Vec-Elemente droppen von vorne nach hinten, lokale Variablen von hinten nach vorne. Nach `forget` fehlt die Ausgabe ganz. Die Deadlock-Variante endet mit Exit-Code 124."
+  },
+  "begriffe": [
+    {
+      "begriff": "RAII",
+      "englisch": "Resource Acquisition Is Initialization",
+      "erklaerung": "Muster, bei dem ein Objekt eine Ressource besitzt und sie beim Droppen automatisch freigibt."
+    },
+    {
+      "begriff": "Drop-Trait",
+      "englisch": "`Drop` trait",
+      "erklaerung": "Trait mit der Methode `drop(&mut self)`, die vor dem Droppen der Felder aufgerufen wird. Gegenstück zum Destruktor."
+    },
+    {
+      "begriff": "Guard",
+      "englisch": "guard",
+      "erklaerung": "RAII-Objekt, das einen Zustand (z. B. eine Sperre) so lange hält, wie es lebt."
+    },
+    {
+      "begriff": "Speicherleck",
+      "englisch": "memory leak",
+      "erklaerung": "Speicher, der nie freigegeben wird. In Rust möglich und kein Undefined Behavior."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Running Code on Cleanup with the Drop Trait",
+      "url": "https://doc.rust-lang.org/book/ch15-03-drop.html"
+    },
+    {
+      "titel": "The Rust Reference: Destructors",
+      "url": "https://doc.rust-lang.org/reference/destructors.html"
+    },
+    {
+      "titel": "The Rustonomicon: Leaking",
+      "url": "https://doc.rust-lang.org/nomicon/leaking.html"
+    }
+  ]
+}

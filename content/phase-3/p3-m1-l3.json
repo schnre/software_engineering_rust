@@ -1,0 +1,223 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m1-l3",
+  "phase": 3,
+  "modul": "3.1 Traits und Generics für Fortgeschrittene",
+  "titel": "GATs, HRTBs und Typzustände",
+  "lernziele": [
+    "Generic Associated Types und Higher-Ranked Trait Bounds lesen",
+    "Das Typzustandsmuster mit Generics anwenden",
+    "Die Orphan Rule verstehen und mit einem Newtype umgehen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "typzustand",
+      "frage": "Ein GPIO-Pin wird im Typ als Ein- oder Ausgang geführt. Was meldet der Compiler zu Zeile 15?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Eingang;",
+          "struct Ausgang;",
+          "struct Pin<Modus> { nr: u8, _m: PhantomData<Modus> }",
+          "",
+          "impl Pin<Eingang> {",
+          "    fn als_ausgang(self) -> Pin<Ausgang> { Pin { nr: self.nr, _m: PhantomData } }",
+          "}",
+          "impl Pin<Ausgang> {",
+          "    fn setze_high(&mut self) { /* Register schreiben */ }",
+          "}",
+          "",
+          "let p: Pin<Eingang> = Pin { nr: 5, _m: PhantomData };",
+          "let mut q = p.als_ausgang();",
+          "q.setze_high();",
+          "p.setze_high();"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "`self` nach Wert: Der alte Zustand wird verbraucht." },
+          { "zeile": 9, "text": "Nur für `Pin<Ausgang>` vorhanden." }
+        ]
+      },
+      "optionen": [
+        "`error[E0599]: no method named `setze_high` found for struct `Pin<Eingang>``",
+        "Kompiliert, `p` und `q` zeigen auf denselben Pin",
+        "Panic zur Laufzeit, weil der Pin im falschen Modus ist",
+        "Nur eine Warnung über unbenutzte Variablen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das **Typzustandsmuster** (*typestate pattern*) kodiert den Zustand im Typ. Methoden gibt es nur im passenden Zustand, Übergänge verbrauchen `self` und liefern einen neuen Typ. Ungültige Aufrufe sind Compilerfehler, Laufzeitkosten gibt es keine. Zusätzlich ist `p` nach Zeile 13 verschoben, selbst die richtige Methode wäre ein Fehler. Embedded-HALs setzen genau so GPIO-Modi um (Phase 7).",
+      "begruendungen": [
+        "Richtig. rustc ergänzt: „the method was found for `Pin<Ausgang>`“.",
+        "`als_ausgang` hat `p` verbraucht. Zwei Griffe auf denselben Pin soll es gerade nicht geben.",
+        "Die Prüfung passiert vollständig zur Übersetzungszeit.",
+        "Der Aufruf einer nicht vorhandenen Methode ist ein Fehler, keine Warnung."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "orphan-rule",
+      "frage": "Warum darfst du `Display` nicht für `Vec<u8>` implementieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl fmt::Display for Vec<u8> {",
+          "    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, \"{}\", self.len()) }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0117]: only traits defined in the current crate can be implemented for types defined outside of the crate",
+          " --> src/main.rs:2:1",
+          "  |",
+          "2 | impl fmt::Display for Vec<u8> {",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^-------",
+          "  |                       |",
+          "  |                       `Vec` is not defined in the current crate",
+          "  |",
+          "  = note: impl doesn't have any local type before any uncovered type parameters",
+          "  = note: define and implement a trait or new type instead"
+        ]
+      },
+      "optionen": [
+        "Weder `Display` noch `Vec` gehören dem eigenen Crate. Die **Orphan Rule** verbietet solche Impls, damit zwei Crates nicht widersprüchliche Impls liefern können",
+        "`Vec<u8>` implementiert `Display` bereits",
+        "`Display` darf nur mit `#[derive]` implementiert werden",
+        "Generische Typen wie `Vec<T>` können keine Traits implementieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Kohärenz** (*coherence*) heisst: Für jedes Paar Trait/Typ gibt es im ganzen Programm höchstens eine Impl. Die **Orphan Rule** sichert das ab: Eine Impl ist nur erlaubt, wenn der Trait oder der Typ im eigenen Crate definiert ist. Sonst könnten zwei Abhängigkeiten dieselbe Impl liefern, und das Hinzufügen eines Crates würde fremden Code brechen.",
+      "begruendungen": [
+        "Richtig.",
+        "`Vec` hat bewusst kein `Display`. Die Meldung wäre dann auch E0119 statt E0117.",
+        "`Display` lässt sich gar nicht ableiten, man implementiert es immer von Hand.",
+        "Für eigene Traits oder eigene Typen geht das sehr wohl."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den **Newtype**, der die Orphan Rule umgeht.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Hex({{?}});",
+          "",
+          "impl fmt::Display for {{?}} {",
+          "    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {",
+          "        for b in &self.{{?}} { write!(f, \"{b:02x}\")?; }",
+          "        Ok(())",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["Vec<u8>"] }, { "loesungen": ["Hex"] }, { "loesungen": ["0"] }],
+      "auswahl": ["Vec<u8>", "Hex", "0", "Vec", "self"],
+      "erklaerung": "Ein **Newtype** ist ein Tupel-Struct mit einem Feld. Er ist ein eigener, lokaler Typ, darum ist die Impl erlaubt. Kosten zur Laufzeit gibt es keine: `Hex` hat dieselbe Grösse wie `Vec<u8>`. Nebenbei verhindert er Verwechslungen, etwa zwischen `Millisekunden(u32)` und `Mikrosekunden(u32)`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Generic Associated Types",
+      "text": "Ein **Generic Associated Type** (GAT) ist ein assoziierter Typ mit eigenen Parametern, meist einer Lebensdauer. Damit kann ein Trait Werte zurückgeben, die vom `&mut self` des Aufrufs abhängen, etwa ein Fenster in einen internen Puffer. Ohne GATs ging das nicht, weil `type Fenster` keinen Bezug zur Lebensdauer des einzelnen Aufrufs hatte. GATs sind seit Rust 1.65 stabil.\n\nDie Klausel `where Self: 'a` verlangt rustc ausdrücklich: Ein `Fenster<'a>` darf nicht länger leben als der Puffer selbst.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Puffer {",
+          "    type Fenster<'a> where Self: 'a;",
+          "    fn fenster<'a>(&'a mut self) -> Self::Fenster<'a>;",
+          "}",
+          "",
+          "impl Puffer for Ring {",
+          "    type Fenster<'a> = &'a mut [u8];",
+          "    fn fenster<'a>(&'a mut self) -> &'a mut [u8] { &mut self.daten[..4] }",
+          "}"
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "hrtb",
+      "frage": "Diese Version ohne `for<'a>` kompiliert nicht (`E0597: s does not live long enough`). Warum?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn wende_an<'a, F>(f: F)",
+          "where",
+          "    F: Fn(&'a str) -> &'a str,",
+          "{",
+          "    let s = String::from(\"abc\");",
+          "    println!(\"{}\", f(&s));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`'a` wählt der **Aufrufer**, und es kann länger sein als die lokale Variable `s`. Richtig wäre `F: for<'a> Fn(&'a str) -> &'a str`: für **jede** Lebensdauer",
+        "`String` kann nicht als `&str` übergeben werden",
+        "Closures können keine Referenzen zurückgeben",
+        "Es fehlt `move` beim Aufruf von `f`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Higher-Ranked Trait Bound** (HRTB) `for<'a>` sagt: Die Closure muss mit jeder beliebigen Lebensdauer funktionieren, auch mit einer, die erst im Rumpf entsteht. Meist schreibt man das nicht selbst: `F: Fn(&str) -> &str` ist dank Lifetime Elision bereits ein HRTB. Ausdrücklich nötig wird `for<'a>` bei Bounds wie `where for<'a> &'a T: IntoIterator`.",
+      "begruendungen": [
+        "Richtig. Mit `for<'a>` gibt das Programm `bc` aus, wenn die Closure `&s[1..]` liefert.",
+        "Deref-Coercion macht aus `&String` automatisch `&str`.",
+        "Closures dürfen Referenzen zurückgeben, solange die Lebensdauern passen.",
+        "`move` betrifft das Einfangen von Variablen in einer Closure, nicht den Aufruf."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Impl verletzt in deinem Crate `sensorik` die Orphan Rule?",
+      "optionen": [
+        "`impl serde::Serialize for heapless::Vec<u8, 16>`",
+        "`impl fmt::Display for sensorik::Messwert`",
+        "`impl sensorik::Kalibrierbar for u16`",
+        "`impl From<sensorik::Messwert> for f32`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Weder `Serialize` noch `heapless::Vec` stammen aus `sensorik`, also verboten. Bei `From<Messwert> for f32` ist zwar `f32` fremd, aber der Typparameter `Messwert` ist lokal, und das genügt laut den Orphan-Regeln. Wenn zwei Fremd-Crates zusammenspielen sollen, bieten sie oft ein Cargo-Feature dafür an, etwa `heapless` mit `features = [\"serde\"]`.",
+      "begruendungen": [
+        "Richtig.",
+        "Lokaler Typ, fremder Trait: erlaubt.",
+        "Lokaler Trait, fremder Typ: erlaubt.",
+        "Erlaubt, weil der lokale Typ als Typparameter des Traits vor jedem nicht abgedeckten Parameter steht."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug löst welches Problem?",
+      "paare": [
+        { "links": "Typzustand mit `PhantomData`", "rechts": "Ungültige Zustandsübergänge zur Übersetzungszeit verbieten" },
+        { "links": "Newtype", "rechts": "Fremden Trait für fremden Typ implementieren" },
+        { "links": "GAT", "rechts": "Assoziierter Typ, der von der Lebensdauer eines Aufrufs abhängt" },
+        { "links": "`for<'a>`", "rechts": "Bound, der für alle Lebensdauern gelten muss" }
+      ],
+      "erklaerung": "Alle vier kosten zur Laufzeit nichts. Sie verschieben Prüfungen vom Testen und Debuggen in den Compiler, was gerade im Embedded-Bereich wertvoll ist, wo Fehler schwer zu beobachten sind."
+    }
+  ],
+  "praxis": "Typzustände findest du in fast jeder Embedded-HAL (`Pin<Input<Floating>>` → `into_push_pull_output()`), in Buildern und bei Protokoll-Handshakes. Die Orphan Rule triffst du spätestens, wenn du zwei Bibliotheken verbinden willst. Der Newtype ist dann der übliche Ausweg, oft kombiniert mit `Deref` oder `From` für bequemen Zugriff.",
+  "labor": {
+    "titel": "Ein Typzustand-Builder",
+    "anleitung": "Baue einen `UartBuilder<Baud, Pins>`, bei dem `build()` nur existiert, wenn sowohl Baudrate als auch Pins gesetzt sind. Nutze leere Structs `Fehlt` und `Gesetzt` als Zustände. Versuche, `build()` zu früh aufzurufen, und lies die Meldung.",
+    "befehle": [
+      "cargo new typzustand && cd typzustand",
+      "cargo check",
+      "cargo clippy"
+    ],
+    "beobachtung": "Der Compiler meldet E0599 mit dem Hinweis, für welchen Typ die Methode existiert. Mit `std::mem::size_of` siehst du, dass die Zustandsparameter keinen Speicher belegen."
+  },
+  "begriffe": [
+    { "begriff": "Typzustandsmuster", "englisch": "typestate pattern", "erklaerung": "Zustand eines Objekts im Typ kodieren, sodass nur gültige Operationen kompilieren." },
+    { "begriff": "Orphan Rule", "englisch": "orphan rule", "erklaerung": "Eine Trait-Impl ist nur erlaubt, wenn Trait oder Typ im eigenen Crate definiert ist." },
+    { "begriff": "Kohärenz", "englisch": "coherence", "erklaerung": "Für jedes Paar aus Trait und Typ gibt es im Programm höchstens eine Implementierung." },
+    { "begriff": "Newtype", "englisch": "newtype", "erklaerung": "Tupel-Struct mit einem Feld, das einen vorhandenen Typ in einen neuen, lokalen Typ verpackt." },
+    { "begriff": "GAT", "englisch": "generic associated type", "erklaerung": "Assoziierter Typ mit eigenen Typ- oder Lebensdauerparametern." },
+    { "begriff": "HRTB", "englisch": "higher-ranked trait bound", "erklaerung": "Bound mit `for<'a>`, der für jede Lebensdauer gelten muss." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Trait and lifetime bounds", "url": "https://doc.rust-lang.org/reference/trait-bounds.html" },
+    { "titel": "Rust Blog: Generic associated types to be stable in Rust 1.65", "url": "https://blog.rust-lang.org/2022/10/28/gats-stabilization.html" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

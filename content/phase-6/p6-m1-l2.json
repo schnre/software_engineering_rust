@@ -1,0 +1,203 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m1-l2",
+  "phase": 6,
+  "modul": "6.1 Der Mikrocontroller",
+  "titel": "no_std und das erste Embedded-Programm",
+  "lernziele": [
+    "Erklären, was `#![no_std]` und `#![no_main]` bewirken und was `core`, `alloc` und `std` bieten",
+    "Ein minimales Cortex-M-Programm mit `#[entry]` und Panic-Handler aufbauen",
+    "Ein Projekt für ein Embedded-Target konfigurieren und bauen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "warum-no-std",
+      "frage": "Warum kann ein Programm für einen Cortex-M ohne Betriebssystem nicht einfach `std` benutzen?",
+      "optionen": [
+        "`std` setzt ein Betriebssystem voraus: Dateien, Threads, Heap-Allokator, Netzwerk und Prozessstart kommen von dort",
+        "`std` ist zu langsam für Mikrocontroller",
+        "`std` gibt es nur für 64-Bit-Prozessoren",
+        "`std` verlangt eine Lizenz des Chipherstellers"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Standardbibliothek ruft für `File`, `thread::spawn`, `println!` oder den Heap Funktionen des Betriebssystems auf. Auf *bare metal* gibt es niemanden, der sie bereitstellt. Darum schreibst du `#![no_std]`: Dein Crate linkt dann nur gegen **`core`**, den plattformunabhängigen Kern der Sprache.",
+      "begruendungen": [
+        "Richtig.",
+        "Es geht nicht um Geschwindigkeit, sondern um fehlende Betriebssystemdienste.",
+        "`std` gibt es auch für 32-Bit-Linux und -Windows.",
+        "`std` ist frei. Es fehlt schlicht das Betriebssystem darunter."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "core, alloc und std",
+      "text": "Die Standardbibliothek ist in drei Schichten aufgebaut. `std` re-exportiert `core` und `alloc`, darum sind `core::mem` und `std::mem` dasselbe Modul.",
+      "tabelle": {
+        "kopf": ["Crate", "Braucht", "Enthält z. B."],
+        "zeilen": [
+          ["`core`", "nichts", "`Option`, `Result`, Iteratoren, Slices, `core::fmt`, `core::ptr`, Atomics"],
+          ["`alloc`", "einen Heap-Allokator (`#[global_allocator]`)", "`Vec`, `String`, `Box`, `Rc`, `Arc`"],
+          ["`std`", "ein Betriebssystem", "`println!`, `File`, `thread`, `HashMap`, `Mutex`"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "println-fehlt",
+      "frage": "Dieses Programm ist mit `#![no_std]` markiert. Was meldet der Compiler zu Zeile 8 und 9?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "",
+          "use cortex_m_rt::entry;",
+          "",
+          "#[entry]",
+          "fn main() -> ! {",
+          "    println!(\"Hallo\");",
+          "    let v = Vec::new();",
+          "    loop {}",
+          "}"
+        ]
+      },
+      "optionen": [
+        "``cannot find macro `println` in this scope`` und ``error[E0433]: cannot find type `Vec` in this scope``",
+        "Es kompiliert, die Ausgabe geht an den Debugger",
+        "Nur `Vec` fehlt, `println!` ist in `core` enthalten",
+        "Ein Linkerfehler, weil `printf` fehlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beide gehören nicht zu `core`. Für Text gibt es auf dem Mikrocontroller andere Wege: `core::fmt::Write` auf einer UART (Modul 6.5), Semihosting oder `defmt` über RTT (Phase 7). Für Sammlungen mit fester Kapazität nimmst du `heapless::Vec<T, N>`, oder du stellst einen Allokator bereit und benutzt `extern crate alloc;`.",
+      "begruendungen": [
+        "Richtig. Beide Fehler kommen schon aus der Namensauflösung, lange vor dem Linker.",
+        "`println!` schreibt nach stdout, das es ohne Betriebssystem nicht gibt.",
+        "`core` enthält `core::fmt` und `write!`, aber kein `println!`.",
+        "Rust benutzt kein `printf`. Der Fehler kommt vor dem Linken."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Das minimale Programm",
+      "text": "Ohne `std` gibt es auch kein normales `main`, das die Laufzeitumgebung aufruft. `#![no_main]` sagt rustc, dass du den Einstiegspunkt selbst lieferst. Das Crate **`cortex-m-rt`** bringt Vektortabelle, Reset-Handler und Linker-Skript mit (Modul 6.7) und ruft deine mit `#[entry]` markierte Funktion auf.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "",
+          "use cortex_m_rt::entry;",
+          "use panic_halt as _;",
+          "",
+          "#[entry]",
+          "fn main() -> ! {",
+          "    let mut zaehler: u32 = 0;",
+          "    loop {",
+          "        zaehler = zaehler.wrapping_add(1);",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Bindet den Panic-Handler ein. `as _` importiert nur das Crate, ohne einen Namen zu belegen." },
+          { "zeile": 8, "text": "`-> !` (never type): Firmware kehrt nie zurück. `#[entry]` prüft diese Signatur." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "panic-handler-fehlt",
+      "frage": "Du hast `use panic_halt as _;` weggelassen und aus Versehen `--target` vergessen, also für den PC gebaut. Welche Aussagen stimmen?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling nostd v0.1.0 (/home/user/projekt/nostd)",
+          "error: `#[panic_handler]` function required, but not found",
+          "",
+          "error: unwinding panics are not supported without std",
+          "  |",
+          "  = help: using nightly cargo, use -Zbuild-std with panic=\"abort\" to avoid unwinding",
+          "  = note: since the core library is usually precompiled with panic=\"unwind\", rebuilding your crate with panic=\"abort\" may not be enough to fix the problem",
+          "",
+          "error: could not compile `nostd` (bin \"nostd\") due to 2 previous errors"
+        ]
+      },
+      "optionen": [
+        "Ein `no_std`-Binary muss genau eine Funktion mit `#[panic_handler]` haben, z. B. aus `panic-halt`",
+        "Der zweite Fehler kommt daher, dass das Host-Target Panics mit Unwinding übersetzt. Die `thumb…-none-…`-Targets verwenden `panic = \"abort\"`",
+        "Man muss für Embedded immer nightly verwenden",
+        "`#![no_std]` ist auf dem PC grundsätzlich verboten"
+      ],
+      "korrekt": [0, 1],
+      "erklaerung": "Wer `panic!` auslöst, ruft den Panic-Handler auf. Ohne `std` musst du ihn selbst liefern: `fn panic(info: &PanicInfo) -> !` mit `#[panic_handler]`, oder ein fertiges Crate wie `panic-halt` (Endlosschleife), `panic-reset` oder `panic-probe`. Die zweite Meldung verschwindet, sobald du für das richtige Target baust. Stable reicht für Embedded-Rust völlig.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Mit `rustc --print cfg --target thumbv7em-none-eabihf` siehst du `panic=\"abort\"`.",
+        "Die Cortex-M-Targets sind auf stable vorkompiliert verfügbar, `-Zbuild-std` brauchst du nur für exotische Ziele.",
+        "`no_std`-Bibliotheken baut man ständig auf dem PC, etwa für Tests. Das Problem hier ist nur das Binary ohne Panic-Handler."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "cargo-config",
+      "frage": "Damit `cargo build` ohne `--target` für den STM32F411 baut und `cortex-m-rt` sein Linker-Skript bekommt, ergänzt du `.cargo/config.toml`.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[build]",
+          "target = \"{{?}}\"",
+          "",
+          "[target.thumbv7em-none-eabihf]",
+          "rustflags = [\"-C\", \"link-arg={{?}}\"]",
+          "runner = \"probe-rs run --chip STM32F411CEUx\""
+        ]
+      },
+      "luecken": [{ "loesungen": ["thumbv7em-none-eabihf"] }, { "loesungen": ["-Tlink.x"] }],
+      "auswahl": ["thumbv7em-none-eabihf", "-Tlink.x", "-Tmemory.x", "x86_64-unknown-linux-gnu"],
+      "erklaerung": "`link.x` kommt von `cortex-m-rt` und bindet seinerseits deine `memory.x` ein, in der Flash und RAM des Chips stehen (Modul 1.4). Gibst du `-Tmemory.x` direkt an, fehlen Vektortabelle und Sektionen. Mit dem `runner` startet `cargo run` das Programm über probe-rs auf der Hardware."
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "projekt-aufsetzen",
+      "frage": "Bringe die Schritte für ein neues Projekt mit der `cortex-m-quickstart`-Vorlage in die richtige Reihenfolge.",
+      "elemente": [
+        "`rustup target add thumbv7em-none-eabihf`",
+        "Projekt aus der Vorlage erzeugen: `cargo generate --git https://github.com/rust-embedded/cortex-m-quickstart`",
+        "`memory.x` an Flash- und RAM-Grösse des Chips anpassen",
+        "Target in `.cargo/config.toml` eintragen",
+        "`cargo build --release` und Grösse mit `cargo size` prüfen"
+      ],
+      "erklaerung": "Die Vorlage bringt `Cargo.toml` mit `cortex-m`, `cortex-m-rt` und `panic-halt`, eine `.cargo/config.toml` mit mehreren auskommentierten Targets und eine Beispiel-`memory.x`. Wichtig ist die `memory.x`: Stimmen die Grössen nicht, merkst du es erst zur Laufzeit."
+    }
+  ],
+  "praxis": "Viele Teams schreiben Treiber und Logik als `#![no_std]`-Bibliothek und testen sie auf dem PC mit `cargo test`, ganz ohne Hardware. Nur das dünne Binary mit `#[entry]` hängt am Target. Das hält den Feedback-Loop schnell und zwingt zu sauberen Schnittstellen.",
+  "labor": {
+    "titel": "Das erste no_std-Binary",
+    "anleitung": "Lege ein Projekt an, füge die Embedded-Crates hinzu und baue es für einen Cortex-M4F. Lass den Panic-Handler einmal weg und lies die Fehlermeldung.",
+    "befehle": [
+      "rustup target add thumbv7em-none-eabihf",
+      "cargo new --bin blinky && cd blinky",
+      "cargo add cortex-m-rt panic-halt",
+      "cargo add cortex-m --features critical-section-single-core",
+      "cargo build --target thumbv7em-none-eabihf",
+      "cargo install cargo-binutils && rustup component add llvm-tools",
+      "cargo size --target thumbv7em-none-eabihf -- -A"
+    ],
+    "beobachtung": "Ohne `memory.x` und `-Tlink.x` schlägt der Linker fehl. Mit beiden zeigt `cargo size` die Sektionen `.vector_table`, `.text`, `.rodata`, `.data` und `.bss`."
+  },
+  "begriffe": [
+    { "begriff": "no_std", "englisch": "no_std", "erklaerung": "Crate-Attribut, das statt `std` nur `core` einbindet, für Umgebungen ohne Betriebssystem." },
+    { "begriff": "core", "englisch": "core library", "erklaerung": "Plattformunabhängiger Kern der Standardbibliothek ohne Heap und ohne Betriebssystem." },
+    { "begriff": "Panic-Handler", "englisch": "panic handler", "erklaerung": "Funktion mit `#[panic_handler]`, die bei `panic!` aufgerufen wird; in `no_std` Pflicht." },
+    { "begriff": "Laufzeit-Crate", "englisch": "runtime crate", "erklaerung": "Crate wie `cortex-m-rt`, das Start-Code, Vektortabelle und Linker-Skript liefert." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" },
+    { "titel": "cortex-m-rt (docs.rs)", "url": "https://docs.rs/cortex-m-rt" },
+    { "titel": "Rust Reference: The panic_handler attribute", "url": "https://doc.rust-lang.org/reference/runtime.html" }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m2-l1",
+  "phase": 13,
+  "modul": "13.2 Entscheidungen und Trade-offs",
+  "titel": "Trade-offs benennen und abwägen",
+  "lernziele": [
+    "Typische Rust-Abwägungen wie Generics gegen `dyn` oder async gegen Threads benennen",
+    "Eine Entscheidungsmatrix mit vorher festgelegten Kriterien aufstellen",
+    "Die Frage „Abhängigkeit oder Eigenbau?“ mit Fakten statt Bauchgefühl beantworten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Junior fragt: „Was ist besser, Generics oder `dyn Trait`?“ Welche Antwort hilft am meisten?",
+      "optionen": [
+        "„Kommt darauf an: Generics sind schneller, aber jede Instanz vergrössert das Binary. `dyn` hält es klein und erlaubt gemischte Listen, kostet aber einen indirekten Aufruf. Was ist bei dir knapp?“",
+        "„Generics, weil Rust auf Zero-Cost Abstractions setzt.“",
+        "„`dyn`, weil es einfacher zu lesen ist.“",
+        "„Kommt darauf an.“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Senior-Antwort nennt, **worauf** es ankommt und was daraus folgt. „Kommt darauf an“ allein ist ehrlich, aber nutzlos. Eine Pauschalregel ist bequem, aber in der Hälfte der Fälle falsch: Auf einem Mikrocontroller mit 64 KB Flash kann Monomorphisierung (das Erzeugen einer eigenen Kopie pro Typ) schnell zu teuer werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Zero-Cost bezieht sich auf die Laufzeit, nicht auf Binary-Grösse und Kompilierzeit.",
+        "Lesbarkeit ist ein Kriterium, aber nicht das einzige.",
+        "Stimmt, hilft aber niemandem weiter."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Es gibt nur Abwägungen",
+      "text": "Fast jede Entscheidung tauscht etwas gegen etwas anderes. Ein **Trade-off** (Abwägung) wird erst handhabbar, wenn man beide Seiten ausspricht:",
+      "tabelle": {
+        "kopf": ["Entscheidung", "Man gewinnt", "Man bezahlt"],
+        "zeilen": [
+          ["Generics", "Statischer Aufruf, Inlining", "Binary-Grösse, Kompilierzeit"],
+          ["`Box<dyn Trait>`", "Gemischte Typen, kleines Binary", "Indirekter Aufruf, Heap"],
+          ["async/await", "Viele Wartende mit wenig Speicher", "Laufzeitumgebung, steilere Lernkurve"],
+          ["Threads", "Einfaches Modell, echte Parallelität", "Stack pro Thread, Synchronisation"],
+          ["Fremdes Crate", "Zeit, erprobter Code", "Abhängigkeit, Updates, Lizenz, Angriffsfläche"]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Plugin-System soll Sensoren verschiedener Typen in **einer** Liste halten. Der erste Versuch scheitert so. Welche Abwägung steckt dahinter?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let sensoren = vec![Temp, Druck];"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0308]: mismatched types",
+          "  --> src/main.rs:16:31",
+          "   |",
+          "16 |     let sensoren = vec![Temp, Druck];",
+          "   |                               ^^^^^ expected `Temp`, found `Druck`"
+        ]
+      },
+      "optionen": [
+        "Ein `Vec` hat einen einzigen Elementtyp. Für gemischte Typen braucht es `Vec<Box<dyn Sensor>>` und damit dynamischen Aufruf",
+        "Es fehlt eine `impl Sensor` für `Druck`",
+        "`vec!` funktioniert nur mit `Copy`-Typen",
+        "Man muss den Typ mit `Vec<impl Sensor>` angeben, dann geht es statisch"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Generics legen den Typ zur Kompilierzeit auf **einen** konkreten Typ fest. Heterogene Sammlungen sind der klassische Fall, in dem `dyn` die richtige Wahl ist. `Box<dyn Sensor>` ist ein Fat Pointer (Datenzeiger plus Zeiger auf die vtable), auf 64-Bit-Systemen 16 Byte. Alternative ohne Heap und ohne vtable: ein `enum` mit einer Variante pro Sensor, wenn die Typen vorab bekannt sind.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Meldung ist ein Typkonflikt, kein fehlendes Trait.",
+        "`vec!` funktioniert mit beliebigen Typen, solange alle Elemente gleich sind.",
+        "`impl Trait` steht in diesem Fall ebenfalls für einen einzigen konkreten Typ."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Wahl passt am besten zu welcher Situation?",
+      "paare": [
+        { "links": "Gateway mit 5 000 gleichzeitigen, meist wartenden TCP-Verbindungen", "rechts": "async mit einer Laufzeitumgebung wie Tokio" },
+        { "links": "Vier rechenintensive Bildfilter auf vier Kernen", "rechts": "Threads, z. B. mit `std::thread::scope` oder Rayon" },
+        { "links": "Treiber mit fest bekannten drei Sensortypen auf einem kleinen MCU", "rechts": "`enum` mit einer Variante pro Sensor" },
+        { "links": "Plugins, die Dritte später hinzufügen", "rechts": "`Box<dyn Trait>` hinter einer stabilen Schnittstelle" }
+      ],
+      "erklaerung": "async lohnt sich, wenn viel **gewartet** wird (I/O). Für reines Rechnen bringt es nichts, dort helfen Threads. Auf Mikrocontrollern dreht sich die Rechnung teilweise um: Embassy nutzt async ganz ohne Heap gerade, weil ein Stack pro Task zu teuer wäre. Kontext schlägt Regel."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ihr braucht für ein Kommandozeilen-Werkzeug einen einzigen TCP-Client, der alle paar Sekunden einen Wert abfragt. Jemand fügt dafür Tokio hinzu. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo tree -e normal",
+        "ausgabe": [
+          "dep v0.1.0 (/home/user/projekt)",
+          "└── tokio v1.54.1",
+          "    ├── bytes v1.12.1",
+          "    ├── libc v0.2.191",
+          "    ├── mio v1.2.4",
+          "    ├── parking_lot v0.12.5",
+          "    │   ├── lock_api v0.4.14",
+          "    │   └── parking_lot_core v0.9.12",
+          "    ├── pin-project-lite v0.2.17",
+          "    ├── signal-hook-registry v1.4.8",
+          "    ├── socket2 v0.6.5",
+          "    └── tokio-macros v2.7.2 (proc-macro)",
+          "        ├── proc-macro2 v1.0.107",
+          "        ├── quote v1.0.47",
+          "        └── syn v3.0.9"
+        ]
+      },
+      "optionen": [
+        "Eine Abhängigkeit zieht viele weitere nach sich. Für einen einzigen blockierenden Client reicht `std::net::TcpStream`",
+        "Tokio hat keine Abhängigkeiten, die Liste zeigt nur interne Module",
+        "Das ist unbedenklich, Abhängigkeiten kosten nichts",
+        "Man sollte stattdessen jedes dieser Crates einzeln hinzufügen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jedes Crate im Baum ist Code, den jemand prüfen, aktualisieren und auf Lizenz und Sicherheitsmeldungen überwachen muss, und es verlängert die Buildzeit. Für einen Server mit vielen Verbindungen ist Tokio genau richtig. Hier löst die Standardbibliothek das Problem mit null zusätzlichen Abhängigkeiten. Die Ausgabe ist gekürzt, der volle Baum enthält noch einige Crates mehr.",
+      "begruendungen": [
+        "Richtig.",
+        "Jede Zeile ist ein eigenes Crate von crates.io mit eigener Version.",
+        "Sie kosten Buildzeit, Pflege und Angriffsfläche in der Lieferkette.",
+        "Damit ändert sich am Baum nichts, die Crates kommen ohnehin mit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Entscheidungsmatrix",
+      "text": "Bei grösseren Entscheidungen hilft eine **Entscheidungsmatrix** (decision matrix): Kriterien mit Gewicht, Optionen mit Punkten, gewichtete Summe. Entscheidend ist die Reihenfolge: **Kriterien und Gewichte zuerst** festlegen, erst dann die Optionen bewerten. Sonst sucht man unbewusst Kriterien, die den eigenen Favoriten gewinnen lassen.\n\nDie Zahl am Ende ist keine Wahrheit, sondern macht Annahmen diskutierbar: „Warum ist dir Buildzeit nur 1 wert?“",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "Kriterium (Gewicht)     | crc-Crate | Eigenbau",
+          "Korrektheit (3)         |     3     |    2",
+          "Pflegeaufwand (2)       |     3     |    1",
+          "Abhängigkeiten (1)      |     2     |    3",
+          "Summe                   |    17     |   11"
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum legt man die Kriterien einer Entscheidungsmatrix **vor** dem Vergleich fest?",
+      "optionen": [
+        "Damit die Kriterien nicht nachträglich so gewählt werden, dass der heimliche Favorit gewinnt",
+        "Weil die Matrix sonst mathematisch nicht aufgeht",
+        "Damit man die Optionen gar nicht mehr diskutieren muss"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Menschen neigen dazu, zuerst zu entscheiden und dann Gründe zu suchen. Festgelegte Kriterien schützen davor und machen Meinungsverschiedenheiten sichtbar, bevor sie sich an einer Option festbeissen. Die Matrix ersetzt die Diskussion nicht, sie macht sie ergiebiger.",
+      "begruendungen": [
+        "Richtig.",
+        "Rechnen kann man in jeder Reihenfolge.",
+        "Im Gegenteil: Die Matrix soll die Diskussion auf die richtigen Fragen lenken."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Abwägung.",
+      "text": "Generics werden für jeden Typ einzeln übersetzt, das heisst {{?}}. Das ermöglicht Inlining, kostet aber {{?}}. `dyn Trait` ruft über eine {{?}} auf.",
+      "luecken": [
+        { "loesungen": ["Monomorphisierung"] },
+        { "loesungen": ["Binary-Grösse"] },
+        { "loesungen": ["vtable"] }
+      ],
+      "auswahl": ["Monomorphisierung", "Binary-Grösse", "vtable", "Type Erasure", "Stack-Speicher", "Borrow-Checker"],
+      "erklaerung": "Wie sich Generics und `dyn` im Binary niederschlagen, hast du in Phase 2 (Module 2.4 und 2.5) gesehen. Auf dem Mikrocontroller kann `cargo bloat` oder `nm --size-sort` zeigen, welche Instanzen am meisten Flash belegen, eine Messung schlägt jede Faustregel."
+    }
+  ],
+  "praxis": "Als Senior wirst du ständig nach „besser“ gefragt. Deine Aufgabe ist, die Frage umzubauen: Besser wofür, unter welchen Bedingungen, und was zahlen wir dafür? In Rust-Teams sind die Klassiker Generics gegen `dyn`, async gegen Threads und „noch ein Crate?“. Für Entscheidungen mit Tragweite hältst du Kriterien vorab fest und lässt Messungen sprechen, für kleine reicht ein Satz mit beiden Seiten der Waage.",
+  "labor": {
+    "titel": "Was kostet eine Abhängigkeit?",
+    "anleitung": "Vergleiche in einem leeren Projekt zwei Wege für dieselbe Aufgabe: einmal mit einem grossen Crate, einmal mit der Standardbibliothek. Miss Abhängigkeiten und Buildzeit.",
+    "befehle": [
+      "cargo new abwaegung && cd abwaegung",
+      "cargo add tokio --features full",
+      "cargo tree -e normal --prefix none | sort -u | wc -l",
+      "cargo clean && time cargo build --release",
+      "cargo remove tokio && cargo clean && time cargo build --release"
+    ],
+    "beobachtung": "Die Zahl der Crates und die Buildzeit unterscheiden sich deutlich. Das macht Tokio nicht schlecht, für einen Server ist es das richtige Werkzeug. Aber du hast jetzt Zahlen für die Spalte „Man bezahlt“ deiner nächsten Entscheidungsmatrix."
+  },
+  "begriffe": [
+    {
+      "begriff": "Abwägung",
+      "englisch": "trade-off",
+      "erklaerung": "Eine Entscheidung, bei der man eine Eigenschaft gewinnt und dafür eine andere hergibt."
+    },
+    {
+      "begriff": "Entscheidungsmatrix",
+      "englisch": "decision matrix",
+      "erklaerung": "Tabelle mit gewichteten Kriterien, nach denen mehrere Optionen bewertet werden."
+    },
+    {
+      "begriff": "Monomorphisierung",
+      "englisch": "monomorphization",
+      "erklaerung": "Der Compiler erzeugt für jeden konkreten Typ eine eigene Kopie einer generischen Funktion."
+    },
+    {
+      "begriff": "Abhängigkeitsbaum",
+      "englisch": "dependency tree",
+      "erklaerung": "Alle direkten und indirekten Crates, die ein Projekt braucht. `cargo tree` zeigt ihn an."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Using Trait Objects",
+      "url": "https://doc.rust-lang.org/book/ch18-02-trait-objects.html"
+    },
+    {
+      "titel": "The Cargo Book: cargo tree",
+      "url": "https://doc.rust-lang.org/cargo/commands/cargo-tree.html"
+    }
+  ]
+}

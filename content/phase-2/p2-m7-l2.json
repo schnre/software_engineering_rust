@@ -1,0 +1,252 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m7-l2",
+  "phase": 2,
+  "modul": "2.7 Fehlerbehandlung",
+  "titel": "panic!, unwind und abort",
+  "lernziele": [
+    "Entscheiden, wann ein Panic statt eines `Result` angemessen ist",
+    "`panic = \"unwind\"` und `panic = \"abort\"` unterscheiden und die Folgen für `catch_unwind` und FFI erklären",
+    "Einen `#[panic_handler]` in `no_std` einordnen und Fehler ohne Heap behandeln"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "frage": "Panic oder `Result`?",
+      "paare": [
+        {
+          "links": "Benutzer tippt im Konfigurationsdialog einen ungültigen Port",
+          "rechts": "`Result`: erwartbarer Fehler, der Aufrufer kann reagieren"
+        },
+        {
+          "links": "Ein interner Index ist ausserhalb des Arrays, obwohl die eigene Logik das ausschliessen sollte",
+          "rechts": "Panic: Programmierfehler, ein Zustand, der nie eintreten dürfte"
+        },
+        {
+          "links": "Ein Sensor antwortet nicht innerhalb von 10 ms",
+          "rechts": "`Result` mit einer Variante `Timeout`"
+        },
+        {
+          "links": "Ein Test prüft eine Bedingung mit `assert_eq!`",
+          "rechts": "Panic: so meldet ein Test seinen Fehlschlag"
+        }
+      ],
+      "erklaerung": "Faustregel aus dem Rust Book: `Result` für Fehler, mit denen man rechnen muss (Eingaben, I/O, Hardware). Panic für **verletzte Invarianten**, also Bugs, bei denen kein sinnvolles Weiterarbeiten möglich ist. Ein Panic ist dabei kein UB, sondern ein geordneter Abbruch."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "unwrap und expect",
+      "text": "`unwrap()` und `expect(\"…\")` holen den Wert aus `Option`/`Result` und panicken im Fehlerfall. Beide sind in Ordnung, wenn der Fehlerfall wirklich ein Bug wäre, und dann ist `expect` besser: Die Meldung erklärt, **welche Annahme** verletzt wurde.\n\nIm Produktionscode sind sie ein Review-Thema, in Tests und Prototypen völlig normal. Clippy kann sie mit `clippy::unwrap_used` bzw. `clippy::expect_used` ganz verbieten, was manche Embedded- und Safety-Projekte tun.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let cfg = lade_konfig().expect(\"Konfiguration muss beim Start geladen sein\");",
+          "let erster = werte.first().unwrap(); // Warum ist werte nie leer?"
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Programm ruft `catch_unwind(|| v[3])` auf einem leeren `Vec` auf und danach `s.expect(\"Konfiguration muss geladen sein\")` auf einem `None`. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo run -q; echo \"exit=$?\"",
+        "ausgabe": [
+          "thread 'main' (13926) panicked at src/main.rs:6:10:",
+          "index out of bounds: the len is 0 but the index is 3",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+          "Ergebnis: true",
+          "",
+          "thread 'main' (13926) panicked at src/main.rs:10:7:",
+          "Konfiguration muss geladen sein",
+          "exit=101"
+        ]
+      },
+      "optionen": [
+        "Der erste Panic wurde von `catch_unwind` aufgefangen, das Programm lief weiter. Der zweite beendete den Prozess mit Exit-Code 101",
+        "Beide Panics wurden aufgefangen, Exit-Code 101 ist ein normaler Erfolg",
+        "Das Programm ist zweimal gestartet worden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei `panic = \"unwind\"` (Standard auf Desktop-Zielen) läuft der Stack zurück, dabei werden alle `Drop`-Implementierungen ausgeführt. `catch_unwind` kann das Abwickeln stoppen. Die Panic-Meldung wird trotzdem ausgegeben, weil der *Panic-Hook* sie schon vorher schreibt. Ein Panic in `main`, der nicht gefangen wird, beendet den Prozess mit 101.",
+      "begruendungen": [
+        "Richtig.",
+        "101 ist der Exit-Code eines nicht gefangenen Panics, nicht von Erfolg.",
+        "Es ist ein Prozess (dieselbe Thread-ID), mit zwei Panics."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Im `Cargo.toml` steht `[profile.dev] panic = \"abort\"`. Was passiert jetzt beim ersten Panic im `catch_unwind`?",
+      "optionen": [
+        "Der Prozess bricht sofort ab (SIGABRT, Exit-Code 134 in der Shell). `catch_unwind` greift nicht, und `Drop` läuft nicht",
+        "`catch_unwind` fängt ihn wie vorher",
+        "Der Build schlägt fehl, weil `catch_unwind` mit `abort` nicht kompiliert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `abort` gibt es kein Abwickeln: Nach dem Panic-Hook (der die Meldung ausgibt) wird der Prozess beendet. Dafür entfallen die Unwind-Tabellen und Landing Pads, das Binary wird kleiner. Embedded-Projekte nutzen fast immer `abort`. `catch_unwind` kompiliert weiterhin, ist aber wirkungslos.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne Unwinding gibt es nichts mehr zu fangen.",
+        "Es kompiliert, die Funktion fängt nur nichts mehr."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert, wenn `rueckruf(-1)` aufgerufen wird (Standardprofil, also `unwind`)?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "extern \"C\" fn rueckruf(x: i32) -> i32 {",
+          "    if x < 0 { panic!(\"negativ: {x}\"); }",
+          "    x * 2",
+          "}",
+          "",
+          "fn main() {",
+          "    let r = std::panic::catch_unwind(|| rueckruf(-1));",
+          "    println!(\"gefangen: {}\", r.is_err());",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Der Prozess bricht ab: *panic in a function that cannot unwind*. Ein Panic darf eine `extern \"C\"`-Funktion nicht verlassen",
+        "`gefangen: true`",
+        "Undefined Behavior, das Programm läuft mit Zufallswerten weiter"
+      ],
+      "korrekt": 0,
+      "erklaerung": "C-Code kennt Rusts Unwinding nicht. Ein Panic, der durch C-Stackframes läuft, wäre UB. Deshalb fügt rustc an der Grenze einer `extern \"C\"`-Funktion eine Sperre ein: Der Panic führt dort zu einem Abbruch. Für Callbacks, die C aufruft, fängt man Panics deshalb selbst mit `catch_unwind` **innerhalb** der Funktion und gibt einen Fehlercode zurück. Wer bewusst über die Grenze abwickeln will, braucht `extern \"C-unwind\"`.",
+      "begruendungen": [
+        "Richtig. So lautet die Meldung, danach *thread caused non-unwinding panic. aborting.*",
+        "Das `catch_unwind` steht ausserhalb der Grenze und kommt nicht mehr zum Zug.",
+        "Früher war das tatsächlich UB, heute bricht Rust definiert ab."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Panics ohne Betriebssystem",
+      "text": "In `#![no_std]` gibt es keine Standardbibliothek, die bei einem Panic eine Meldung ausgibt und den Prozess beendet. Das Programm muss deshalb **genau eine** Funktion mit `#[panic_handler]` bereitstellen, sonst meldet rustc *`#[panic_handler]` function required, but not found*. Meist kommt sie aus einem Crate: `panic-halt` (Endlosschleife), `panic-probe` (meldet über den Debugger) oder `panic-reset` (Neustart, sinnvoll im Feld). Mehr dazu in Phase 6.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "",
+          "use core::panic::PanicInfo;",
+          "",
+          "#[panic_handler]",
+          "fn panik(_info: &PanicInfo) -> ! {",
+          "    loop {}",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 7,
+            "text": "Rückgabetyp `!`: Die Funktion kehrt nie zurück."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ein Puffer ohne Heap: `heapless::Vec::push` liefert bei vollem Puffer den Wert im `Err` zurück. Ergänze.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use heapless::Vec;",
+          "",
+          "let mut puffer: Vec<u8, {{?}}> = Vec::new();",
+          "for b in 0..6u8 {",
+          "    if let {{?}}(abgelehnt) = puffer.push(b) {",
+          "        zaehle_verworfen(abgelehnt);",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "4"
+          ]
+        },
+        {
+          "loesungen": [
+            "Err"
+          ]
+        }
+      ],
+      "auswahl": [
+        "4",
+        "usize",
+        "Err",
+        "Some",
+        "Ok"
+      ],
+      "erklaerung": "Bei `heapless::Vec<u8, 4>` steht die Kapazität im Typ. `push` gibt `Result<(), u8>` zurück. Ein voller Puffer ist ein erwartbarer Fehler, kein Panic, und der abgelehnte Wert geht nicht verloren. Das ist das typische Muster für Fehlerbehandlung ohne Heap: kleine Fehlerwerte fester Grösse statt `String` oder `Box<dyn Error>`."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Motorsteuerung im Feld panickt wegen eines Bugs. Welche Panic-Strategie ist meist am sinnvollsten?",
+      "optionen": [
+        "Ausgänge in einen sicheren Zustand bringen, Fehler protokollieren und neu starten, statt endlos stehen zu bleiben",
+        "`panic-halt`: Endlosschleife, damit man den Zustand später untersuchen kann",
+        "Den Panic ignorieren und an der nächsten Zeile weitermachen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auf dem Labortisch mit Debugger ist `panic-probe` oder `panic-halt` ideal, im Feld blockiert eine Endlosschleife das Gerät, bis der Watchdog zuschlägt. Viele Projekte schreiben die Panic-Meldung in einen RAM-Bereich, der den Reset überlebt, und lesen sie nach dem Neustart aus. Weiterlaufen nach einem Panic ist nicht möglich, denn der Handler kehrt per Definition nie zurück.",
+      "begruendungen": [
+        "Richtig.",
+        "Gut für die Entwicklung, im Feld bleibt das Gerät aber hängen.",
+        "Ein `#[panic_handler]` hat den Rückgabetyp `!`, Weitermachen ist ausgeschlossen."
+      ]
+    }
+  ],
+  "praxis": "Typische Review-Fragen: Ist dieses `unwrap()` wirklich ein Bug-Fall, und wenn ja, warum steht kein `expect` mit Begründung da? Kann diese `extern \"C\"`-Funktion panicken? Welches `panic`-Profil nutzt die Firmware, und was passiert im Feld? In Safety-Projekten geht man noch weiter und weist nach, dass im Betrieb überhaupt kein Panic möglich ist (Phase 12).",
+  "labor": {
+    "titel": "unwind gegen abort",
+    "anleitung": "Baue das `catch_unwind`-Beispiel und lass es mit beiden Strategien laufen. Vergleiche danach die Grösse der Release-Binaries.",
+    "befehle": [
+      "cargo new panik && cd panik",
+      "cargo run; echo \"exit=$?\"",
+      "cargo run --config 'profile.dev.panic=\"abort\"'; echo \"exit=$?\"",
+      "cargo build --release && ls -l target/release/panik",
+      "RUST_BACKTRACE=1 cargo run"
+    ],
+    "beobachtung": "Mit `unwind` meldet das Programm `Ergebnis: true` und endet mit 101, mit `abort` endet es schon beim ersten Panic mit 134 (SIGABRT). Mit `RUST_BACKTRACE=1` siehst du zusätzlich den Aufrufstapel bis zur Panic-Stelle."
+  },
+  "begriffe": [
+    {
+      "begriff": "Panic",
+      "englisch": "panic",
+      "erklaerung": "Geordneter Abbruch bei einem Programmierfehler. Je nach Profil mit Abwickeln des Stacks (`unwind`) oder sofortigem Abbruch (`abort`)."
+    },
+    {
+      "begriff": "Abwickeln",
+      "englisch": "unwinding",
+      "erklaerung": "Zurücklaufen durch die Stackframes nach einem Panic, wobei alle `Drop`-Implementierungen ausgeführt werden."
+    },
+    {
+      "begriff": "Panic-Handler",
+      "englisch": "panic handler",
+      "erklaerung": "Funktion mit `#[panic_handler]`, die in `no_std` festlegt, was bei einem Panic passiert."
+    },
+    {
+      "begriff": "catch_unwind",
+      "englisch": "catch_unwind",
+      "erklaerung": "Fängt einen abwickelnden Panic in einer Closure und liefert ihn als `Err`. Wirkungslos bei `panic = \"abort\"`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: To panic! or Not to panic!",
+      "url": "https://doc.rust-lang.org/book/ch09-03-to-panic-or-not-to-panic.html"
+    },
+    {
+      "titel": "std::panic::catch_unwind",
+      "url": "https://doc.rust-lang.org/std/panic/fn.catch_unwind.html"
+    },
+    {
+      "titel": "The Rustonomicon",
+      "url": "https://doc.rust-lang.org/nomicon/"
+    }
+  ]
+}

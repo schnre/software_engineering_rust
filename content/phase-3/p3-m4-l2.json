@@ -1,0 +1,190 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m4-l2",
+  "phase": 3,
+  "modul": "3.4 Moderne Bibliothekstypen",
+  "titel": "Smart Pointers und innere Mutabilität",
+  "lernziele": [
+    "Für einen Besitzfall den passenden Smart Pointer wählen: `Box`, `Rc`, `Arc`, `Weak`",
+    "Innere Mutabilität mit `Cell` und `RefCell` verstehen und den Laufzeit-Borrow-Check einschätzen",
+    "Mit `Cow` unnötige Kopien vermeiden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "refcell-panic",
+      "frage": "Der Code kompiliert, stürzt aber ab. Was ist passiert?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "use std::cell::RefCell;",
+          "fn main() {",
+          "    let log = RefCell::new(Vec::<u8>::new());",
+          "    let lesen = log.borrow();",
+          "    log.borrow_mut().push(1);",
+          "    println!(\"{}\", lesen.len());",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "   Compiling projekt v0.1.0 (/home/user/projekt)",
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.65s",
+          "     Running `target/debug/projekt`",
+          "",
+          "thread 'main' (32067) panicked at src/main.rs:5:9:",
+          "RefCell already borrowed",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+        ]
+      },
+      "optionen": [
+        "`RefCell` prüft die Ausleihregeln **zur Laufzeit**. `lesen` hält noch eine geteilte Ausleihe, also scheitert `borrow_mut` mit einem Panic",
+        "`Vec::push` ist bei einem leeren Vektor nicht erlaubt",
+        "Der Borrow-Checker hat den Fehler übersehen, das ist ein Compiler-Bug",
+        "`RefCell` darf nur in Threads verwendet werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Innere Mutabilität** (*interior mutability*) erlaubt Veränderung über eine geteilte Referenz `&T`. `RefCell<T>` zählt dafür aktive Ausleihen: `borrow()` liefert ein `Ref`, `borrow_mut()` ein `RefMut`. Die Regel „viele Leser oder ein Schreiber“ gilt weiter, nur wird ein Verstoss erst zur Laufzeit erkannt. Wer nicht panicen will, nimmt `try_borrow_mut()`, das ein `Result<_, BorrowMutError>` liefert.",
+      "begruendungen": [
+        "Richtig.",
+        "`push` auf einen leeren `Vec` ist völlig normal.",
+        "Die Prüfung ist bewusst auf die Laufzeit verlegt. Genau dafür gibt es `RefCell`.",
+        "`RefCell` ist gerade **nicht** `Sync` und damit für einen einzelnen Thread gedacht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Welcher Pointer wofür?",
+      "text": "Ein **Smart Pointer** ist ein Typ, der wie ein Zeiger benutzt wird (`Deref`) und zusätzlich Besitz oder Zählung verwaltet. Die Wahl folgt zwei Fragen: Wie viele Besitzer gibt es, und muss verändert werden?",
+      "tabelle": {
+        "kopf": ["Typ", "Besitz", "Veränderung", "Threads"],
+        "zeilen": [
+          ["`Box<T>`", "ein Besitzer, Wert auf dem Heap", "über `&mut`", "wie `T`"],
+          ["`Rc<T>`", "geteilt, Zähler nicht atomar", "nur lesend", "nein"],
+          ["`Arc<T>`", "geteilt, atomarer Zähler", "nur lesend", "ja"],
+          ["`Weak<T>`", "kein Besitz, kann ins Leere zeigen", "–", "wie `Rc`/`Arc`"],
+          ["`Cell<T>`", "–", "`get`/`set`, kopiert ganze Werte", "nein"],
+          ["`RefCell<T>`", "–", "Ausleihen mit Laufzeitprüfung", "nein"],
+          ["`Mutex<T>`", "–", "Sperre", "ja (Phase 5)"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "rc-weak",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let a = Rc::new(5);",
+          "let b = Rc::clone(&a);",
+          "let w = Rc::downgrade(&a);",
+          "println!(\"{} {}\", Rc::strong_count(&a), Rc::weak_count(&a));",
+          "drop(b);",
+          "drop(a);",
+          "println!(\"{:?}\", w.upgrade());"
+        ]
+      },
+      "optionen": ["`2 1` und `None`", "`3 0` und `Some(5)`", "`2 1` und `Some(5)`", "`1 1` und `None`"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`Rc::clone` erhöht nur den **starken** Zähler, die Daten werden nicht kopiert. `downgrade` erzeugt einen **`Weak`**, der den Wert nicht am Leben hält. Fällt der starke Zähler auf 0, wird der Wert freigegeben, `upgrade()` liefert dann `None`. Damit bricht man Zyklen auf, etwa die Rückreferenz vom Kind auf den Elternknoten. Zyklen aus reinen `Rc` würden nie freigegeben: ein Speicherleck, das Rust nicht verhindert.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein `Weak` zählt nicht zu den starken Referenzen.",
+        "Nach dem letzten `drop` ist der Wert freigegeben, `upgrade` scheitert.",
+        "`a` und `b` sind zwei starke Referenzen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Typ passt zum Fall?",
+      "paare": [
+        { "links": "Rekursiver Typ wie `enum Ausdruck { Zahl(i32), Summe(?, ?) }`", "rechts": "`Box<Ausdruck>`" },
+        { "links": "Konfiguration, die mehrere Threads lesen", "rechts": "`Arc<Konfig>`" },
+        { "links": "Zähler in einem Struct, der über `&self` erhöht wird", "rechts": "`Cell<u32>`" },
+        { "links": "Rückverweis vom Kind auf den Elternknoten", "rechts": "`Weak<Knoten>`" },
+        { "links": "Mehrere Teile einer GUI teilen sich veränderbaren Zustand in einem Thread", "rechts": "`Rc<RefCell<Zustand>>`" }
+      ],
+      "erklaerung": "Ein rekursiver Typ ohne Indirektion hätte unendliche Grösse (E0072), `Box` macht ihn endlich. `Cell` kopiert Werte rein und raus und braucht darum keine Ausleihzählung, ideal für kleine `Copy`-Typen. `Rc<RefCell<T>>` ist das Einzelthread-Gegenstück zu `Arc<Mutex<T>>`."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Funktion, die nur dann einen neuen `String` anlegt, wenn wirklich etwas ersetzt werden muss.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::borrow::Cow;",
+          "",
+          "fn normalisiere(s: &str) -> Cow<'_, str> {",
+          "    if s.contains(' ') {",
+          "        Cow::{{?}}(s.replace(' ', \"_\"))",
+          "    } else {",
+          "        Cow::{{?}}(s)",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["Owned"] }, { "loesungen": ["Borrowed"] }],
+      "auswahl": ["Owned", "Borrowed", "Boxed", "Shared"],
+      "erklaerung": "**`Cow`** (*clone on write*) enthält entweder eine Ausleihe oder einen eigenen Wert. Im häufigen Fall ohne Leerzeichen gibt es keine Allokation. Der Aufrufer liest beides gleich über `Deref` und kann mit `into_owned()` bei Bedarf einen `String` erzwingen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Auf x86_64: Wie gross sind `Box<u8>` und `Option<Box<u8>>`?",
+      "optionen": ["8 und 8 Bytes", "8 und 16 Bytes", "1 und 2 Bytes", "16 und 16 Bytes"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Eine `Box` ist ein einzelner Zeiger und nie null. Der Compiler nutzt den Nullwert als **Nische** (*niche*) für `None`, `Option<Box<T>>` braucht also keinen Extra-Tag. Dasselbe gilt für `&T`, `Rc<T>`, `NonNull<T>` und `NonZeroU32`. Das ist die sichere Entsprechung zum C-Nullzeiger, ohne dessen Risiken.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Nischenoptimierung spart den Tag.",
+        "Eine `Box` speichert einen Zeiger, nicht den Wert selbst.",
+        "Nur Fat Pointer wie `Box<[u8]>` oder `Box<dyn Trait>` sind 16 Bytes."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Code-Review findet überall `Rc<RefCell<…>>`. Was ist die beste Rückmeldung?",
+      "optionen": [
+        "Prüfen, ob sich die Besitzverhältnisse klarer gestalten lassen: ein Besitzer, der `&mut` ausleiht, oder Indizes in einen `Vec`. `Rc<RefCell>` verschiebt Fehler vom Compiler in die Laufzeit",
+        "Alles auf `Arc<Mutex<…>>` umstellen, das ist sicherer",
+        "In Ordnung, `Rc<RefCell>` ist der idiomatische Standard für Rust",
+        "Durch `unsafe` mit Rohzeigern ersetzen, das ist schneller"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Rc<RefCell<T>>` ist manchmal richtig, etwa bei Graphen oder Callbacks in GUIs. Als Standardlösung zeigt es oft, dass ein Entwurf aus einer Sprache mit Garbage Collector übertragen wurde. Häufig klarer: ein zentraler Besitzer, Arenen mit Indizes (Modul 3.5) oder Nachrichten statt geteiltem Zustand. In `no_std`-Firmware gibt es `Rc` ohne Allokator gar nicht.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ändert das Entwurfsproblem nicht und kostet zusätzlich Atomics und Sperren.",
+        "Es ist ein Werkzeug für Sonderfälle, kein Standard.",
+        "`unsafe` würde die Prüfungen ganz abschalten, ohne das Entwurfsproblem zu lösen."
+      ]
+    }
+  ],
+  "praxis": "`Box<dyn Trait>` für Plugins und Treiber, `Arc` für geteilte Konfiguration in Diensten, `Cow` in Parsern und Protokollschichten. In Firmware ohne Heap gibt es diese Typen nicht. Dort übernehmen `static`-Variablen, `heapless`-Pools und `critical_section::Mutex<RefCell<T>>` (Phase 6) die Rolle des geteilten, veränderbaren Zustands. Die Faustregel bleibt: einfachster Besitz zuerst, Zählung und Laufzeitprüfung nur bei Bedarf.",
+  "labor": {
+    "titel": "Ein Baum mit Rückverweisen",
+    "anleitung": "Baue einen Baum aus `Knoten { wert, kinder: RefCell<Vec<Rc<Knoten>>>, eltern: RefCell<Weak<Knoten>> }`. Gib nach jedem Schritt `strong_count` und `weak_count` aus. Ersetze danach `Weak` durch `Rc` und beobachte, dass `Drop` für die Knoten nicht mehr aufgerufen wird.",
+    "befehle": [
+      "cargo new baum && cd baum",
+      "cargo run",
+      "cargo clippy"
+    ],
+    "beobachtung": "Mit `Weak` werden alle Knoten am Ende freigegeben (eine `Drop`-Impl mit `println!` zeigt es). Mit `Rc` in beide Richtungen entsteht ein Zyklus, und es erscheint keine `Drop`-Ausgabe."
+  },
+  "begriffe": [
+    { "begriff": "Smart Pointer", "englisch": "smart pointer", "erklaerung": "Zeigerartiger Typ, der zusätzlich Besitz, Zählung oder Prüfungen verwaltet." },
+    { "begriff": "Innere Mutabilität", "englisch": "interior mutability", "erklaerung": "Veränderung über eine geteilte Referenz, mit Prüfung zur Laufzeit oder durch Kopieren (`Cell`)." },
+    { "begriff": "Referenzzählung", "englisch": "reference counting", "erklaerung": "Freigabe, sobald der letzte Besitzer verschwindet (`Rc`, `Arc`)." },
+    { "begriff": "Schwache Referenz", "englisch": "weak reference", "erklaerung": "Verweis, der den Wert nicht am Leben hält und Zyklen auflöst (`Weak`)." },
+    { "begriff": "Cow", "englisch": "clone on write", "erklaerung": "Enthält entweder eine Ausleihe oder einen eigenen Wert, kopiert erst bei Bedarf." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Smart Pointers", "url": "https://doc.rust-lang.org/book/ch15-00-smart-pointers.html" },
+    { "titel": "std::cell (Dokumentation)", "url": "https://doc.rust-lang.org/std/cell/index.html" }
+  ]
+}

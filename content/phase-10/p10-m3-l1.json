@@ -1,0 +1,189 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m3-l1",
+  "phase": 10,
+  "modul": "10.3 Ports & Adapters",
+  "titel": "Hexagonale Architektur",
+  "lernziele": [
+    "Ports als Traits des Kerns und Adapter als ihre Implementierungen unterscheiden",
+    "Einen Domänenkern ohne I/O entwerfen, dessen Abhängigkeiten nach innen zeigen",
+    "Einen Ablauf durch treibenden Adapter, Kern und getriebenen Adapter nachvollziehen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "kern-abhaengigkeit",
+      "frage": "Eine Heizungssteuerung speichert Messwerte in SQLite und empfängt Sollwerte per MQTT. Wovon sollte die Regellogik abhängen?",
+      "optionen": [
+        "Von nichts Technischem. SQLite- und MQTT-Code hängen von der Regellogik ab, nicht umgekehrt",
+        "Von `rusqlite`, weil dort die Daten liegen",
+        "Von `rumqttc`, weil MQTT den Ablauf steuert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Regellogik ist der wertvollste und langlebigste Teil. Datenbank, Protokoll und Hardware wechseln öfter: Morgen kommt statt MQTT ein CAN-Bus, statt SQLite ein Flash-Speicher. Hängt der Kern von ihnen ab, zieht jeder Technikwechsel Änderungen an der Fachlogik nach sich, und der Kern ist ohne Datenbank nicht testbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Dann ist die Fachlogik an SQLite gekoppelt und kann z. B. nie auf einem Mikrocontroller laufen.",
+        "MQTT ist nur ein Weg, den Kern anzustossen. Morgen könnte es eine Kommandozeile oder ein Taster sein."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ports und Adapter",
+      "diagramm": {
+        "knoten": ["MQTT-Handler (treibend)", "Kern mit Ports", "SQLite-Speicher (getrieben)"],
+        "beschriftung": "Der Aufruf läuft von links nach rechts, die Abhängigkeiten zeigen beide zum Kern"
+      },
+      "text": "Die **hexagonale Architektur** (Alistair Cockburn, auch *Ports & Adapters*) stellt die Fachlogik in die Mitte:\n\n- Ein **Port** ist ein Trait, den der Kern **selbst definiert**: „Ich muss Messwerte speichern können“ (`MesswertSpeicher`).\n- Ein **Adapter** implementiert einen Port mit konkreter Technik: `SqliteSpeicher`, `FlashSpeicher`, `FakeSpeicher` im Test.\n\n**Treibende** Adapter rufen den Kern auf (MQTT-Handler, Kommandozeile, Tests). **Getriebene** Adapter werden vom Kern aufgerufen (Datenbank, Aktoren, Netzwerk)."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "begriffe",
+      "frage": "Ordne die Begriffe den Beispielen aus der Heizungssteuerung zu.",
+      "paare": [
+        { "links": "Port", "rechts": "`trait MesswertSpeicher` im Kern-Crate" },
+        { "links": "Getriebener Adapter", "rechts": "`impl MesswertSpeicher for SqliteSpeicher`" },
+        { "links": "Treibender Adapter", "rechts": "MQTT-Handler, der `regler.setze_soll(…)` aufruft" },
+        { "links": "Kern", "rechts": "Regellogik mit Hysterese und Plausibilitätsprüfung" },
+        { "links": "Composition Root", "rechts": "`main`, das Adapter erzeugt und dem Kern übergibt" }
+      ],
+      "erklaerung": "Der Unterschied zur Schichtenarchitektur ist vor allem die Sicht: Statt oben und unten gibt es innen und aussen. Datenbank und Bedienoberfläche liegen beide aussen und sind beide austauschbar. Technisch ist es Dependency Inversion (Modul 10.1), angewendet auf das ganze System."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein Port als Trait",
+      "code": {
+        "sprache": "rust",
+        "datei": "kern/src/lib.rs",
+        "zeilen": [
+          "pub struct Messwert {",
+          "    pub milligrad: i32,",
+          "}",
+          "",
+          "pub trait MesswertSpeicher {",
+          "    type Fehler;",
+          "    fn speichere(&mut self, m: Messwert) -> Result<(), Self::Fehler>;",
+          "}",
+          "",
+          "pub fn erfasse<S: MesswertSpeicher>(speicher: &mut S, m: Messwert) -> Result<bool, S::Fehler> {",
+          "    if !(-40_000..=125_000).contains(&m.milligrad) {",
+          "        return Ok(false);",
+          "    }",
+          "    speicher.speichere(m)?;",
+          "    Ok(true)",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Der Name beschreibt die fachliche Aufgabe, nicht die Technik: nicht `Datenbank`, sondern `MesswertSpeicher`." },
+          { "zeile": 6, "text": "Jeder Adapter bringt seinen eigenen Fehlertyp mit. Der Kern muss `rusqlite::Error` nicht kennen." },
+          { "zeile": 11, "text": "Die Fachregel liegt im Kern und ist ohne Datenbank testbar." }
+        ]
+      },
+      "text": "Der Kern kennt nur seine eigenen Typen. Kein SQL, kein Socket, kein Register."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "use-kern",
+      "frage": "Welche Zeile in einer Datei des Kern-Crates verletzt die hexagonale Architektur?",
+      "code": {
+        "sprache": "rust",
+        "datei": "kern/src/regler.rs",
+        "zeilen": [
+          "use core::time::Duration;",
+          "use crate::ports::Aktor;",
+          "use rusqlite::Connection;",
+          "use heapless::Vec;"
+        ]
+      },
+      "optionen": [
+        "Zeile 3: `rusqlite` ist eine konkrete Datenbanktechnik und gehört in einen Adapter",
+        "Zeile 1: `core` ist eine externe Abhängigkeit",
+        "Zeile 2: Ein Kern darf keine Traits importieren",
+        "Zeile 4: Jedes externe Crate im Kern ist verboten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`core` gehört zur Sprache und ist immer erlaubt. Ports aus dem eigenen Crate sind genau der Sinn der Sache. `heapless` ist eine reine Datenstruktur-Bibliothek ohne I/O und ohne Technikbezug, die ist im Kern unproblematisch. Die Grenze ist also nicht „keine Crates“, sondern „keine Crates, die mit der Aussenwelt sprechen“.",
+      "begruendungen": [
+        "Richtig.",
+        "`core` ist Teil der Sprache und überall verfügbar, sogar ohne Betriebssystem.",
+        "Ports sind Traits des Kerns, ihn zu benutzen ist erlaubt und gewollt.",
+        "Reine Hilfs-Crates ohne I/O wie `heapless` sind im Kern in Ordnung."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "ablauf",
+      "frage": "Ein Sollwert kommt per MQTT und führt zum Einschalten der Heizung. In welcher Reihenfolge laufen die Teile?",
+      "elemente": [
+        "Der MQTT-Adapter empfängt die Nachricht und parst sie in einen Kern-Typ `Sollwert`",
+        "Der Adapter ruft `regler.setze_soll(sollwert)` im Kern auf",
+        "Der Kern vergleicht Soll- und Istwert und entscheidet: heizen",
+        "Der Kern ruft den Port `Aktor::schalte(true)` auf",
+        "Der GPIO-Adapter setzt den Relais-Pin über `OutputPin::set_high()`"
+      ],
+      "erklaerung": "Der Aufruf geht von aussen durch den Kern wieder nach aussen. Die **Abhängigkeiten** zeigen aber beide nach innen: Der MQTT-Adapter kennt den Kern, der GPIO-Adapter kennt den Port des Kerns. Der Kern kennt keinen der beiden. Das Parsen in einen Kern-Typ an der Grenze ist „Parse, don't validate“ aus Modul 10.1."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "leck",
+      "frage": "Welche Zeile lässt Technikdetails durch den Port in den Kern sickern?",
+      "code": {
+        "sprache": "rust",
+        "datei": "kern/src/ports.rs",
+        "zeilen": [
+          "use crate::Messwert;",
+          "",
+          "pub trait MesswertSpeicher {",
+          "    type Fehler;",
+          "",
+          "    fn speichere(&mut self, m: Messwert) -> Result<(), Self::Fehler>;",
+          "",
+          "    fn lade_letzte(&mut self, anzahl: usize) -> Result<Vec<Messwert>, Self::Fehler>;",
+          "",
+          "    fn fuehre_sql_aus(&mut self, sql: &str) -> Result<usize, Self::Fehler>;",
+          "}"
+        ]
+      },
+      "fehlerZeile": 10,
+      "erklaerung": "Ein Port, der SQL entgegennimmt, zwingt jeden Adapter, SQL zu verstehen. Ein Flash-Adapter oder ein Fake im Test kann das nicht sinnvoll umsetzen, und die Fachlogik schreibt plötzlich Datenbankabfragen. Das ist eine **undichte Abstraktion** (leaky abstraction). Was der Kern damit eigentlich will, gehört als fachliche Methode in den Port, etwa `loesche_aelter_als(zeit)`."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "nutzen",
+      "frage": "Was ist der grösste Gewinn dieser Architektur gerade für Embedded-Projekte?",
+      "optionen": [
+        "Der Kern läuft unverändert auf dem Mikrocontroller, auf dem Host in Tests und in einer Simulation. Nur die Adapter unterscheiden sich",
+        "Die Firmware wird automatisch kleiner",
+        "Man braucht keine Integrationstests mehr auf der Zielhardware"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Fachlogik, wo die meisten und teuersten Fehler entstehen, ist mit `cargo test` auf dem Entwicklungsrechner in Millisekunden testbar. Adapter sind dünn und brauchen nur wenige Tests auf echter Hardware. Wie man das in einem Cargo-Workspace mit getrennten Crates erzwingt, zeigt die nächste Lektion.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Grösse hängt von der Umsetzung ab. Generics können sie sogar erhöhen.",
+        "Adapter und das Zusammenspiel mit echter Hardware müssen weiterhin getestet werden."
+      ]
+    }
+  ],
+  "praxis": "Ports & Adapters lohnt sich besonders bei langlebiger Fachlogik und wechselnder Technik: Steuerungen, Medizingeräte, Fahrzeugfunktionen, Gateways. Für ein kleines Kommandozeilenwerkzeug ist es oft zu viel. Im Review prüfst du die `use`-Zeilen und `Cargo.toml` des Kerns: Taucht dort eine Datenbank-, Netzwerk- oder HAL-Bibliothek auf, ist die Grenze verletzt. Ebenso verdächtig sind Ports, deren Methoden nach Technik klingen (`execute_sql`, `write_register`).",
+  "labor": {
+    "titel": "Den Kern freilegen",
+    "anleitung": "Prüfe in einem eigenen Projekt, ob die Fachlogik technische Crates benutzt. Suche nach typischen I/O-Crates in den Modulen, die du als Kern betrachtest.",
+    "befehle": [
+      "rg -n 'use (rusqlite|tokio|reqwest|rumqttc|std::fs|std::net)' src/domain/ src/kern/",
+      "cargo tree -e normal --depth 1"
+    ],
+    "beobachtung": "Jeder Treffer in der Fachlogik ist ein Kandidat für einen neuen Port. Der Abhängigkeitsbaum zeigt, welche technischen Crates überhaupt im Spiel sind und wo man die Grenze ziehen könnte."
+  },
+  "begriffe": [
+    { "begriff": "Hexagonale Architektur", "englisch": "hexagonal architecture, ports and adapters", "erklaerung": "Der fachliche Kern ist unabhängig von Technik. Er definiert Ports, die Adapter umsetzen." },
+    { "begriff": "Port", "englisch": "port", "erklaerung": "Trait, den der Kern definiert, um mit der Aussenwelt zu sprechen, benannt nach der fachlichen Aufgabe." },
+    { "begriff": "Adapter", "englisch": "adapter", "erklaerung": "Implementierung eines Ports mit konkreter Technik, z. B. SQLite, MQTT oder ein GPIO-Pin." },
+    { "begriff": "Undichte Abstraktion", "englisch": "leaky abstraction", "erklaerung": "Eine Schnittstelle gibt Details ihrer Implementierung nach aussen weiter." }
+  ],
+  "weiterlesen": [
+    { "titel": "Alistair Cockburn: Hexagonal Architecture", "url": "https://alistair.cockburn.us/hexagonal-architecture/" },
+    { "titel": "The Rust Programming Language, Kapitel 10.2: Traits", "url": "https://doc.rust-lang.org/book/ch10-02-traits.html" }
+  ]
+}

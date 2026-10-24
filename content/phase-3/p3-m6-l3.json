@@ -1,0 +1,198 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m6-l3",
+  "phase": 3,
+  "modul": "3.6 Neue Sprachmittel",
+  "titel": "async/await und Editionen",
+  "lernziele": [
+    "Erklären, wie `async fn` zu einer Zustandsmaschine wird und welche Rolle der Executor spielt",
+    "Nicht-`Send`-Futures erkennen und beheben",
+    "Editionen und den Release-Zyklus von Rust einordnen und eine Migration mit `cargo fix --edition` durchführen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "future-lazy",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "async fn a() -> u32 {",
+          "    println!(\"a\");",
+          "    1",
+          "}",
+          "",
+          "fn main() {",
+          "    let f = a();",
+          "    println!(\"erzeugt\");",
+          "    drop(f);",
+          "}"
+        ]
+      },
+      "optionen": ["Nur `erzeugt`", "`a`, dann `erzeugt`", "`erzeugt`, dann `a`", "Compilerfehler: `async fn` braucht einen Executor"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Der Aufruf einer `async fn` führt **nichts** aus. Er liefert ein **Future**, einen Wert, der die Arbeit beschreibt. Erst wenn jemand das Future pollt, typischerweise ein **Executor** über `.await`, läuft der Rumpf. Hier wird es ungepollt gedroppt, `a` erscheint nie. Futures sind also lazy wie Iteratoren. Unbenutzte Futures meldet rustc mit der Warnung `unused_must_use`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Rumpf läuft erst beim ersten `poll`, nicht beim Aufruf.",
+        "Das Future wird nie gepollt, sondern gedroppt.",
+        "Ein Future zu erzeugen braucht keinen Executor, nur es auszuführen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zustandsmaschine statt Thread",
+      "text": "Der Compiler macht aus jeder `async fn` ein anonymes Enum mit einer Variante pro `.await`-Punkt. Jede Variante speichert die lokalen Variablen, die über diesen Punkt hinweg leben. Der Trait **`Future`** hat eine Methode: `poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Output>`. Sie liefert `Ready(wert)` oder `Pending`. Bei `Pending` registriert das Future über `cx.waker()`, wer es wieder wecken soll.\n\nEin **Executor** (`tokio`, `embassy-executor`) pollt Futures, sobald sie geweckt werden. Keine eigenen Stacks, kein Betriebssystem nötig: Ein Future ist nur so gross wie sein grösster Zustand. Im Versuch belegt eine `async fn` mit einem `[u8; 1024]` über einem `.await` 1026 Bytes. Weil die Zustände Zeiger auf eigene Felder enthalten können, braucht `poll` `Pin` (Modul 3.5).",
+      "diagramm": {
+        "knoten": ["Start", "Warte auf Sensor (Pending)", "Waker weckt Task", "Warte auf UART (Pending)", "Ready(Ergebnis)"],
+        "beschriftung": "Eine async fn als Zustandsmaschine: Jeder .await-Punkt ist ein Zustand"
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "future-nicht-send",
+      "frage": "`tokio::spawn` verlangt ein `Send`-Future. Was ist hier das Problem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "async fn aufgabe() {",
+          "    let r = Rc::new(5);",
+          "    lese().await;",
+          "    println!(\"{r}\");",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: future cannot be sent between threads safely",
+          "  |",
+          "  = help: within `impl Future<Output = ()>`, the trait `Send` is not implemented for `Rc<i32>`",
+          "note: future is not `Send` as this value is used across an await",
+          " --> src/main.rs:5:12",
+          "  |",
+          "4 |     let r = Rc::new(5);",
+          "  |         - has type `Rc<i32>` which is not `Send`",
+          "5 |     lese().await;",
+          "  |            ^^^^^ await occurs here, with `r` maybe used later"
+        ]
+      },
+      "optionen": [
+        "`r` lebt über das `.await` hinweg und wird damit Teil des Futures. Weil `Rc` nicht `Send` ist, ist es das Future auch nicht",
+        "`async fn` darf grundsätzlich kein `Rc` enthalten",
+        "`println!` ist in async-Code nicht erlaubt",
+        "`lese()` muss selbst `Send` zurückgeben, sonst scheitert jeder Aufrufer"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Multithread-Executor darf eine Task zwischen zwei Polls auf einen anderen Thread verschieben. Darum muss alles, was über ein `.await` hinweg gespeichert wird, `Send` sein. Lösungen: `Arc` statt `Rc`, den Wert vor dem `.await` droppen (eigener Block `{ … }`) oder einen Einzelthread-Executor verwenden. Embassy läuft auf einem Kern und verlangt in vielen Fällen kein `Send`.",
+      "begruendungen": [
+        "Richtig.",
+        "`Rc` ist erlaubt, solange es nicht über ein `.await` lebt oder das Future nicht `Send` sein muss.",
+        "`println!` ist unproblematisch.",
+        "Das Problem ist die Variable `r`, rustc zeigt genau auf sie."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Neuerungen der Edition zu.",
+      "paare": [
+        { "links": "Edition 2015", "rechts": "Rust 1.0, `extern crate` nötig, `try!`-Makro" },
+        { "links": "Edition 2018", "rechts": "`async`/`await` als Schlüsselwörter, neues Pfadsystem ohne `extern crate`, `dyn Trait`" },
+        { "links": "Edition 2021", "rechts": "Disjunkte Captures in Closures, `TryFrom`/`TryInto` im Prelude, `array.into_iter()` liefert Werte" },
+        { "links": "Edition 2024", "rechts": "`gen` reserviert, `unsafe extern`, `#[unsafe(no_mangle)]`, RPIT erfasst alle Lebensdauern" }
+      ],
+      "erklaerung": "Eine **Edition** ändert Details der Syntax und der Regeln, die sonst inkompatibel wären. Sie wird pro Crate in `Cargo.toml` gewählt. Crates verschiedener Editionen lassen sich beliebig mischen, denn alle übersetzen in dieselbe Zwischendarstellung. Das ist der grosse Unterschied zu C++-Standards: Niemand muss alle Abhängigkeiten gleichzeitig migrieren."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "cargo-fix-edition",
+      "frage": "Ein Crate soll von Edition 2021 auf 2024 wechseln. Was hat dieser Befehl getan?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs (vorher)",
+        "zeilen": [
+          "fn main() {",
+          "    let gen = 5;",
+          "    println!(\"{gen}\");",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo fix --edition",
+        "ausgabe": [
+          "   Migrating Cargo.toml from 2021 edition to 2024",
+          "    Checking projekt v0.1.0 (/home/user/projekt)",
+          "   Migrating src/main.rs from 2021 edition to 2024",
+          "       Fixed src/main.rs (1 fix)",
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s"
+        ]
+      },
+      "optionen": [
+        "Er hat den Code so umgeschrieben, dass er in **beiden** Editionen gilt (hier `let r#gen = 5;`). Die Edition in `Cargo.toml` stellt man danach selbst auf 2024",
+        "Er hat das Crate bereits auf Edition 2024 umgestellt, es ist nichts mehr zu tun",
+        "Er hat alle Abhängigkeiten auf Edition 2024 aktualisiert",
+        "Er hat nur Warnungen ausgegeben, ohne Dateien zu ändern"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`gen` ist ab 2024 ein reserviertes Schlüsselwort. `cargo fix --edition` ersetzt es durch den **Raw Identifier** `r#gen`, der in beiden Editionen gültig ist. Im Versuch mit Cargo 1.97 stand danach in `Cargo.toml` weiterhin `edition = \"2021\"`. Der empfohlene Ablauf: `cargo fix --edition`, Edition in `Cargo.toml` ändern, `cargo build` und Tests, danach optional `cargo fix --edition-idioms`.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Edition in `Cargo.toml` blieb unverändert, das ist ein eigener Schritt.",
+        "Abhängigkeiten behalten ihre eigene Edition, das ist gerade der Sinn des Konzepts.",
+        "Die Meldung „Fixed src/main.rs (1 fix)“ zeigt eine Änderung."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie kommen neue Sprachmittel in stable Rust?",
+      "optionen": [
+        "Über einen RFC und eine Implementierung hinter einem Feature-Gate auf nightly. Nach der Stabilisierung erscheinen sie in einem Release, das alle sechs Wochen erscheint",
+        "Alle drei Jahre mit einer neuen Edition",
+        "Durch eine ISO-Abstimmung",
+        "Sobald sie auf crates.io genug Downloads haben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust folgt dem **Zugmodell** (*train model*): nightly → beta → stable, alle sechs Wochen ein Release (z. B. 1.97). Neue Features erscheinen in normalen Releases und sind meist in allen Editionen nutzbar. Editionen (ca. alle drei Jahre) bündeln nur die wenigen inkompatiblen Änderungen. Was ein Release bringt, steht im Rust-Blog. Der Fehler E0658 (Modul 3.5) zeigt ein noch instabiles Feature an.",
+      "begruendungen": [
+        "Richtig.",
+        "Editionen bringen nur inkompatible Änderungen, die meisten Features kommen in regulären Releases.",
+        "Rust wird vom Rust-Projekt mit seinen Teams entwickelt, nicht von der ISO.",
+        "Crates sind keine Sprachmittel, auch wenn manche später in `std` aufgenommen werden."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Ein `async fn` liefert beim Aufruf ein {{?}}, das erst ausgeführt wird, wenn ein {{?}} es pollt. Ein neues stable Rust erscheint alle {{?}} Wochen, inkompatible Änderungen bündelt eine {{?}}.",
+      "luecken": [{ "loesungen": ["Future"] }, { "loesungen": ["Executor"] }, { "loesungen": ["sechs"] }, { "loesungen": ["Edition"] }],
+      "auswahl": ["Future", "Executor", "sechs", "Edition", "Thread", "zwölf", "Version"],
+      "erklaerung": "Für Embedded ist async besonders attraktiv: Embassy verwaltet mehrere Tasks ohne RTOS und ohne eigene Stacks pro Task. Mehr dazu in Phase 7."
+    }
+  ],
+  "praxis": "async ist in Rust nicht nur für Webserver: Mit Embassy schreibt man Firmware, in der jede Task wie sequenzieller Code aussieht (`uart.read(&mut buf).await`), während der Prozessor zwischen den Interrupts schläft. Die häufigsten Stolpersteine sind nicht-`Send`-Futures, blockierende Aufrufe in async-Code und zu grosse Futures auf kleinen Stacks. Bei Editionen gilt: Neue Crates mit der aktuellen Edition beginnen, bestehende mit `cargo fix --edition` migrieren, wenn ohnehin Arbeit am Crate ansteht.",
+  "labor": {
+    "titel": "Futures und Editionen untersuchen",
+    "anleitung": "Gib mit `std::mem::size_of_val(&fut)` die Grösse mehrerer Futures aus, ohne sie auszuführen: eines leeren, eines mit einem grossen Array über einem `.await` und eines, das das Array vor dem `.await` droppt. Migriere danach ein kleines Crate mit `edition = \"2021\"` und einer Variablen `gen` nach 2024.",
+    "befehle": [
+      "cargo new futures && cd futures",
+      "cargo run",
+      "cargo fix --edition --allow-dirty",
+      "cargo build"
+    ],
+    "beobachtung": "Das Future mit dem Array über dem `.await` ist rund 1 KiB gross, ohne das Array über dem `.await` nur wenige Bytes. `cargo fix` ersetzt `gen` durch `r#gen`. Die Edition in `Cargo.toml` stellst du anschliessend von Hand um."
+  },
+  "begriffe": [
+    { "begriff": "Future", "englisch": "future", "erklaerung": "Wert, der eine noch nicht abgeschlossene Berechnung beschreibt und über `poll` vorangetrieben wird." },
+    { "begriff": "Executor", "englisch": "executor", "erklaerung": "Laufzeit, die Futures pollt, wenn sie geweckt werden, z. B. tokio oder embassy-executor." },
+    { "begriff": "Waker", "englisch": "waker", "erklaerung": "Handle, mit dem ein Future dem Executor meldet, dass es wieder gepollt werden soll." },
+    { "begriff": "Edition", "englisch": "edition", "erklaerung": "Pro Crate gewählte Sprachvariante, die inkompatible Änderungen bündelt (2015, 2018, 2021, 2024)." },
+    { "begriff": "Raw Identifier", "englisch": "raw identifier", "erklaerung": "Bezeichner mit `r#`-Präfix, der auch reservierte Wörter als Namen erlaubt." }
+  ],
+  "weiterlesen": [
+    { "titel": "Asynchronous Programming in Rust", "url": "https://rust-lang.github.io/async-book/" },
+    { "titel": "The Rust Edition Guide", "url": "https://doc.rust-lang.org/edition-guide/" },
+    { "titel": "Embassy", "url": "https://embassy.dev/" }
+  ]
+}

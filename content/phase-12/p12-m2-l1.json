@@ -1,0 +1,283 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m2-l1",
+  "phase": 12,
+  "modul": "12.2 Sicher entwerfen",
+  "titel": "Sichere Zustände, Watchdog und Panics",
+  "lernziele": [
+    "Sichere Zustände, Redundanz und Plausibilisierung als Entwurfsmuster einsetzen",
+    "Einen Watchdog so einsetzen, dass er wirklich den Programmfluss überwacht",
+    "Panics im Safety-Kontext vermeiden und mit Clippy-Lints und `Result` nachweisbar ausschliessen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "sicherer-zustand",
+      "frage": "Was ist der **sichere Zustand** einer Industriepresse, wenn die Steuerung einen Fehler erkennt?",
+      "optionen": [
+        "Die Bewegung stoppen und die Antriebe energielos schalten",
+        "Mit reduzierter Geschwindigkeit weiterlaufen",
+        "Die Steuerung neu starten und den Hub fortsetzen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **sicherer Zustand** (*safe state*) ist ein Zustand ohne unvertretbares Risiko, den das System bei einem Fehler zuverlässig erreicht. Bei vielen Maschinen ist das „aus“ (*fail-safe*). Bei einer Lenkung wäre „aus“ gerade gefährlich. Dann braucht es eingeschränkten Weiterbetrieb (*fail-operational*), meist mit Redundanz.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Notbetrieb ist nur zulässig, wenn seine Sicherheit nachgewiesen ist.",
+        "Ein Neustart ohne Ursachenanalyse kann den Fehler wiederholen, mitten im Hub."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "muster",
+      "frage": "Ordne die Muster zu.",
+      "paare": [
+        {
+          "links": "Fail-safe",
+          "rechts": "Bei einem Fehler in einen sicheren, meist abgeschalteten Zustand"
+        },
+        {
+          "links": "Fail-operational",
+          "rechts": "Bei einem Fehler mit eingeschränkter Funktion weiterarbeiten"
+        },
+        {
+          "links": "1oo2 (one out of two)",
+          "rechts": "Zwei Kanäle, jeder kann allein abschalten"
+        },
+        {
+          "links": "2oo3 (two out of three)",
+          "rechts": "Drei Kanäle mit Mehrheitsentscheid, ein Ausfall wird toleriert"
+        },
+        {
+          "links": "Diversität",
+          "rechts": "Verschiedene Umsetzungen gegen gemeinsame Fehlerursachen"
+        }
+      ],
+      "erklaerung": "Zwei identische Kanäle mit derselben Software machen denselben Fehler zur selben Zeit (*common cause failure*). Darum ist der Überwachungskanal oft bewusst einfacher und anders gebaut: ein vereinfachtes Modell, ein anderer Algorithmus oder ein separater Mikrocontroller."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "plausibilisierung",
+      "frage": "Was leistet diese Plausibilisierung eines Temperatursensors (zulässig: −40 bis 125 °C, höchstens 5 K pro Zyklus)?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub enum SensorFehler { AusserhalbBereich, ZuSchnelleAenderung }",
+          "",
+          "impl Plausibilisierung {",
+          "    pub fn pruefe(&mut self, roh: i16) -> Result<i16, SensorFehler> {",
+          "        if !(-40..=125).contains(&roh) {",
+          "            return Err(SensorFehler::AusserhalbBereich);",
+          "        }",
+          "        if let Some(alt) = self.letzter",
+          "            && (roh - alt).abs() > 5",
+          "        {",
+          "            return Err(SensorFehler::ZuSchnelleAenderung);",
+          "        }",
+          "        self.letzter = Some(roh);",
+          "        Ok(roh)",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 8,
+            "text": "`let`-Kette (*let chain*), stabil seit Edition 2024."
+          }
+        ]
+      },
+      "optionen": [
+        "Sie erkennt Werte ausserhalb des physikalisch möglichen Bereichs und unplausible Sprünge und gibt beides als eigenen Fehlertyp zurück, über den der Aufrufer entscheiden muss",
+        "Sie korrigiert falsche Messwerte automatisch",
+        "Sie panikt bei einem unplausiblen Wert, damit das System sicher stoppt",
+        "Sie erkennt jeden Sensorfehler, auch einen langsam driftenden Sensor"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Plausibilisierung** (*plausibility check*) prüft Wertebereich, Änderungsrate oder den Vergleich mit anderen Quellen. Weil `Result` mit `#[must_use]` markiert ist, warnt der Compiler, wenn der Aufrufer den Fehler ignoriert. Wie lange ein Ersatzwert gilt und wann ein Fehler entprellt wieder verschwindet, gehört als Anforderung in die Spezifikation.",
+      "begruendungen": [
+        "Richtig.",
+        "Sie meldet nur. Die Reaktion (Ersatzwert, sicherer Zustand) ist eine Entwurfsentscheidung des Aufrufers.",
+        "Es gibt hier kein `panic!`. Gerade das ist gewollt: Fehler sind Werte, keine Abstürze.",
+        "Eine langsame Drift innerhalb von 5 K pro Zyklus bleibt unentdeckt. Dafür braucht es z. B. einen zweiten Sensor."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Panics im Safety-Kontext",
+      "text": "Ein Panic ist in Rust die geordnete Reaktion auf einen verletzten Vertrag, etwa einen Index ausserhalb des Slices. Auf dem Mikrocontroller landet er im `#[panic_handler]` (Phase 6). Im sicherheitsrelevanten Betrieb gilt aber: **Kein Panic als normale Fehlerbehandlung**. Jeder mögliche Panic ist ein ungeplanter Sprung in den sicheren Zustand, und davon will man im Betrieb keinen sehen.\n\nPraktisch heisst das:\n\n- Fehler als `Result` durchreichen, `?` statt `unwrap()`\n- `get()` statt `[]`, `checked_*`/`saturating_*` statt blanker Arithmetik\n- Clippy-Lints wie `unwrap_used`, `expect_used`, `indexing_slicing`, `panic` auf `deny` setzen\n- Der `#[panic_handler]` bleibt trotzdem als letzte Linie: sicheren Zustand herstellen, Ursache speichern, Reset"
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "clippy-panics",
+      "frage": "Das Team hat Panic-Lints aktiviert. Was zeigt diese Ausgabe?",
+      "terminal": {
+        "befehl": "cargo clippy",
+        "ausgabe": [
+          "error: indexing may panic",
+          " --> src/lib.rs:4:18",
+          "  |",
+          "4 |     let erster = werte[0];",
+          "  |                  ^^^^^^^^",
+          "  |",
+          "  = help: consider using `.get(n)` or `.get_mut(n)` instead",
+          "",
+          "error: used `unwrap()` on a `Result` value",
+          " --> src/lib.rs:6:13",
+          "  |",
+          "6 |     let n = u32::try_from(werte.len()).unwrap();",
+          "  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: if this value is an `Err`, it will panic"
+        ]
+      },
+      "optionen": [
+        "Zwei Stellen, an denen der Code im Betrieb paniken könnte. Mit `deny` bricht der Build ab, bis sie umgebaut oder einzeln begründet freigegeben sind",
+        "Zwei Compilerfehler von rustc, das Programm ist ungültiges Rust",
+        "Zwei Warnungen, die man im Release-Build ignorieren kann",
+        "Clippy beweist, dass der restliche Code panikfrei ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Lints sind *restriction*-Lints und standardmässig aus. Man aktiviert sie z. B. im Abschnitt `[lints.clippy]` der `Cargo.toml`. Begründete Ausnahmen werden mit `#[expect(clippy::indexing_slicing, reason = \"...\")]` dokumentiert und im Review geprüft. Clippy erfasst aber nicht jede Panic-Quelle: Überläufe, Division durch null oder Panics in Abhängigkeiten brauchen weitere Mittel.",
+      "begruendungen": [
+        "Richtig.",
+        "Es sind Clippy-Lints, die mit `deny` zu Fehlern hochgestuft wurden. Für rustc ist der Code gültig.",
+        "Mit `deny` bricht der Build ab, und in Safety-Code ist ein möglicher Panic kein Schönheitsfehler.",
+        "Clippy findet nur bestimmte Muster. Ein Nachweis der Panikfreiheit braucht mehr, z. B. Kani oder eine Prüfung des Binärcodes."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "no-panic",
+      "frage": "Wie kann man für eine kritische Funktion **nachweisen**, dass der optimierte Code keinen Panic-Pfad mehr enthält?",
+      "optionen": [
+        "Mit dem Crate `no_panic`: Das Attribut `#[no_panic]` lässt den Build (Linken) fehlschlagen, wenn der Compiler einen Panic-Pfad nicht wegoptimieren konnte",
+        "Mit `panic = \"abort\"` im Release-Profil",
+        "Mit `#![forbid(unsafe_code)]`",
+        "Indem man `RUST_BACKTRACE=0` setzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`no_panic` nutzt einen Linker-Trick: Bleibt ein Panic-Pfad im optimierten Code, verweist er auf ein nicht existierendes Symbol. Das funktioniert nur mit Optimierung und ist abhängig vom Compiler, ist aber ein starkes Signal. Ergänzend kann man im fertigen Binary mit `nm` prüfen, ob Symbole wie `panic_bounds_check` überhaupt vorkommen, oder mit Kani beweisen, dass kein Panic erreichbar ist.",
+      "begruendungen": [
+        "Richtig.",
+        "`abort` ändert nur, was nach dem Panic passiert, nicht ob er auftreten kann.",
+        "`unsafe` und Panics sind verschiedene Themen. Sicherer Code kann jederzeit paniken.",
+        "Das steuert nur die Ausgabe der Rückverfolgung."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "watchdog",
+      "frage": "Der Watchdog soll erkennen, wenn die Regelschleife hängt. Welche Zeile macht ihn wirkungslos?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[interrupt]",
+          "fn SYSTICK() {",
+          "    WATCHDOG.lock(|wd| wd.fuettern());",
+          "}",
+          "",
+          "fn hauptschleife() -> ! {",
+          "    loop {",
+          "        lese_sensoren();",
+          "        regle();",
+          "        schreibe_ausgaenge();",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "Der Timer-Interrupt füttert den Watchdog unabhängig davon, ob die Hauptschleife noch läuft. Hängt `regle()` in einer Endlosschleife, laufen die Interrupts weiter, und der Watchdog merkt nichts. Richtig ist, ihn am Ende eines vollständigen Zyklus zu füttern und vorher zu prüfen, ob alle Schritte erreicht wurden (**Programmflussüberwachung**). Ein **Fenster-Watchdog** erkennt zusätzlich zu frühes Füttern, ein externer Watchdog auch einen defekten Takt des Mikrocontrollers."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-panic",
+      "frage": "Ergänze die Lint-Konfiguration in der `Cargo.toml`.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[lints.clippy]",
+          "{{?}} = \"deny\"",
+          "expect_used = \"deny\"",
+          "{{?}} = \"deny\"",
+          "panic = \"{{?}}\""
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "unwrap_used"
+          ]
+        },
+        {
+          "loesungen": [
+            "indexing_slicing"
+          ]
+        },
+        {
+          "loesungen": [
+            "deny"
+          ]
+        }
+      ],
+      "auswahl": [
+        "unwrap_used",
+        "indexing_slicing",
+        "deny",
+        "allow",
+        "unsafe_code",
+        "pedantic"
+      ],
+      "erklaerung": "Mit `[lints]` in der `Cargo.toml` gilt die Einstellung für das ganze Crate und ist im Review sichtbar. `allow` würde den Lint abschalten, `pedantic` ist eine ganze Gruppe von Stil-Lints."
+    }
+  ],
+  "praxis": "Sicherheit entsteht im Entwurf: Welche Fehler sind möglich, wie werden sie erkannt, was ist die Reaktion, und wie schnell muss sie kommen (*fault tolerant time interval*)? In Rust-Projekten bewährt sich eine klare Trennung: Der sicherheitsrelevante Kern ist panikfrei, arbeitet mit `Result` und festen Fehlertypen und hat die Panic-Lints auf `deny`. Der `#[panic_handler]` stellt trotzdem den sicheren Zustand her und speichert die Ursache für die Analyse, denn „kann nicht passieren“ ist keine Fehlerreaktion.",
+  "labor": {
+    "titel": "Panic-Quellen sichtbar machen",
+    "anleitung": "Lege ein Bibliotheks-Crate an, schreibe eine Funktion mit Indexzugriff und `unwrap()`, aktiviere die Lints und baue die Funktion panikfrei um (`get`, `?`, `Option`). Prüfe anschliessend im Release-Binary, welche Panic-Symbole noch vorkommen.",
+    "befehle": [
+      "cargo new --lib sensor && cd sensor",
+      "cargo clippy -- -D clippy::unwrap_used -D clippy::indexing_slicing -D clippy::panic",
+      "cargo build --release",
+      "nm -C target/release/libsensor.rlib 2>/dev/null | grep -i panic | head"
+    ],
+    "beobachtung": "Clippy zeigt jede gefundene Stelle mit einem Vorschlag. Nach dem Umbau verschwinden die Meldungen. Ob im fertigen Binary noch Panic-Pfade stecken, entscheidet erst der Optimierer. Darum ergänzen Teams die Lints mit `no_panic` oder Kani."
+  },
+  "begriffe": [
+    {
+      "begriff": "Sicherer Zustand",
+      "englisch": "safe state",
+      "erklaerung": "Zustand ohne unvertretbares Risiko, den das System bei einem Fehler einnimmt."
+    },
+    {
+      "begriff": "Plausibilisierung",
+      "englisch": "plausibility check",
+      "erklaerung": "Prüfung eines Werts auf physikalische und logische Glaubwürdigkeit."
+    },
+    {
+      "begriff": "Fenster-Watchdog",
+      "englisch": "window watchdog",
+      "erklaerung": "Watchdog, der nur innerhalb eines Zeitfensters gefüttert werden darf und so auch zu schnelles Laufen erkennt."
+    },
+    {
+      "begriff": "Gemeinsame Fehlerursache",
+      "englisch": "common cause failure",
+      "erklaerung": "Ein Fehler, der mehrere redundante Kanäle gleichzeitig ausfallen lässt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Clippy Documentation",
+      "url": "https://doc.rust-lang.org/clippy/"
+    },
+    {
+      "titel": "docs.rs: no-panic",
+      "url": "https://docs.rs/no-panic"
+    },
+    {
+      "titel": "The Embedded Rust Book",
+      "url": "https://docs.rust-embedded.org/book/"
+    }
+  ]
+}

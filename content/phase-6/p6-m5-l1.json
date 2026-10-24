@@ -1,0 +1,175 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m5-l1",
+  "phase": 6,
+  "modul": "6.5 Kommunikationsschnittstellen",
+  "titel": "UART und serielle Ausgabe",
+  "lernziele": [
+    "Baudrate und Rahmenformat einer UART erklären und Übertragungszeiten berechnen",
+    "Nicht-blockierende (`nb`) und blockierende Schnittstellen in `embedded-hal-nb` und `embedded-io` unterscheiden",
+    "Formatierte Ausgabe mit `core::fmt::Write` ohne `std` umsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "uart-was",
+      "frage": "Was kennzeichnet eine **UART**-Verbindung?",
+      "optionen": [
+        "Asynchron: Es gibt keine Taktleitung, beide Seiten müssen sich vorher auf dieselbe Baudrate einigen",
+        "Ein gemeinsamer Takt wird vom Master mitgeschickt",
+        "Mehrere Geräte hängen mit Adressen an zwei Leitungen",
+        "Sie funktioniert nur mit USB"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine **UART** (*universal asynchronous receiver-transmitter*) hat nur TX und RX (plus Masse). Der Empfänger synchronisiert sich auf jedes Startbit und tastet die folgenden Bits zur erwarteten Zeit ab. Weichen die Baudraten mehr als ein paar Prozent ab, kommt Datenmüll an. Darum muss beim Konfigurieren der Takt des Chips stimmen.",
+      "begruendungen": [
+        "Richtig.",
+        "Das beschreibt synchrone Schnittstellen wie SPI oder I²C.",
+        "Das ist I²C.",
+        "USB-Seriell-Wandler sind verbreitet, aber die UART selbst ist viel einfacher."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Rahmen",
+      "text": "Das übliche Format heisst **8N1**: ein Startbit (Low), 8 Datenbits (niederwertigstes zuerst), keine Parität, ein Stoppbit (High). Pro Byte gehen also 10 Bit über die Leitung.",
+      "diagramm": {
+        "knoten": ["Ruhe (High)", "Startbit", "D0 … D7", "Stoppbit", "Ruhe oder nächstes Startbit"],
+        "beschriftung": "Ein UART-Rahmen im Format 8N1"
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "uart-zeit",
+      "frage": "Wie lange dauert es, 100 Byte mit 115 200 Baud im Format 8N1 zu senden?",
+      "optionen": ["Etwa 8,7 ms", "Etwa 6,9 ms", "Etwa 0,87 ms", "Etwa 87 ms"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "100 Byte · 10 Bit = 1000 Bit. 1000 / 115 200 ≈ 8,7 ms. Für einen Mikrocontroller mit 100 MHz sind das fast 900 000 Takte. Blockierend zu senden, verschwendet also viel Zeit. Darum gibt es nicht-blockierende APIs, Interrupts und DMA (Modul 6.6).",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre mit 8 Bit pro Byte, Start- und Stoppbit vergessen.",
+        "Um eine Zehnerpotenz verrechnet.",
+        "Das wäre bei 11 520 Baud."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "nb, blockierend und embedded-io",
+      "text": "In `embedded-hal` 1.0 gibt es keine UART-Traits mehr im Hauptcrate. Stattdessen:\n\n- **`embedded-hal-nb`**: `serial::Write::write(&mut self, word) -> nb::Result<(), E>` liefert sofort `Err(nb::Error::WouldBlock)`, wenn das Senderegister belegt ist\n- **`embedded-io`**: `Write::write(&mut self, &[u8]) -> Result<usize, E>` und `write_all`, angelehnt an `std::io`, aber ohne `std`\n- **`core::fmt::Write`**: `write_str` als Grundlage für `write!` und `writeln!`\n\nMit `nb::block!(tx.write(b))` wartest du aktiv, bis die Operation klappt."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "nb-ergebnis",
+      "frage": "Das Senderegister ist gerade noch mit dem vorigen Byte beschäftigt. Was liefert der Aufruf?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal_nb::serial::Write;",
+          "",
+          "let ergebnis = tx.write(b'A');"
+        ]
+      },
+      "optionen": [
+        "`Err(nb::Error::WouldBlock)`: Das Byte wurde nicht übernommen, du musst es später erneut versuchen",
+        "`Ok(())`: Das Byte wird in eine interne Warteschlange gestellt",
+        "Die Funktion wartet, bis das Register frei ist",
+        "Eine Panik"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`nb` steht für *non-blocking*. Die Funktion kehrt sofort zurück. `WouldBlock` ist kein echter Fehler, sondern „jetzt nicht“. Echte Fehler kommen als `nb::Error::Other(e)`. Dieses Muster erlaubt Polling in einer Hauptschleife, die nebenbei anderes erledigt.",
+      "begruendungen": [
+        "Richtig.",
+        "Die meisten HALs haben keinen Sendepuffer. Das Byte wäre verloren, wenn `Ok` zurückkäme.",
+        "Das wäre das blockierende Verhalten, z. B. von `nb::block!` oder `embedded_io::Write::write_all`.",
+        "Ein belegtes Register ist ein normaler Zustand."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "fmt-write",
+      "frage": "Ergänze die Implementierung, damit `writeln!(uart, \"T={} C\", t)` funktioniert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::fmt::{self, Write};",
+          "",
+          "impl Write for MeineUart {",
+          "    fn {{?}}(&mut self, s: &str) -> fmt::Result {",
+          "        for b in s.{{?}}() {",
+          "            nb::block!(self.tx.write(b)).map_err(|_| {{?}})?;",
+          "        }",
+          "        Ok(())",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["write_str"] }, { "loesungen": ["bytes"] }, { "loesungen": ["fmt::Error"] }],
+      "auswahl": ["write_str", "write_fmt", "bytes", "chars", "fmt::Error", "nb::Error::WouldBlock"],
+      "erklaerung": "`write_str` ist die einzige Pflichtmethode von `core::fmt::Write`. `write_fmt` und damit `write!` gibt es gratis. `fmt::Error` trägt keine Information, darum geht der eigentliche UART-Fehler hier verloren. Viele HALs implementieren `fmt::Write` für ihren `Tx` schon selbst. Achtung: `core::fmt` kostet einige KB Flash (Phase 7)."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "heapless-string",
+      "frage": "Du formatierst in einen Puffer mit fester Kapazität. Was steht danach in `s`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::fmt::Write;",
+          "",
+          "let mut s: heapless::String<8> = heapless::String::new();",
+          "let r = write!(s, \"Wert={}\", 12345);"
+        ]
+      },
+      "optionen": [
+        "`r` ist `Err(fmt::Error)`, und `s` ist leer: Der Text passt nicht in 8 Byte",
+        "`s` ist `\"Wert=123\"`, der Rest wird abgeschnitten, `r` ist `Ok`",
+        "Eine Panik wegen Überlauf",
+        "`s` wächst automatisch auf 10 Byte"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`\"Wert=12345\"` braucht 10 Byte. `heapless::String<N>` hat eine feste Kapazität und meldet den Platzmangel als Fehler. Mit `heapless` 0.9 war `s` im Versuch danach leer. Verlass dich bei einem Fehler grundsätzlich nicht auf einen Teilinhalt. Entscheidend: keine Panik, kein Pufferüberlauf, sondern ein `Result`, das du behandeln musst.",
+      "begruendungen": [
+        "Richtig.",
+        "Stilles Abschneiden passiert nicht, der Fehler wird gemeldet.",
+        "`heapless` gibt Fehler als `Result` zurück.",
+        "Die Kapazität ist fest, ohne Heap gibt es kein Wachstum."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "uart-fehler",
+      "frage": "Ordne die Symptome den wahrscheinlichen Ursachen zu.",
+      "paare": [
+        { "links": "Nur unleserliche Zeichen im Terminal", "rechts": "Baudrate falsch oder Systemtakt anders als angenommen" },
+        { "links": "Gar nichts kommt an", "rechts": "TX und RX vertauscht oder Pin nicht auf alternative Funktion gestellt" },
+        { "links": "Einzelne Bytes fehlen beim Empfang", "rechts": "Überlauf: Das Byte wurde nicht schnell genug abgeholt" },
+        { "links": "Ausgabe bremst die Regelschleife", "rechts": "Blockierendes Senden in zeitkritischem Code" }
+      ],
+      "erklaerung": "Beim Empfang ist ein **Overrun** typisch: Ein neues Byte kommt, bevor das alte abgeholt wurde. Abhilfe: Empfang im Interrupt in eine `heapless::spsc::Queue` (Modul 6.4) oder per DMA."
+    }
+  ],
+  "praxis": "Eine UART-Konsole ist oft das erste Lebenszeichen eines neuen Boards und bleibt im Feld eine wichtige Service-Schnittstelle. Für Entwickler-Logs nutzt man heute meist `defmt` über RTT (Phase 7), weil es den Debugger mitbenutzt und viel weniger Flash braucht als `core::fmt`. Die UART bleibt für Kommunikation mit anderen Geräten: GPS, Modems, RS-485.",
+  "labor": {
+    "titel": "fmt::Write ohne Hardware",
+    "anleitung": "Implementiere `core::fmt::Write` für einen eigenen Typ, der jedes Byte mit `print!` ausgibt, als Stellvertreter für eine UART. Teste `writeln!` und einen `heapless::String<8>`, der überläuft.",
+    "befehle": [
+      "cargo new uart-sim && cd uart-sim",
+      "cargo add heapless",
+      "cargo run"
+    ],
+    "beobachtung": "`writeln!` funktioniert mit jeder Implementierung von `write_str`. Der zu kleine `heapless::String` liefert `Err(Error)` statt zu paniken."
+  },
+  "begriffe": [
+    { "begriff": "UART", "englisch": "universal asynchronous receiver-transmitter", "erklaerung": "Serielle Schnittstelle ohne Taktleitung mit vereinbarter Baudrate." },
+    { "begriff": "Baudrate", "englisch": "baud rate", "erklaerung": "Anzahl Symbole pro Sekunde, bei UART gleich Bits pro Sekunde." },
+    { "begriff": "Nicht-blockierend", "englisch": "non-blocking", "erklaerung": "Operation kehrt sofort zurück und meldet `WouldBlock`, wenn sie noch nicht möglich ist." },
+    { "begriff": "Overrun", "englisch": "overrun error", "erklaerung": "Empfangenes Byte geht verloren, weil das vorherige nicht rechtzeitig abgeholt wurde." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-io (docs.rs)", "url": "https://docs.rs/embedded-io" },
+    { "titel": "embedded-hal-nb (docs.rs)", "url": "https://docs.rs/embedded-hal-nb" },
+    { "titel": "core::fmt::Write", "url": "https://doc.rust-lang.org/core/fmt/trait.Write.html" }
+  ]
+}

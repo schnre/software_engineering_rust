@@ -1,0 +1,166 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m5-l2",
+  "phase": 3,
+  "modul": "3.5 Speicher für Fortgeschrittene",
+  "titel": "Pin, MaybeUninit und Ausrichtung",
+  "lernziele": [
+    "Erklären, warum selbstreferenzielle Typen `Pin` brauchen",
+    "Uninitialisierten Speicher mit `MaybeUninit` sicher behandeln und `transmute` durch sichere Alternativen ersetzen",
+    "Ausrichtung mit `#[repr(align(N))]` steuern und `NonNull` einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Struct enthält einen Puffer und einen Rohzeiger, der in genau diesen Puffer zeigt. Was passiert, wenn man den Struct verschiebt (*move*)?",
+      "optionen": [
+        "Die Bytes werden an eine neue Adresse kopiert, der Zeiger zeigt aber weiter auf die alte Stelle",
+        "Rust passt den Zeiger beim Verschieben automatisch an",
+        "Der Compiler verbietet das Verschieben jedes Structs mit Rohzeigern",
+        "Nichts, ein Move ändert die Adresse nie"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Move in Rust ist ein bitweises Kopieren an eine neue Adresse, ohne Move-Konstruktor wie in C++. Ein **selbstreferenzieller Typ** (*self-referential type*) wäre danach kaputt: Der innere Zeiger hängt. Genau solche Typen erzeugt der Compiler für `async fn`, wenn eine lokale Variable über ein `.await` hinweg ausgeliehen bleibt (Modul 3.6).",
+      "begruendungen": [
+        "Richtig.",
+        "Rust hat keine Move-Konstruktoren, ein Move kopiert nur Bytes.",
+        "Rohzeiger sind erlaubt, der Compiler verfolgt nicht, wohin sie zeigen.",
+        "Ein Move kann den Wert an eine andere Stelle im Speicher legen, etwa beim Rückgeben aus einer Funktion oder beim Einfügen in einen `Vec`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was Pin verspricht",
+      "text": "**`Pin<P>`** umhüllt einen Zeiger `P` (etwa `Box<T>` oder `&mut T`) und verspricht: Der Wert, auf den er zeigt, wird nie wieder verschoben, bis er gedroppt wird. Darum liefert ein `Pin` kein `&mut T` heraus, mit dem man `mem::swap` oder `mem::replace` aufrufen könnte.\n\nDie meisten Typen sind **`Unpin`**: Für sie ist Verschieben harmlos, und `Pin` schränkt nichts ein. Nur Typen mit **`PhantomPinned`** oder vom Compiler erzeugte Futures sind `!Unpin`.\n\nPinnen geht mit `Box::pin(x)` (auf dem Heap) oder `std::pin::pin!(x)` (auf dem Stack). Im Alltag begegnet man `Pin` fast nur in der Signatur `Future::poll(self: Pin<&mut Self>, …)`."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "pin-kein-mut",
+      "frage": "Was meldet der Compiler zu Zeile 9?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::marker::PhantomPinned;",
+          "",
+          "struct Selbst {",
+          "    daten: [u8; 4],",
+          "    zeiger: *const u8,",
+          "    _p: PhantomPinned,",
+          "}",
+          "let mut b = Box::pin(Selbst { daten: [0; 4], zeiger: std::ptr::null(), _p: PhantomPinned });",
+          "let r: &mut Selbst = &mut *b;"
+        ]
+      },
+      "optionen": [
+        "`E0596`: `DerefMut` ist für `Pin<Box<Selbst>>` nicht implementiert, weil `Selbst` nicht `Unpin` ist",
+        "Kompiliert, `Pin` ist nur eine Markierung ohne Wirkung",
+        "`E0382`: `b` wurde verschoben",
+        "Panic zur Laufzeit beim Zugriff"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Pin<P>` implementiert `DerefMut` nur, wenn das Ziel `Unpin` ist. Für `!Unpin`-Typen bekommt man ein `&mut T` nur über `unsafe { Pin::get_unchecked_mut(…) }` und verspricht damit, nichts zu verschieben. Lesen über `&*b` geht weiterhin. In der Praxis schreibt man selten selbst gepinnte Typen, sondern nutzt `pin-project` oder `async`.",
+      "begruendungen": [
+        "Richtig.",
+        "Für `!Unpin`-Typen schränkt `Pin` den Zugriff wirksam ein.",
+        "`b` wurde nicht verschoben, nur ausgeliehen.",
+        "Die Prüfung erfolgt zur Übersetzungszeit."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ein Array soll Element für Element initialisiert werden, ohne vorher Nullen zu schreiben. Ergänze.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::mem::MaybeUninit;",
+          "",
+          "let mut arr: [MaybeUninit<u16>; 4] = [MaybeUninit::{{?}}(); 4];",
+          "for (i, e) in arr.iter_mut().enumerate() {",
+          "    e.{{?}}(i as u16 * 10);",
+          "}",
+          "// Alle vier Elemente sind jetzt initialisiert:",
+          "let fertig: [u16; 4] = unsafe { std::mem::transmute(arr) };",
+          "// [0, 10, 20, 30]"
+        ]
+      },
+      "luecken": [{ "loesungen": ["uninit"] }, { "loesungen": ["write"] }],
+      "auswahl": ["uninit", "write", "zeroed", "assume_init", "new"],
+      "erklaerung": "**`MaybeUninit<T>`** ist ein Behälter, der noch keinen gültigen `T` enthalten muss. Ein uninitialisierter `u16` ausserhalb davon wäre sofort undefiniertes Verhalten, selbst ohne Lesen. Erst wenn alles geschrieben ist, holt man den Wert mit `assume_init()` (bei Arrays per `transmute`) heraus. In Firmware nutzt man das für grosse Puffer in `.bss`/`.uninit`, deren Nullen beim Start Zeit kosten."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug ersetzt `transmute` hier sicher?",
+      "paare": [
+        { "links": "`f32` als Bitmuster `u32`", "rechts": "`f.to_bits()` / `f32::from_bits(b)`" },
+        { "links": "`u32` in Little-Endian-Bytes", "rechts": "`x.to_le_bytes()`" },
+        { "links": "`&[u8]` aus dem Netzwerk als `&Kopf`-Struct lesen", "rechts": "`zerocopy` oder `bytemuck` mit geprüften Traits" },
+        { "links": "`u32` in `u64` umwandeln", "rechts": "`u64::from(x)`, ein `transmute` meldet E0512" }
+      ],
+      "erklaerung": "`transmute` deutet Bits um, ohne irgendetwas zu prüfen, nur gleiche Grösse wird verlangt (sonst E0512). rustc warnt bei `transmute(f32) -> u32` sogar mit `unnecessary_transmutes`. Crates wie `bytemuck` (`Pod`, `cast_slice`) und `zerocopy` (`FromBytes`, `IntoBytes`) prüfen per Derive, dass jedes Bitmuster gültig ist und keine Padding-Bytes gelesen werden."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "align-groesse",
+      "frage": "Was gibt `println!(\"{} {}\", size_of::<DmaPuffer>(), align_of::<DmaPuffer>())` aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[repr(align(32))]",
+          "struct DmaPuffer([u8; 40]);"
+        ]
+      },
+      "optionen": ["`64 32`", "`40 32`", "`40 1`", "`32 32`"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "**`#[repr(align(N))]`** erhöht die Mindestausrichtung auf N Bytes. Die Grösse eines Typs ist immer ein Vielfaches seiner Ausrichtung, damit Elemente eines Arrays alle korrekt ausgerichtet sind: 40 wird auf 64 aufgerundet. Typische Anwendungen sind DMA-Puffer und Cache-Zeilen (gegen *false sharing*, Phase 5). Das Gegenteil, `#[repr(packed)]`, entfernt Padding, macht Referenzen auf Felder aber unzulässig.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Grösse muss ein Vielfaches der Ausrichtung sein.",
+        "Ohne das Attribut wäre die Ausrichtung 1, mit ihm 32.",
+        "Der Inhalt ist 40 Bytes gross und passt nicht in 32."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wozu dient `NonNull<T>` statt `*mut T` in einer eigenen Sammlung?",
+      "optionen": [
+        "Es garantiert „nie null“, ist kovariant in `T` und erlaubt die Nischenoptimierung: `Option<NonNull<T>>` ist 8 Bytes gross",
+        "Es macht Zugriffe sicher, `unsafe` ist nicht mehr nötig",
+        "Es prüft zur Laufzeit, ob der Speicher noch gültig ist",
+        "Es ist ein Smart Pointer mit Referenzzählung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`NonNull<T>` ist ein Rohzeiger mit einer zusätzlichen Garantie. Dereferenzieren bleibt `unsafe`, Gültigkeit und Lebensdauer prüft niemand. `Box`, `Vec` und `Rc` sind intern darauf aufgebaut. Die Details zu Varianz und eigenen Sammlungen beschreibt das Rustonomicon.",
+      "begruendungen": [
+        "Richtig.",
+        "Dereferenzieren bleibt `unsafe`.",
+        "Es gibt keinerlei Laufzeitprüfung.",
+        "Das wäre `Rc` oder `Arc`."
+      ]
+    }
+  ],
+  "praxis": "`Pin` siehst du vor allem in async-Code: Futures müssen gepinnt werden, bevor man sie pollt, und `tokio::pin!` oder `std::pin::pin!` erledigen das. `MaybeUninit`, `repr(align)` und `NonNull` gehören in Low-Level-Code: Treiber mit DMA, Ringpuffer, eigene Sammlungen. Jede Verwendung von `transmute` im Review verdient eine Rückfrage, fast immer gibt es eine sichere Alternative.",
+  "labor": {
+    "titel": "Layouts ausmessen",
+    "anleitung": "Definiere `struct Kopf { typ: u8, laenge: u32, flags: u8 }` einmal ohne Attribut, einmal mit `#[repr(C)]` und einmal mit `#[repr(C, packed)]`. Gib jeweils `size_of` und `align_of` aus. Ergänze einen `#[repr(align(64))]`-Typ und ein `transmute` zwischen unterschiedlich grossen Typen.",
+    "befehle": [
+      "cargo new layout && cd layout",
+      "cargo run",
+      "cargo add bytemuck --features derive"
+    ],
+    "beobachtung": "Ohne Attribut ordnet Rust die Felder um: 8 Bytes. Mit `repr(C)` gilt die Deklarationsreihenfolge: 12 Bytes. Mit `packed`: 6 Bytes. Das `transmute` zwischen `u32` und `u64` scheitert mit E0512."
+  },
+  "begriffe": [
+    { "begriff": "Pin", "englisch": "pinning", "erklaerung": "Garantie, dass ein Wert bis zu seinem Drop nicht mehr verschoben wird." },
+    { "begriff": "Unpin", "englisch": "Unpin", "erklaerung": "Auto-Trait für Typen, die trotz `Pin` gefahrlos verschoben werden dürfen." },
+    { "begriff": "MaybeUninit", "englisch": "MaybeUninit", "erklaerung": "Behälter für möglicherweise uninitialisierten Speicher." },
+    { "begriff": "Ausrichtung", "englisch": "alignment", "erklaerung": "Adressen eines Typs sind Vielfache dieses Werts. Steuerbar mit `#[repr(align(N))]`." },
+    { "begriff": "transmute", "englisch": "transmute", "erklaerung": "Ungeprüfte Umdeutung der Bits eines Werts als anderer Typ gleicher Grösse." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::pin (Dokumentation)", "url": "https://doc.rust-lang.org/std/pin/index.html" },
+    { "titel": "The Rustonomicon", "url": "https://doc.rust-lang.org/nomicon/" },
+    { "titel": "zerocopy auf docs.rs", "url": "https://docs.rs/zerocopy" }
+  ]
+}

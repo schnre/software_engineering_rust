@@ -1,0 +1,280 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m1-l1",
+  "phase": 2,
+  "modul": "2.1 Speicherlayout zur Laufzeit",
+  "titel": "Stack und Heap in Rust",
+  "lernziele": [
+    "Für jeden Wert sagen, ob er auf dem Stack, dem Heap oder im statischen Speicher liegt",
+    "Den Aufbau von `Vec<T>`, `String` und `&str` mit `size_of` erklären",
+    "Erkennen, warum grosse Arrays den Stack sprengen und wie man das vermeidet"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Wo liegt der Wert `5`, auf den `b` zeigt?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn messen() {",
+          "    let b = Box::new(5u32);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Auf dem Heap",
+        "Auf dem Stack",
+        "Im statischen Speicher (`.data`)"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Box::new` reserviert Platz auf dem **Heap** und legt den Wert dort ab. Die Box selbst ist nur ein Zeiger (8 Byte auf 64-Bit) und liegt als lokale Variable auf dem **Stack**. Anders als ein roher `new` in C++ gibt die Box den Heap-Speicher am Ende von `messen()` automatisch wieder frei.",
+      "begruendungen": [
+        "Richtig. `Box<T>` ist der einfachste besitzende Heap-Zeiger in Rust.",
+        "Auf dem Stack liegt nur der Zeiger `b`, nicht der Wert.",
+        "In `.data` landen `static`-Variablen mit Startwert, keine Werte, die zur Laufzeit angelegt werden."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Speicherbereiche in Rust",
+      "text": "Rust benutzt dieselben Speicherbereiche wie C und C++. Neu ist, dass der Compiler für jeden Heap-Wert einen **Besitzer** (owner) kennt und die Freigabe selbst einfügt. Wie das genau funktioniert, zeigt Modul 2.2.",
+      "tabelle": {
+        "kopf": [
+          "Bereich",
+          "Beispiel in Rust",
+          "Lebenszeit"
+        ],
+        "zeilen": [
+          [
+            "Text (Code)",
+            "kompilierte Funktionen",
+            "ganzes Programm"
+          ],
+          [
+            "statisch (`.rodata`, `.data`, `.bss`)",
+            "`static ZAEHLER: u32 = 7;`, String-Literale `\"Hallo\"`",
+            "ganzes Programm"
+          ],
+          [
+            "Heap",
+            "Inhalt von `Box`, `Vec`, `String`",
+            "bis der Besitzer gedroppt wird"
+          ],
+          [
+            "Stack",
+            "`let x = 5;`, Parameter, die Verwaltungsdaten von `Vec`",
+            "bis zum Ende des Blocks"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wo liegen die Bytes?",
+      "paare": [
+        {
+          "links": "`static ZAEHLER: u32 = 7;`",
+          "rechts": "Statischer Speicher, beschreibbar nur über `static mut` oder innere Mutabilität"
+        },
+        {
+          "links": "die Zeichen von `let s: &str = \"Hallo\";`",
+          "rechts": "Nur-Lese-Daten im Binary (`.rodata`)"
+        },
+        {
+          "links": "`let summe = 0u64;` in einer Funktion",
+          "rechts": "Stack-Frame der Funktion"
+        },
+        {
+          "links": "die Elemente von `vec![1, 2, 3]`",
+          "rechts": "Heap, angefordert über den globalen Allokator"
+        }
+      ],
+      "erklaerung": "Ein String-Literal ist ein `&'static str`: Die Zeichen stehen fest im Binary, `s` ist nur ein Verweis darauf. Deshalb kann man ein Literal nicht verändern. Ein veränderbarer Text braucht einen `String` mit eigenem Heap-Puffer."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was gibt `std::mem::size_of::<Vec<u8>>()` auf einem 64-Bit-System aus, wenn der Vektor 10 Elemente enthält?",
+      "optionen": [
+        "`24`",
+        "`10`",
+        "`8`",
+        "`34`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`size_of` misst nur den Teil, der direkt in der Variablen steckt. Ein `Vec<T>` besteht aus drei Wörtern: **Zeiger** auf den Heap-Puffer, **Länge** (`len`, belegte Elemente) und **Kapazität** (`cap`, reservierter Platz). Das sind 3 × 8 = 24 Byte, egal wie viele Elemente gerade drin sind. `String` ist intern ein `Vec<u8>` und ebenfalls 24 Byte gross.",
+      "begruendungen": [
+        "Richtig: Zeiger, Länge und Kapazität.",
+        "Die Elemente liegen auf dem Heap und zählen für `size_of` nicht.",
+        "Das wäre die Grösse von `Box<u8>`, also nur ein Zeiger.",
+        "`size_of` ist eine Compilezeit-Konstante und kennt den Inhalt zur Laufzeit nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "String und &str",
+      "text": "`String` **besitzt** seinen Heap-Puffer und kann wachsen. `&str` ist eine geliehene Sicht auf UTF-8-Bytes, die irgendwo liegen: in einem `String`, im Binary oder in einem Puffer. Sie besteht aus Zeiger und Länge, also 16 Byte. Solche Zeiger mit Zusatzinformation heissen **Fat Pointer**. Mehr dazu in der nächsten Lektion.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let literal: &str = \"Grüezi\";          // zeigt ins Binary",
+          "let mut s = String::from(literal);     // kopiert auf den Heap",
+          "s.push_str(\" mitenand\");              // Puffer wächst",
+          "let sicht: &str = &s[0..6];            // leiht Bytes aus s",
+          "println!(\"{}\", literal.len());          // 7 Byte, nur 6 Zeichen"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "`&'static str`: 16 Byte auf dem Stack, Text in `.rodata`."
+          },
+          {
+            "zeile": 2,
+            "text": "`String`: 24 Byte (ptr, len, cap) plus Heap-Puffer."
+          },
+          {
+            "zeile": 4,
+            "text": "Kein neuer Speicher, nur ein Fat Pointer in `s` hinein."
+          },
+          {
+            "zeile": 5,
+            "text": "`len()` zählt Bytes, nicht Zeichen. „ü“ braucht in UTF-8 zwei Byte."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Kollege legt einen 16-MiB-Puffer als lokales Array an: `let puffer = [0u8; 16 * 1024 * 1024];`. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s",
+          "     Running `target/debug/puffer`",
+          "",
+          "thread 'main' (1448) has overflowed its stack",
+          "fatal runtime error: stack overflow, aborting",
+          "Aborted (core dumped)"
+        ]
+      },
+      "optionen": [
+        "Das Array liegt auf dem Stack, und der Haupt-Thread hat unter Linux typisch nur 8 MiB Stack",
+        "Der Heap ist voll, weil 16 MiB auf einmal angefordert wurden",
+        "Ein Index ausserhalb des Arrays hat einen Bounds-Check ausgelöst",
+        "Rust erlaubt grundsätzlich keine Arrays über 1 MiB"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Array `[T; N]` ist ein gewöhnlicher Wert und liegt als lokale Variable vollständig im Stack-Frame. Rust prüft beim Betreten der Funktion mit einer **Stack Probe**, ob der Platz reicht, und bricht kontrolliert ab, statt still fremden Speicher zu überschreiben. Abhilfe: `vec![0u8; 16 * 1024 * 1024]` legt die Daten auf den Heap. Auf Mikrocontrollern ist der Stack oft nur wenige KiB gross, dort trifft dich das viel früher.",
+      "begruendungen": [
+        "Richtig. `ulimit -s` zeigt die Grenze (meist 8192 KiB), neue Threads haben standardmässig 2 MiB.",
+        "Hier wird gar kein Heap benutzt. Ein voller Heap führt zu einem Allokationsfehler (`memory allocation of … failed`).",
+        "Ein Bounds-Check meldet `index out of bounds` und ist ein Panic, kein Stack Overflow.",
+        "Eine solche Grenze gibt es nicht. `static PUFFER: [u8; 16 << 20]` ist z. B. erlaubt."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Reicht es, das Array in eine `Box` zu packen? Was passiert im Debug-Build (`cargo run`)?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let puffer = Box::new([0u8; 16 * 1024 * 1024]);",
+          "    println!(\"{}\", puffer[1234]);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Es kann trotzdem einen Stack Overflow geben: Das Array entsteht zuerst auf dem Stack und wird dann in die Box kopiert",
+        "Es gibt sicher `0` aus, weil `Box::new` direkt auf dem Heap konstruiert",
+        "Compilerfehler: `Box` kann keine Arrays aufnehmen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Box::new(x)` ist eine normale Funktion: Ihr Argument wird zuerst als Wert gebaut, also auf dem Stack. Im Release-Build optimiert LLVM die Kopie oft weg und das Programm läuft, im Debug-Build stürzt es ab (mit rustc 1.97 getestet). Darauf darf man sich nicht verlassen. Robust ist `vec![0u8; N]` oder `vec![0u8; N].into_boxed_slice()`, weil dort der Puffer direkt auf dem Heap entsteht.",
+      "begruendungen": [
+        "Richtig. Ein bekannter Stolperstein, besonders bei grossen Puffern in Embedded-Code.",
+        "Rust hat (noch) keine garantierte „Konstruktion am Zielort“ (placement new).",
+        "`Box<[u8; N]>` ist ein gültiger Typ."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Aufbau eines `Vec<T>`.",
+      "text": "Ein `Vec<T>` besteht auf dem Stack aus einem {{?}} auf den Puffer, der Länge und der {{?}}. Die Elemente selbst liegen auf dem {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "Zeiger"
+          ]
+        },
+        {
+          "loesungen": [
+            "Kapazität"
+          ]
+        },
+        {
+          "loesungen": [
+            "Heap"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Zeiger",
+        "Kapazität",
+        "Heap",
+        "Stack",
+        "Referenzzähler"
+      ],
+      "erklaerung": "Ist `len == cap`, muss `push` einen grösseren Puffer anfordern und die Elemente umkopieren. Wer die Grösse vorher kennt, nimmt `Vec::with_capacity(n)` und spart sich die Umzüge. Einen Referenzzähler haben erst `Rc` und `Arc` (Phase 3)."
+    }
+  ],
+  "praxis": "Auf dem Desktop fallen falsch platzierte Puffer selten auf, auf einem Mikrocontroller mit 8 KiB Stack sofort. Grosse Puffer gehören dort in ein `static` (eventuell mit `heapless` oder `static_cell`), auf dem Host in einen `Vec`. Bei Strings gilt im Code-Review: Funktionen, die Text nur lesen, nehmen `&str`, nicht `&String` oder `String`. So akzeptieren sie Literale, Teilstücke und `String`s gleichermassen.",
+  "labor": {
+    "titel": "Adressen und Grössen sichtbar machen",
+    "anleitung": "Lege mit `cargo new speicher` ein Projekt an. Gib mit `println!(\"{:p}\", …)` die Adressen eines `static`, eines String-Literals (`s.as_ptr()`), einer `Box` und einer lokalen Variable aus. Gib zusätzlich `size_of` von `String`, `&str`, `Vec<u8>` und `Box<u8>` aus. Probiere danach das 16-MiB-Array einmal mit `cargo run` und einmal mit `cargo run --release` in einer `Box`.",
+    "befehle": [
+      "cargo new speicher && cd speicher",
+      "cargo run",
+      "cargo run --release",
+      "ulimit -s"
+    ],
+    "beobachtung": "`static` und Literal liegen dicht beieinander im Bereich des Programms, die `Box` etwas weiter oben im Heap, die lokale Variable bei einer sehr hohen Adresse (`0x7ff…`). Die Grössen sind 24, 16, 24 und 8 Byte. Die geboxte 16-MiB-Variante stürzt nur im Debug-Build ab."
+  },
+  "begriffe": [
+    {
+      "begriff": "Box",
+      "englisch": "box",
+      "erklaerung": "Besitzender Zeiger auf einen Wert auf dem Heap. Gibt den Speicher frei, wenn die Box gedroppt wird."
+    },
+    {
+      "begriff": "Kapazität",
+      "englisch": "capacity",
+      "erklaerung": "Anzahl Elemente, für die ein `Vec` oder `String` bereits Platz reserviert hat. Immer grösser oder gleich der Länge."
+    },
+    {
+      "begriff": "String-Slice",
+      "englisch": "string slice, `&str`",
+      "erklaerung": "Geliehene Sicht auf gültige UTF-8-Bytes, bestehend aus Zeiger und Länge."
+    },
+    {
+      "begriff": "Stapelüberlauf",
+      "englisch": "stack overflow",
+      "erklaerung": "Der Stack eines Threads reicht nicht. Rust erkennt das mit Stack Probes und Guard Pages und bricht das Programm ab."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: What Is Ownership? (Abschnitt „The Stack and the Heap“)",
+      "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"
+    },
+    {
+      "titel": "The Rust Book: Using Box<T> to Point to Data on the Heap",
+      "url": "https://doc.rust-lang.org/book/ch15-01-box.html"
+    },
+    {
+      "titel": "std::mem::size_of",
+      "url": "https://doc.rust-lang.org/std/mem/fn.size_of.html"
+    }
+  ]
+}

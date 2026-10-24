@@ -1,0 +1,202 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m3-l1",
+  "phase": 4,
+  "modul": "4.3 Debugging",
+  "titel": "rust-gdb und rust-lldb",
+  "lernziele": [
+    "Ein Rust-Programm mit `rust-gdb` oder `rust-lldb` anhalten, untersuchen und schrittweise ausführen",
+    "Erklären, warum die Pretty-Printer `Vec`, `String` und `Option` lesbar machen",
+    "Debug-Informationen im Release-Profil gezielt einschalten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "ohne-pretty-printer",
+      "frage": "Im selben Programm, an derselben Stelle, zeigt einmal `gdb` und einmal `rust-gdb` die Variable `name`. Was erklärt den Unterschied?",
+      "terminal": {
+        "befehl": "gdb ./target/debug/dbg   (dann: print name)",
+        "ausgabe": [
+          "$1 = alloc::string::String {vec: alloc::vec::Vec<u8, alloc::alloc::Global> {buf: alloc::raw_vec::RawVec<u8, alloc::alloc::Global> {inner: alloc::raw_vec::RawVecInner<alloc::alloc::Global> {ptr: core::ptr::unique::Unique<u8> {pointer: core::ptr::non_null::NonNull<u8> {pointer: 0x5555555add60}, _marker: core::marker::PhantomData<u8>}, cap: core::num::niche_types::UsizeNoHighBit (8), alloc: alloc::alloc::Global}, _marker: core::marker::PhantomData<u8>}, len: 8}}",
+          "",
+          "$ rust-gdb ./target/debug/dbg   (dann: print name)",
+          "$2 = \"sensor-1\""
+        ]
+      },
+      "optionen": [
+        "`rust-gdb` startet gdb mit den Pretty-Printern der Rust-Toolchain, die `String`, `Vec` und `Option` lesbar darstellen",
+        "`rust-gdb` ist ein eigener Debugger mit einer eigenen Rust-Laufzeit",
+        "Das Binary wurde für `rust-gdb` mit anderen Debug-Informationen gebaut",
+        "Plain gdb versteht kein Rust und zeigt deshalb nur Rohspeicher"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`rust-gdb` und `rust-lldb` sind kleine Skripte aus rustup. Sie starten das normale gdb bzw. lldb und laden Python-**Pretty-Printer** (Darstellungsskripte), die zur installierten Toolchain passen. Ohne sie sieht man die interne Struktur: `String` enthält einen `Vec<u8>`, der einen `RawVec` mit Zeiger, Kapazität und Länge enthält. Die Daten sind dieselben, nur die Darstellung unterscheidet sich.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist nur ein Wrapper-Skript um das installierte gdb.",
+        "Beide Läufe nutzen dasselbe Binary aus `target/debug`.",
+        "gdb versteht Rust-Typen und -Namen. Es fehlt ihm nur die hübsche Darstellung der Standardbibliothek."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Eine Sitzung mit rust-gdb",
+      "text": "Debug-Builds (`cargo build`, Profil `dev`) enthalten volle **Debug-Informationen** (DWARF): Zuordnung von Maschinencode zu Datei, Zeile und Variablen. Breakpoints setzt man mit dem vollen Pfad, also `dbg::mittelwert` (Crate-Name plus Funktion). Nur `mittelwert` findet gdb nicht.",
+      "terminal": {
+        "befehl": "rust-gdb -q target/debug/dbg",
+        "ausgabe": [
+          "(gdb) break dbg::mittelwert",
+          "Breakpoint 1 at 0x15ff2: file src/main.rs, line 2.",
+          "(gdb) run",
+          "Breakpoint 1, dbg::mittelwert (werte=&[u32](size=3) = {...}) at src/main.rs:2",
+          "2\t    let summe: u32 = werte.iter().sum();",
+          "(gdb) bt",
+          "#0  dbg::mittelwert (werte=&[u32](size=3) = {...}) at src/main.rs:2",
+          "#1  0x000055555556a255 in dbg::main () at src/main.rs:10",
+          "(gdb) up",
+          "(gdb) info locals",
+          "letzter = core::option::Option<u32>::Some(30)",
+          "werte = Vec(size=3) = {10, 20, 30}",
+          "name = \"sensor-1\""
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "gdb-befehle",
+      "frage": "Was macht welcher gdb-Befehl?",
+      "paare": [
+        { "links": "`break src/main.rs:3`", "rechts": "Anhalten, bevor Zeile 3 ausgeführt wird" },
+        { "links": "`next`", "rechts": "Nächste Zeile ausführen, Funktionsaufrufe überspringen" },
+        { "links": "`step`", "rechts": "In den nächsten Funktionsaufruf hineingehen" },
+        { "links": "`finish`", "rechts": "Bis zum Ende der aktuellen Funktion laufen und den Rückgabewert zeigen" },
+        { "links": "`up`", "rechts": "Zum aufrufenden Frame wechseln" },
+        { "links": "`watch summe`", "rechts": "Anhalten, sobald sich der Wert ändert" }
+      ],
+      "erklaerung": "In lldb heissen die Befehle ähnlich: `breakpoint set -n dbg::mittelwert` (kurz `b`), `next`, `step`, `finish`, `up`, `frame variable`. `finish` ist praktisch, um den Rückgabewert einer Funktion zu sehen, ohne `dbg!` einzubauen. gdb meldet dann z. B. `Value returned is $2 = 20`."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "release-breakpoint",
+      "frage": "Das Release-Profil ist unverändert. Was passiert bei `rust-gdb target/release/dbg` mit `break dbg::mittelwert`?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "fn mittelwert(werte: &[u32]) -> u32 {",
+          "    let summe: u32 = werte.iter().sum();",
+          "    summe / werte.len() as u32",
+          "}",
+          "",
+          "fn main() {",
+          "    let werte = vec![10, 20, 30];",
+          "    let m = mittelwert(&werte);",
+          "    println!(\"{m}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "gdb meldet `Function \"dbg::mittelwert\" not defined.`",
+        "Der Breakpoint funktioniert wie im Debug-Build",
+        "Der Build schlägt fehl, weil Release-Builds keine Breakpoints erlauben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Profil `release` hat standardmässig `debug = false`, und die kleine Funktion wird ohnehin in `main` eingebettet (inlining). Es gibt also weder Debug-Informationen noch ein eigenes Symbol. Mit `debug = true` (oder `\"line-tables-only\"`) unter `[profile.release]` bekommt man Zeileninfos zurück. Trotzdem springt der Debugger im optimierten Code oft scheinbar wild hin und her, und Variablen sind `<optimized out>`.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne Debug-Informationen und nach Inlining findet gdb die Funktion nicht.",
+        "Das Bauen klappt immer, nur der Debugger hat weniger Informationen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "profil-debug",
+      "frage": "Ergänze die `Cargo.toml`: Release-Builds sollen Debug-Informationen bekommen, das ausgelieferte Binary aber trotzdem schlank sein.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "{{?}} = true",
+          "split-debuginfo = \"packed\"",
+          "{{?}} = \"debuginfo\""
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["debug"] },
+        { "loesungen": ["strip"] }
+      ],
+      "auswahl": ["debug", "strip", "opt-level", "lto", "debug-assertions"],
+      "erklaerung": "`debug = true` erzeugt volle DWARF-Informationen. Mit `split-debuginfo = \"packed\"` landen sie unter Linux in einer separaten `.dwp`-Datei, und `strip = \"debuginfo\"` entfernt sie aus dem Binary selbst. So archiviert man die Symbole und liefert ein schlankes Programm aus. `debug-assertions` steuert dagegen `debug_assert!` und Überlaufprüfungen, nicht die Debug-Informationen."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Debuggen in VS Code",
+      "text": "In VS Code nutzt man meist die Erweiterung **CodeLLDB** zusammen mit **rust-analyzer**. Über dem `fn main` und jedem `#[test]` erscheinen die Links „Run“ und „Debug“. Ein Klick baut das Binary und startet es unter lldb, Breakpoints setzt man am Zeilenrand. Die Pretty-Printer für Rust bringt CodeLLDB mit.\n\nAuch Tests lassen sich so debuggen. Auf der Kommandozeile geht das ebenfalls: Der Pfad des Test-Binarys steht in der `cargo test`-Ausgabe, z. B. `target/debug/deps/rechner-1e2cdc407df3fba9`. Man startet es mit `rust-gdb --args <binary> teilt_gerade --exact`. Für Mikrocontroller kommt in Phase 9 probe-rs mit einem Debug-Adapter dazu."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "wann-debugger",
+      "frage": "Wann ist ein Debugger das passende Werkzeug?",
+      "optionen": [
+        "Ein Test schlägt fehl, und du willst die Zwischenwerte mehrerer Variablen in einem tiefen Aufrufpfad ansehen",
+        "Ein seltener Fehler tritt nur in Produktion auf und ist nicht reproduzierbar",
+        "Du willst wissen, welcher Pfad durch einen Zustandsautomaten genommen wurde, und kannst das Programm an einer verdächtigen Stelle anhalten",
+        "Du willst messen, welche Funktion am meisten Rechenzeit verbraucht"
+      ],
+      "korrekt": [0, 2],
+      "erklaerung": "Der Debugger glänzt bei reproduzierbaren Fehlern: anhalten, umsehen, Schritt für Schritt weiter. Für Produktionsfehler braucht man Logs, Backtraces und Core Dumps (nächste Lektion). Für Laufzeitmessungen ist ein Profiler wie `perf` das richtige Werkzeug (Phase 5).",
+      "begruendungen": [
+        "Richtig.",
+        "Hier helfen Logs, Backtraces und Core Dumps mehr.",
+        "Richtig.",
+        "Das ist Aufgabe eines Profilers."
+      ]
+    }
+  ],
+  "praxis": "Viele Rust-Entwickler greifen seltener zum Debugger als in C++, weil der Compiler viele Fehler vorher abfängt und `dbg!` schnell eingebaut ist. Bei Logikfehlern in tiefen Aufrufketten, bei FFI und auf Mikrocontrollern bleibt der Debugger aber unverzichtbar. Ein Senior kennt `rust-gdb` auf der Kommandozeile, denn auf einem Server oder in einem Container gibt es kein VS Code.",
+  "labor": {
+    "titel": "Eine Debug-Sitzung",
+    "anleitung": "Baue das Beispielprogramm mit `mittelwert` und untersuche es mit rust-gdb. Vergleiche anschliessend die Ausgabe von plain `gdb` und probiere einen Release-Build mit und ohne `debug = true`.",
+    "befehle": [
+      "cargo build",
+      "rust-gdb -q -ex 'break dbg::mittelwert' -ex run -ex bt -ex up -ex 'info locals' target/debug/dbg",
+      "gdb -q -batch -ex 'break dbg::mittelwert' -ex run -ex up -ex 'print werte' target/debug/dbg",
+      "cargo build --release && rust-gdb -q -ex 'break dbg::mittelwert' target/release/dbg"
+    ],
+    "beobachtung": "Mit `rust-gdb` erscheint `werte = Vec(size=3) = {10, 20, 30}`, mit plain gdb die interne Struktur. Im Release-Build ohne Debug-Informationen findet gdb die Funktion nicht."
+  },
+  "begriffe": [
+    {
+      "begriff": "Pretty-Printer",
+      "englisch": "pretty printer",
+      "erklaerung": "Skript für den Debugger, das komplexe Typen wie `Vec` oder `String` lesbar darstellt."
+    },
+    {
+      "begriff": "Debug-Informationen",
+      "englisch": "debug info, DWARF",
+      "erklaerung": "Daten im Binary, die Maschinencode mit Quelldatei, Zeile, Typen und Variablen verknüpfen."
+    },
+    {
+      "begriff": "Breakpoint",
+      "englisch": "breakpoint",
+      "erklaerung": "Stelle, an der der Debugger das Programm anhält."
+    },
+    {
+      "begriff": "Inlining",
+      "englisch": "inlining",
+      "erklaerung": "Der Compiler kopiert den Rumpf einer Funktion in den Aufrufer. Die Funktion existiert dann nicht mehr als eigenes Symbol."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Profiles",
+      "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+    },
+    {
+      "titel": "Debugging with GDB",
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb/"
+    }
+  ]
+}

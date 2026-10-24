@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m7-l2",
+  "phase": 10,
+  "modul": "10.7 Coding-Standards und ADRs",
+  "titel": "Architecture Decision Records",
+  "lernziele": [
+    "Den Aufbau eines ADR kennen und ein eigenes schreiben",
+    "Entscheiden, welche Entscheidungen ein ADR verdienen",
+    "Mit geänderten Entscheidungen richtig umgehen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Zwei Jahre nach Projektstart fragt eine neue Kollegin, warum die Firmware Embassy statt RTIC nutzt. Niemand erinnert sich. Was hätte geholfen?",
+      "optionen": [
+        "Ein kurzes Dokument zur Entscheidung mit Kontext, Begründung und verworfenen Alternativen, abgelegt im Repository",
+        "Ein Kommentar `// Embassy` in `main.rs`",
+        "Die Entscheidung im Team-Chat zu besprechen",
+        "Die Abhängigkeit in `Cargo.toml` mit einer festen Version zu versehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Code und `Cargo.toml` zeigen, **was** entschieden wurde, aber nicht **warum**. Ohne das Warum wird eine gute Entscheidung später rückgängig gemacht, oder eine überholte bleibt bestehen, weil sich niemand traut. Ein **Architecture Decision Record** (ADR) hält genau das fest.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Kommentar sagt nichts über Gründe und Alternativen.",
+        "Chats sind nach kurzer Zeit nicht mehr auffindbar.",
+        "Eine feste Version dokumentiert keinen Grund."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau eines ADR",
+      "text": "Ein ADR ist kurz, meist eine Seite, und folgt einer festen Struktur (nach Michael Nygard):\n\n- **Titel und Nummer**, z. B. „0004 – Embassy statt RTIC“\n- **Status**: vorgeschlagen, angenommen, ersetzt durch …\n- **Kontext**: Welches Problem, welche Randbedingungen?\n- **Entscheidung**: Was tun wir?\n- **Konsequenzen**: Was wird leichter, was schwerer? Welche Alternativen wurden verworfen und warum?\n\nADRs liegen als Markdown im Repository, üblich ist `docs/adr/`, und werden wie Code per Pull Request besprochen."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Abschnitte eines ADR in die übliche Reihenfolge.",
+      "elemente": [
+        "Titel und Nummer",
+        "Status und Datum",
+        "Kontext",
+        "Entscheidung",
+        "Konsequenzen"
+      ],
+      "erklaerung": "Der Kontext steht vor der Entscheidung, weil man eine Entscheidung nur im Licht ihres Kontexts beurteilen kann. Wer das ADR später liest, prüft zuerst, ob der Kontext noch gilt. Hat er sich geändert, ist es Zeit für eine neue Entscheidung."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Beispiel: Embassy statt RTIC",
+      "code": {
+        "sprache": "text",
+        "datei": "docs/adr/0004-embassy-statt-rtic.md (gekürzt)",
+        "zeilen": [
+          "# 0004 – Embassy statt RTIC für die Sensor-Firmware",
+          "Status: Angenommen · Datum: 2026-03-12",
+          "",
+          "Kontext: Die Firmware wartet meist auf I/O (I²C, UART, BLE).",
+          "Das Team kennt async aus Backend-Projekten, nicht aus RTIC.",
+          "Harte Echtzeit unter 50 µs braucht nur die Motorregelung.",
+          "",
+          "Entscheidung: Embassy mit async-Tasks für alles ausser der Regelung.",
+          "Die Regelung läuft in einem Interrupt mit höherer Priorität.",
+          "",
+          "Konsequenzen: Weniger Zustandsmaschinen von Hand, fertige HALs.",
+          "Timing ist schwerer zu analysieren als mit RTICs Prioritäten.",
+          "Verworfen: RTIC (Team-Erfahrung), FreeRTOS über FFI (unsafe, C-Toolchain)."
+        ]
+      },
+      "text": "Die Entscheidung ist nicht „Embassy ist besser“, sondern „in **diesem** Kontext passt Embassy besser“. Ein anderes Team mit harten Echtzeitanforderungen überall könnte mit denselben Argumenten bei RTIC landen (Phase 7)."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Aussagen aus dem Beispiel dem Abschnitt zu.",
+      "paare": [
+        { "links": "„Die Firmware wartet meist auf I/O“", "rechts": "Kontext" },
+        { "links": "„Embassy mit async-Tasks für alles ausser der Regelung“", "rechts": "Entscheidung" },
+        { "links": "„Timing ist schwerer zu analysieren“", "rechts": "Konsequenzen" },
+        { "links": "„Angenommen“", "rechts": "Status" }
+      ],
+      "erklaerung": "Der wertvollste Teil ist oft die Liste der verworfenen Alternativen. Sie verhindert, dass dieselbe Diskussion in einem Jahr von vorne beginnt, und zeigt, dass die Alternativen ernsthaft geprüft wurden."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Entscheidungen verdienen ein ADR?",
+      "optionen": [
+        "Die Wahl zwischen Embassy und RTIC",
+        "Die Fehlerstrategie: `thiserror` in Bibliotheken, `anyhow` in Binaries, keine Panics im Betrieb",
+        "`#![forbid(unsafe_code)]` in allen Crates ausser dem Treiber-Crate",
+        "Der Name einer lokalen Variable in einer Hilfsfunktion"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Ein ADR lohnt sich für Entscheidungen, die schwer rückgängig zu machen sind, viele betreffen oder später Fragen aufwerfen. Faustregel: Wenn die Diskussion im Team länger als eine halbe Stunde dauerte, gehört das Ergebnis aufgeschrieben.",
+      "begruendungen": [
+        "Richtig. Betrifft die ganze Firmware und ist teuer zu ändern.",
+        "Richtig. Eine Querschnittsentscheidung für die ganze Codebasis.",
+        "Richtig. Die `unsafe`-Policy aus Modul 10.7 ist eine Architekturentscheidung.",
+        "Das klärt ein Review in einem Satz."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Zwei Jahre später wechselt das Team doch auf RTIC. Was passiert mit ADR 0004?",
+      "optionen": [
+        "Es bleibt inhaltlich unverändert, bekommt aber den Status „Ersetzt durch 0011“. ADR 0011 erklärt die neue Entscheidung",
+        "Es wird überschrieben, damit nur der aktuelle Stand dokumentiert ist",
+        "Es wird gelöscht, weil es nicht mehr stimmt",
+        "Es wird ins Wiki verschoben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "ADRs sind ein **Logbuch**: Sie zeigen, was zu welchem Zeitpunkt mit welchem Wissen entschieden wurde. Diese Geschichte ist wertvoll, etwa um zu verstehen, warum ein Teil des Codes noch async-Tasks nutzt.",
+      "begruendungen": [
+        "Richtig.",
+        "Dann geht verloren, warum es früher anders war.",
+        "Auch Löschen zerstört die Nachvollziehbarkeit.",
+        "Getrennt vom Code veralten Dokumente schneller und sind nicht mit Commits verknüpft."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Regel aus `docs/adr/README.md` dieser App.",
+      "text": "ADRs werden nicht nachträglich {{?}}. Ändert sich eine Entscheidung, entsteht ein neues ADR, und das alte bekommt den Status {{?}}.",
+      "luecken": [
+        { "loesungen": ["umgeschrieben"] },
+        { "loesungen": ["Ersetzt durch NNNN"] }
+      ],
+      "auswahl": ["umgeschrieben", "Ersetzt durch NNNN", "gelesen", "Gelöscht", "Archiviert"],
+      "erklaerung": "Diese App führt ihre eigenen ADRs unter `docs/adr/`, mit einer Tabelle in `README.md` und einer Vorlage. Zum Beispiel begründet ADR 0002, warum Lektionen als JSON-Dateien gespeichert werden. Kleine Korrekturen wie Tippfehler sind erlaubt, inhaltlich bleibt ein angenommenes ADR, wie es ist."
+    }
+  ],
+  "praxis": "ADRs sind eines der einfachsten Werkzeuge, mit denen ein Senior einem Team langfristig hilft. Ein guter Start: Bei der nächsten wichtigen Diskussion, etwa „Embassy oder RTIC?“, „welche MSRV?“ oder „eigenes Crate oder Modul?“, das Ergebnis als ADR per Pull Request vorschlagen. Nach einigen Monaten hat das Projekt ein nachvollziehbares Gedächtnis, und neue Teammitglieder lesen sich in einer Stunde ein.",
+  "labor": {
+    "titel": "Das erste ADR schreiben",
+    "anleitung": "Wähle eine Entscheidung aus deinem Rust-Projekt, die nirgends begründet ist, etwa die Wahl des Async-Runtimes, die MSRV oder die `unsafe`-Policy. Schreibe ein ADR nach der Vorlage aus `docs/adr/README.md` dieser App und reiche es per Pull Request ein.",
+    "befehle": [
+      "mkdir -p docs/adr && $EDITOR docs/adr/0001-titel-der-entscheidung.md",
+      "git switch -c adr/0001 && git add docs/adr && git commit -m 'ADR 0001 hinzufügen'",
+      "gh pr create --fill"
+    ],
+    "beobachtung": "Der Pull Request ist die eigentliche Diskussion: Oft merken Kolleginnen und Kollegen erst beim Lesen des Kontexts, dass sie von unterschiedlichen Annahmen ausgegangen sind."
+  },
+  "begriffe": [
+    {
+      "begriff": "Architecture Decision Record",
+      "englisch": "architecture decision record, ADR",
+      "erklaerung": "Kurzes Dokument zu einer Architekturentscheidung mit Kontext, Entscheidung und Konsequenzen."
+    },
+    {
+      "begriff": "Ersetzt",
+      "englisch": "superseded",
+      "erklaerung": "Status eines ADR, dessen Entscheidung durch ein späteres ADR abgelöst wurde."
+    },
+    {
+      "begriff": "Konsequenzen",
+      "englisch": "consequences",
+      "erklaerung": "Abschnitt eines ADR mit Vor- und Nachteilen der Entscheidung und den verworfenen Alternativen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Michael Nygard: Documenting Architecture Decisions",
+      "url": "https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions"
+    },
+    {
+      "titel": "adr.github.io",
+      "url": "https://adr.github.io/"
+    }
+  ]
+}

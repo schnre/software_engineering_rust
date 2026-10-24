@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m1-l1",
+  "phase": 7,
+  "modul": "7.1 Ablaufmodelle und Echtzeit",
+  "titel": "Superloop, Interrupts, RTOS und async",
+  "lernziele": [
+    "Die vier Ablaufmodelle Superloop, interruptgesteuert, RTOS und async unterscheiden",
+    "Für eine Anforderung das passende Modell und das passende Rust-Werkzeug wählen",
+    "Erklären, warum Determinismus wichtiger ist als Geschwindigkeit"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Diese Firmware fragt einen Taster ab und regelt eine Heizung. Was ist das grösste Problem?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#[entry]",
+          "fn main() -> ! {",
+          "    let mut hw = Hardware::init();",
+          "    loop {",
+          "        if hw.taster.is_low() {",
+          "            hw.notaus();",
+          "        }",
+          "        let t = hw.sensor.lese_temperatur();   // blockiert ~80 ms",
+          "        hw.heizung.regle(t);",
+          "        hw.display.zeichne(t);                 // ~30 ms",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Die Hauptschleife: der Superloop" },
+          { "zeile": 8, "text": "Ein langsamer Sensor blockiert die ganze Schleife" }
+        ]
+      },
+      "optionen": [
+        "Der Not-Aus wird im schlechtesten Fall erst nach über 100 ms bemerkt, weil jeder Schritt die ganze Schleife aufhält",
+        "Der Code kompiliert nicht, weil `main` nie zurückkehrt",
+        "`loop` verbraucht unbegrenzt Stack",
+        "Die Temperatur wird zu oft gelesen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im **Superloop** (*super loop*) läuft alles nacheinander in einer Endlosschleife. Die Reaktionszeit auf ein Ereignis ist die Summe aller anderen Schritte. Kommt eine langsame Funktion dazu, wird jede andere Reaktion langsamer. Für einfache Geräte ist das völlig in Ordnung, für zeitkritische Ereignisse nicht.",
+      "begruendungen": [
+        "Richtig.",
+        "`-> !` ist genau die Signatur, die `#[entry]` aus cortex-m-rt verlangt.",
+        "Eine Schleife allein legt keine neuen Stack Frames an.",
+        "Die Frequenz ist nicht das Problem, sondern die blockierende Dauer."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vier Ablaufmodelle",
+      "text": "- **Superloop**: eine Schleife, alles nacheinander. Einfach, aber Reaktionszeit = Schleifendauer.\n- **Interruptgesteuert** (*foreground/background*): Zeitkritisches läuft in Interrupt-Handlern, der Rest in der Hauptschleife. Daten zwischen beiden teilen ist die Herausforderung (Phase 6).\n- **RTOS**: Tasks mit Prioritäten, ein Scheduler verdrängt (*preemption*) niedrige Tasks. In Rust vor allem **RTIC**, das die Hardware-Interrupts selbst als Scheduler nutzt.\n- **async/await**: Tasks sind Futures, die an `.await` freiwillig abgeben (*kooperativ*). In Rust: **Embassy**. Ein Executor schläft, bis ein Interrupt eine Task aufweckt.\n\nAlle vier kommen ohne Heap aus."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne jedem Modell sein typisches Merkmal zu.",
+      "paare": [
+        { "links": "Superloop", "rechts": "Reaktionszeit hängt von der Dauer aller anderen Schritte ab" },
+        { "links": "Interruptgesteuert", "rechts": "Zeitkritisches im Handler, Daten über `critical_section::Mutex` oder Atomics teilen" },
+        { "links": "RTIC", "rechts": "Tasks sind Interrupt-Handler, Prioritäten macht der NVIC" },
+        { "links": "Embassy", "rechts": "Tasks geben an `.await` freiwillig ab, ein Executor weckt sie bei Ereignissen" }
+      ],
+      "erklaerung": "In der Praxis mischt man: Embassy kann mehrere Executoren auf verschiedenen Interrupt-Prioritäten betreiben, RTIC 2 hat neben Hardware-Tasks auch async Software-Tasks. Wichtig ist, dass klar ist, wer wen unterbrechen kann."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was bedeutet **Determinismus** bei einem Echtzeitsystem?",
+      "optionen": [
+        "Für jede Reaktion lässt sich eine obere Zeitschranke angeben, die immer gilt",
+        "Das Programm liefert bei gleichen Eingaben immer dasselbe Ergebnis",
+        "Das System reagiert im Durchschnitt möglichst schnell",
+        "Das System benutzt keine Interrupts"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im Echtzeitkontext geht es um **zeitlichen** Determinismus: Wie lange dauert es im schlechtesten Fall? Ein System mit 50 µs Mittelwert und gelegentlich 20 ms Ausreissern ist für eine Motorsteuerung schlechter als eines mit konstant 2 ms. Garbage Collection, ein Heap mit schwankender Laufzeit oder lange gesperrte Interrupts zerstören diesen Determinismus.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist funktionaler Determinismus, hier geht es um die Zeit.",
+        "Der Durchschnitt sagt nichts über den schlechtesten Fall.",
+        "Interrupts sind gerade das Mittel für schnelle, vorhersagbare Reaktionen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Harte oder weiche Echtzeit? Ordne zu.",
+      "paare": [
+        { "links": "Airbag auslösen", "rechts": "Hart: eine verpasste Frist ist ein Versagen" },
+        { "links": "Display-Aktualisierung", "rechts": "Weich: Verspätung stört nur die Qualität" },
+        { "links": "Audio-Puffer nachfüllen", "rechts": "Fest: ein zu spätes Paket ist wertlos, einzelne Aussetzer sind tolerierbar" }
+      ],
+      "erklaerung": "Die Einstufung legt den Aufwand fest: Für harte Echtzeit braucht man ein Argument (Analyse), dass die Frist immer eingehalten wird. Mehr dazu in der nächsten Lektion."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Embassy-Task mit zwei `await`-Punkten. Was passiert während `Timer::after_millis(10).await`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[embassy_executor::task]",
+          "async fn regler(mut adc: Adc<'static>, mut pwm: Pwm<'static>) {",
+          "    loop {",
+          "        let wert = adc.lese().await;",
+          "        pwm.setze_tastgrad(berechne(wert));",
+          "        Timer::after_millis(10).await;",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Die Task gibt die CPU ab. Der Executor führt andere bereite Tasks aus oder legt die CPU mit WFE schlafen, bis der Timer-Interrupt die Task weckt",
+        "Die CPU dreht 10 ms in einer Warteschleife",
+        "Ein Betriebssystem-Thread wird schlafen gelegt",
+        "Die Task wird beendet und nach 10 ms neu gestartet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`.await` auf eine noch nicht fertige Future gibt `Poll::Pending` an den Executor zurück. Der Zustand der Task (z. B. `wert`) liegt in der vom Compiler erzeugten Zustandsmaschine, nicht auf einem eigenen Stack. Darum braucht Embassy keinen Stack pro Task. Achtung: Zwischen zwei `await` läuft die Task ununterbrechbar durch, eine lange Berechnung blockiert alle Tasks desselben Executors.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre ein blockierendes Delay, genau das vermeidet async.",
+        "Auf dem Mikrocontroller gibt es keine OS-Threads, nur den Executor.",
+        "Die Task setzt nach dem `await` an derselben Stelle fort, der Schleifenzustand bleibt erhalten."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Gerät hat einen 20-kHz-Stromregler (Frist 50 µs) und daneben Kommunikation über USB und eine UI. Welche Architektur passt am besten?",
+      "optionen": [
+        "Regler in einem hoch priorisierten Interrupt (RTIC-Hardware-Task oder eigener Handler), USB und UI als async Tasks auf niedriger Priorität",
+        "Alles in einem Superloop, der Regler zuerst",
+        "Alles als async Tasks in einem einzigen Embassy-Executor",
+        "Den Regler in der UI-Task aufrufen, wenn gerade nichts zu tun ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Kooperative Tasks in einem Executor können sich nicht gegenseitig unterbrechen. Wenn die USB-Task zwischen zwei `await` 200 µs rechnet, verpasst der Regler seine Frist. Darum gehört harte Echtzeit auf eine **präemptive** Ebene: einen Interrupt mit höherer Priorität. Embassy unterstützt das mit einem `InterruptExecutor`, RTIC mit Prioritäten pro Task.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Reaktionszeit hinge von USB- und UI-Code ab.",
+        "Ohne Präemption bestimmt die längste Strecke zwischen zwei `await` die Latenz.",
+        "Dann läuft der Regler nur, wenn die UI Zeit hat: weiche statt harte Echtzeit."
+      ]
+    }
+  ],
+  "praxis": "Bei jedem neuen Embedded-Projekt lohnt sich zuerst eine Liste aller zeitkritischen Ereignisse mit Frist und Häufigkeit. Daraus folgt das Ablaufmodell: Für ein einfaches Sensorgerät reicht oft ein Superloop mit Interrupts, für vernetzte Geräte mit vielen nebenläufigen Abläufen ist Embassy beliebt, für harte Echtzeit mit Analysebedarf RTIC. Mischformen sind normal, solange die Prioritäten dokumentiert sind.",
+  "labor": {
+    "titel": "async ohne Betriebssystem auf dem PC",
+    "anleitung": "Embassy läuft mit der Plattform `platform-std` auch auf dem PC. Lege ein Projekt an, starte zwei Tasks mit unterschiedlichen Perioden und füge in eine Task eine lange Rechenschleife ohne `await` ein.",
+    "befehle": [
+      "cargo new embassy-pc && cd embassy-pc",
+      "cargo add embassy-executor --features platform-std,executor-thread",
+      "cargo add embassy-time --features std",
+      "cargo run"
+    ],
+    "beobachtung": "Solange eine Task ohne `await` rechnet, gibt die andere nichts aus: kooperatives Multitasking. Erst wenn die lange Task wieder `await`et, kommt die andere zum Zug."
+  },
+  "begriffe": [
+    { "begriff": "Superloop", "englisch": "super loop", "erklaerung": "Endlosschleife, die alle Aufgaben nacheinander abarbeitet." },
+    { "begriff": "Präemption", "englisch": "preemption", "erklaerung": "Unterbrechung einer laufenden Aufgabe zugunsten einer höher priorisierten." },
+    { "begriff": "Kooperatives Multitasking", "englisch": "cooperative multitasking", "erklaerung": "Tasks geben die CPU freiwillig ab, in Rust an jedem `.await`." },
+    { "begriff": "Determinismus", "englisch": "determinism", "erklaerung": "Im Echtzeitkontext: garantierte obere Zeitschranke für jede Reaktion." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Embedded Rust Book: Concurrency", "url": "https://docs.rust-embedded.org/book/concurrency/" },
+    { "titel": "Embassy Book", "url": "https://embassy.dev/book/" }
+  ]
+}

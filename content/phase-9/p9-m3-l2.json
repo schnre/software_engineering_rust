@@ -1,0 +1,223 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m3-l2",
+  "phase": 9,
+  "modul": "9.3 Abhängigkeiten managen",
+  "titel": "Zyklische Abhängigkeiten auflösen",
+  "lernziele": [
+    "Erklären, warum Cargo Zyklen zwischen Crates verbietet, rustc zwischen Modulen aber nicht",
+    "Zyklen zwischen Modulen eines Crates erkennen",
+    "Zyklen mit Dependency Inversion oder einem gemeinsamen Crate auflösen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Im Workspace hängt `treiber` von `domain` ab. Jemand ergänzt in `domain/Cargo.toml` die Abhängigkeit `treiber`. Was passiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: cyclic package dependency: package `domain v0.1.0 (/home/user/projekt/crates/domain)` depends on itself. Cycle:",
+          "package `domain v0.1.0 (/home/user/projekt/crates/domain)`",
+          "    ... which satisfies path dependency `domain` (locked to 0.1.0) of package `treiber v0.1.0 (/home/user/projekt/crates/treiber)`",
+          "    ... which satisfies path dependency `treiber` (locked to 0.1.0) of package `domain v0.1.0 (/home/user/projekt/crates/domain)`"
+        ]
+      },
+      "optionen": [
+        "Cargo lehnt den Zyklus ab, noch bevor rustc startet. Crates müssen einen gerichteten Graphen ohne Kreise bilden",
+        "rustc meldet einen Typfehler in `domain`",
+        "Cargo baut beide Crates zweimal hintereinander",
+        "Der Linker meldet doppelte Symbole"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Crate muss vollständig übersetzt sein, bevor ein abhängiges Crate es benutzen kann, denn rustc liest dessen Metadaten. Bei einem Kreis gäbe es keinen Anfang. Cargo prüft das schon beim Auflösen der Abhängigkeiten und meldet den ganzen Kreis.",
+      "begruendungen": [
+        "Richtig. Der Fehler kommt von Cargo, nicht von rustc.",
+        "rustc wird gar nicht erst aufgerufen.",
+        "Eine Reihenfolge, in der beide gebaut werden könnten, gibt es nicht.",
+        "Bis zum Linken kommt es nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Crates: verboten. Module: erlaubt",
+      "text": "Abhängigkeiten sollten einen **gerichteten azyklischen Graphen** bilden (DAG, directed acyclic graph). Zwischen Crates erzwingt Cargo das. **Innerhalb** eines Crates aber nicht: Ein Crate ist eine Übersetzungseinheit, und Module dürfen sich beliebig gegenseitig mit `use crate::…` benutzen.\n\nDas ist bequem und gefährlich zugleich. Zwei Module, die sich gegenseitig brauchen, sind faktisch eines: Keines lässt sich allein verstehen, testen oder später in ein eigenes Crate auslagern. Viele Projekte merken das erst, wenn sie ein Crate aufteilen wollen und an einem Knäuel aus Modulzyklen scheitern."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim Bauen dieses Crates?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "mod netz {",
+          "    use crate::protokoll::Paket;",
+          "",
+          "    pub fn sende(p: &Paket) -> usize {",
+          "        p.daten.len()",
+          "    }",
+          "}",
+          "",
+          "mod protokoll {",
+          "    use crate::netz;",
+          "",
+          "    pub struct Paket {",
+          "        pub daten: Vec<u8>,",
+          "    }",
+          "",
+          "    pub fn quittiere() -> usize {",
+          "        netz::sende(&Paket { daten: vec![0x06] })",
+          "    }",
+          "}",
+          "",
+          "pub use protokoll::quittiere;"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler und ohne Warnung, obwohl `netz` und `protokoll` einen Zyklus bilden",
+        "Fehler: zyklischer Import zwischen `netz` und `protokoll`",
+        "Warnung `cyclic_modules`, aber es baut",
+        "Fehler E0433: `protokoll` ist beim ersten `use` noch nicht definiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc kennt das ganze Crate auf einmal, die Reihenfolge der Definitionen spielt keine Rolle, und Zyklen zwischen Modulen sind erlaubt. Deshalb musst du sie selbst finden, etwa im Review oder mit Werkzeugen, die den Modulgraphen zeigen.",
+      "begruendungen": [
+        "Richtig. Der Zyklus ist für den Compiler kein Problem, aber für die Architektur.",
+        "Einen solchen Fehler gibt es in Rust nicht.",
+        "Eine solche Lint gibt es in rustc nicht.",
+        "In Rust ist die Reihenfolge von Items innerhalb eines Crates egal."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Dependency Inversion",
+      "text": "Das wichtigste Werkzeug gegen Zyklen: Das untere Modul definiert ein **Trait** für das, was es von oben braucht. Das obere implementiert es. Die Richtung der **Abhängigkeit** dreht sich, die Richtung des **Aufrufs** bleibt.\n\nBeispiel: `domain` soll Alarme melden, die `treiber` per LED anzeigt. Statt `domain → treiber` definiert `domain` ein Trait `AlarmAusgabe`, und `treiber` implementiert es für seine LED. In `main` wird beides zusammengesteckt (Composition Root, Lektion 9.3).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "// crates/domain/src/lib.rs",
+          "pub trait AlarmAusgabe {",
+          "    fn melde(&mut self, stufe: u8);",
+          "}",
+          "",
+          "// crates/treiber/src/led.rs  (treiber hängt von domain ab)",
+          "impl domain::AlarmAusgabe for StatusLed {",
+          "    fn melde(&mut self, stufe: u8) { self.blinke(stufe); }",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 2,
+            "text": "Das Trait gehört der Schicht, die es benutzt."
+          },
+          {
+            "zeile": 7,
+            "text": "Die Implementierung liegt oben. `treiber` kennt `domain`, nicht umgekehrt."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Strategie löst welchen Zyklus?",
+      "paare": [
+        {
+          "links": "Ein unteres Crate muss etwas im oberen auslösen",
+          "rechts": "Trait unten, Implementierung oben (Dependency Inversion)"
+        },
+        {
+          "links": "Beide Crates brauchen dieselben Datentypen",
+          "rechts": "Die Typen in ein neues, gemeinsames Crate auslagern"
+        },
+        {
+          "links": "Das untere Modul soll nur benachrichtigen, nicht steuern",
+          "rechts": "Callback (`FnMut`) oder Ereignis-Kanal übergeben"
+        },
+        {
+          "links": "Eine Funktion gehört fachlich eigentlich ins andere Modul",
+          "rechts": "Die Funktion verschieben"
+        }
+      ],
+      "erklaerung": "Ein gemeinsames Crate für Typen ist oft der schnellste Weg, sollte aber klein bleiben. Sonst entsteht ein neues `common`-Sammelbecken mit niedriger Kohäsion (Lektion 9.1). Für Ereignisse eignen sich in Embedded-Projekten Kanäle wie `embassy_sync::channel::Channel` oder `heapless::spsc::Queue`."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Die Schichten sind `app` → `treiber` → `domain`. Welche Zeile im `Cargo.toml` von `domain` bricht die Architektur?",
+      "code": {
+        "sprache": "toml",
+        "datei": "crates/domain/Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"domain\"",
+          "version = \"0.1.0\"",
+          "edition.workspace = true",
+          "",
+          "[dependencies]",
+          "heapless.workspace = true",
+          "treiber = { path = \"../treiber\" }",
+          "",
+          "[dev-dependencies]",
+          "proptest = \"1\""
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "`domain` ist die unterste Schicht und darf nichts von `treiber` wissen. Weil `treiber` schon von `domain` abhängt, lehnt Cargo diese Zeile sogar als Zyklus ab. `heapless` ist eine neutrale Hilfsbibliothek, und `proptest` gilt nur für Tests."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie stellst du in einem grossen Workspace dauerhaft sicher, dass `domain` nie eine Hardware-Abhängigkeit bekommt?",
+      "optionen": [
+        "Einen CI-Schritt, der `domain` für ein Host-Target ohne HAL baut, etwa `cargo build -p domain`, und die erlaubten Abhängigkeiten mit `cargo tree -p domain` prüft",
+        "Eine Regel im Wiki, die jeder lesen soll",
+        "`domain` mit `#![forbid(unsafe_code)]` versehen",
+        "Alle Crates in einem einzigen Crate zusammenführen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Regeln, die keine Maschine prüft, werden irgendwann gebrochen. Ein `domain`, das auf dem Host baut und testet, kann keine HAL eines Mikrocontrollers enthalten. Mit `cargo tree -p domain --edges normal` und einem kleinen Skript oder mit `cargo-deny` lassen sich unerwünschte Abhängigkeiten zusätzlich verbieten.",
+      "begruendungen": [
+        "Richtig. Die Grenze wird automatisch bei jedem PR geprüft.",
+        "Hilfreich als Erklärung, verhindert aber nichts.",
+        "Das ist sinnvoll, verbietet aber keine Abhängigkeiten.",
+        "Dann verliert man genau die Grenze, die Cargo erzwingen könnte."
+      ]
+    }
+  ],
+  "praxis": "Zyklen zwischen Crates kann es dank Cargo nicht geben. Zyklen zwischen Modulen entstehen dagegen schleichend, und spätestens beim Aufteilen eines grossen Crates fallen sie dir auf die Füsse. Halte deshalb auch innerhalb eines Crates eine Schichtung ein, prüfe neue `use crate::…`-Zeilen im Review und löse Rückwärtsabhängigkeiten mit einem Trait in der unteren Schicht.",
+  "labor": {
+    "titel": "Einen Crate-Zyklus provozieren und auflösen",
+    "anleitung": "Nimm den Workspace aus Lektion 9.1 (`domain`, `treiber`, `app`). Füge `treiber` als Abhängigkeit von `domain` hinzu und baue. Entferne die Zeile wieder und löse das Problem stattdessen mit einem Trait in `domain`, das `treiber` implementiert.",
+    "befehle": [
+      "cargo add -p domain treiber --path crates/treiber",
+      "cargo remove -p domain treiber",
+      "cargo tree -p domain"
+    ],
+    "beobachtung": "`cargo add` trägt die Zeile in `domain/Cargo.toml` ein, löst danach die Abhängigkeiten auf und meldet sofort `cyclic package dependency` mit dem ganzen Kreis. `cargo remove` entfernt die Zeile wieder, danach zeigt `cargo tree -p domain` keine Abhängigkeit auf `treiber` mehr."
+  },
+  "begriffe": [
+    {
+      "begriff": "Zyklische Abhängigkeit",
+      "englisch": "cyclic dependency",
+      "erklaerung": "Zwei oder mehr Einheiten hängen über einen Kreis voneinander ab. Zwischen Crates von Cargo verboten."
+    },
+    {
+      "begriff": "DAG",
+      "englisch": "directed acyclic graph",
+      "erklaerung": "Gerichteter Graph ohne Kreise. Die gesunde Form eines Abhängigkeitsgraphen."
+    },
+    {
+      "begriff": "Dependency Inversion",
+      "englisch": "dependency inversion",
+      "erklaerung": "Das untere Modul definiert eine Schnittstelle, das obere implementiert sie. Die Abhängigkeit zeigt dann nach unten."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Specifying Dependencies",
+      "url": "https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html"
+    },
+    {
+      "titel": "The Cargo Book: cargo tree",
+      "url": "https://doc.rust-lang.org/cargo/commands/cargo-tree.html"
+    }
+  ]
+}

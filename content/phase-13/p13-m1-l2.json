@@ -1,0 +1,228 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m1-l2",
+  "phase": 13,
+  "modul": "13.1 Technische Schulden und Refactoring",
+  "titel": "Von C/C++ nach Rust migrieren",
+  "lernziele": [
+    "Eine Migration nach dem Strangler-Fig-Muster Modul für Modul planen",
+    "Die FFI-Grenze zwischen Alt- und Neucode bewusst schmal und sicher gestalten",
+    "Begründen, wann sich eine Migration nicht lohnt"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eure Firmware hat 200 000 Zeilen C. Das Management will „auf Rust umsteigen“. Welcher Weg ist am wenigsten riskant?",
+      "optionen": [
+        "Ein klar abgegrenztes, fehleranfälliges Modul in Rust neu bauen, über FFI einbinden und das Produkt jederzeit lieferbar halten",
+        "Ein zweites Team schreibt die ganze Firmware in Rust neu, danach wird umgestellt",
+        "Erst alle C-Module mit `c2rust` automatisch übersetzen und dann aufräumen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Grosse Neuschreib-Projekte (*Big Bang*) dauern fast immer länger als geplant, und das Altsystem muss parallel gepflegt werden. Beim schrittweisen Ersetzen bleibt jeder Schritt klein, überprüfbar und lieferbar. Der Nutzen von Rust kommt dort zuerst an, wo heute die meisten Speicherfehler entstehen.",
+      "begruendungen": [
+        "Richtig.",
+        "Jahrelange Parallelentwicklung, und das Wissen über Sonderfälle im Altcode geht verloren.",
+        "Automatisch übersetzter Code ist fast vollständig `unsafe` und verschiebt die Arbeit nur. Als Hilfsmittel kann es nützen, als Strategie nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Strangler Fig mit FFI",
+      "text": "Beim Muster **Strangler Fig** (Würgefeige) wächst das neue System neben dem alten, bis dieses nicht mehr gebraucht wird. In einer C/C++-Codebasis heisst das: Rust-Code wird als `staticlib` gebaut und dazugelinkt. An der **FFI-Grenze** (Foreign Function Interface) rufen sich beide Seiten über die C-Aufrufkonvention auf.\n\nGute Kandidaten für den ersten Schritt sind Module mit wenig Abhängigkeiten, viel Umgang mit fremden Daten und hoher Fehlerrate: Parser, Protokolle, Dekoder. Schlechte Kandidaten sind stabile, selten geänderte Treiber.",
+      "diagramm": {
+        "knoten": ["C-Hauptprogramm", "FFI-Grenze (extern \"C\")", "Rust-Modul (staticlib)", "Sichere Rust-API"],
+        "beschriftung": "Die Grenze bleibt schmal, dahinter ist alles sicheres Rust"
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug hilft wobei?",
+      "paare": [
+        { "links": "`bindgen`", "rechts": "Erzeugt Rust-Deklarationen aus bestehenden C-Headern" },
+        { "links": "`cbindgen`", "rechts": "Erzeugt einen C-Header aus Rust-Funktionen mit `extern \"C\"`" },
+        { "links": "`cxx`", "rechts": "Sichere, typisierte Brücke zwischen Rust und C++ mit Strings und Vektoren" },
+        { "links": "`cc` in `build.rs`", "rechts": "Kompiliert bestehende C-Dateien und linkt sie ins Rust-Crate" }
+      ],
+      "erklaerung": "Welche Richtung zuerst? Ist das Hauptprogramm in C, ruft es neue Rust-Funktionen auf: `cbindgen` für den Header. Wird später Rust das Hauptprogramm, ruft es verbleibenden Altcode auf: `bindgen` und `cc`. `cxx` lohnt sich, wenn auf beiden Seiten C++-Typen wie `std::string` über die Grenze sollen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Rust-Crate (Edition 2024) soll die bestehende C-Funktion `crc16` aufrufen. Was bedeutet diese Meldung?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "extern \"C\" {",
+          "    fn crc16(daten: *const u8, laenge: usize) -> u16;",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling ffi v0.1.0 (/home/user/projekt)",
+          "error: extern blocks must be unsafe",
+          " --> src/lib.rs:1:1",
+          "  |",
+          "1 | / extern \"C\" {",
+          "2 | |     fn crc16(daten: *const u8, laenge: usize) -> u16;",
+          "3 | | }",
+          "  | |_^"
+        ]
+      },
+      "optionen": [
+        "Seit Edition 2024 muss man `unsafe extern \"C\" { … }` schreiben: Wer deklariert, verspricht, dass die Signatur zum C-Code passt",
+        "Der Linker findet `crc16` nicht",
+        "C-Funktionen dürfen nur aus `unsafe fn` aufgerufen werden",
+        "`usize` ist kein gültiger FFI-Typ, es muss `u32` sein"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Deklaration selbst ist eine unbeweisbare Behauptung: Stimmt die Signatur nicht mit dem C-Code überein, ist jeder Aufruf undefiniertes Verhalten. Edition 2024 macht diese Verantwortung mit `unsafe extern` sichtbar. `usize` entspricht auf den üblichen Plattformen `size_t`.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist ein Fehler des Compilers, nicht des Linkers. Der Linker wurde noch gar nicht aufgerufen.",
+        "Aufrufe brauchen einen `unsafe`-Block, aber die Meldung betrifft die Deklaration.",
+        "`usize` ist für `size_t` üblich und zulässig."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die sichere Hülle um die alte C-Funktion, damit der restliche Rust-Code kein `unsafe` mehr braucht.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "{{?}} extern \"C\" {",
+          "    fn crc16(daten: *const u8, laenge: usize) -> u16;",
+          "}",
+          "",
+          "pub fn pruefsumme(daten: &[u8]) -> u16 {",
+          "    // SAFETY: Zeiger und Länge stammen aus demselben gültigen Slice.",
+          "    unsafe { crc16(daten.{{?}}(), daten.len()) }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["unsafe"] },
+        { "loesungen": ["as_ptr"] }
+      ],
+      "auswahl": ["unsafe", "as_ptr", "pub", "as_mut_ptr", "into_raw"],
+      "erklaerung": "Das ist die wichtigste Regel an der FFI-Grenze: `unsafe` an **einer** Stelle bündeln, mit Begründung, und nach aussen eine sichere Funktion anbieten. Ein Test mit bekannten Werten (für CRC-16/CCITT-FALSE ergibt `b\"123456789\"` den Wert `0x29B1`) sichert ab, dass Alt- und Neucode gleich rechnen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Diese Rust-Funktion soll vom C-Hauptprogramm aufgerufen werden. Was meldet `cargo build`?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub struct Messung {",
+          "    pub kanal: u8,",
+          "    pub wert: i32,",
+          "}",
+          "",
+          "#[unsafe(no_mangle)]",
+          "pub extern \"C\" fn messung_skalieren(m: Messung) -> i32 {",
+          "    m.wert * 10 + m.kanal as i32",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Eine Warnung: `Messung` ist nicht FFI-sicher, es fehlt `#[repr(C)]`",
+        "Fehler: `#[unsafe(no_mangle)]` ist keine gültige Syntax",
+        "Kompiliert ohne Meldung",
+        "Fehler E0133: Aufruf einer unsicheren Funktion"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `#[repr(C)]` darf rustc die Felder beliebig anordnen, der C-Code würde ein anderes Layout erwarten. Der Lint `improper_ctypes_definitions` warnt davor. Für die Migration heisst das: Typen an der Grenze bewusst entwerfen, am besten wenige und einfache. In Edition 2024 ist `#[unsafe(no_mangle)]` übrigens die vorgeschriebene Form.",
+      "begruendungen": [
+        "Richtig.",
+        "In Edition 2024 ist genau das die verlangte Schreibweise, `#[no_mangle]` allein ist dort ein Fehler.",
+        "Der Lint `improper_ctypes_definitions` ist standardmässig aktiv.",
+        "Hier wird keine unsichere Funktion aufgerufen."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Schritte für die Ablösung eines C-Moduls in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Charakterisierungstests für das Verhalten des C-Moduls schreiben",
+        "Die Schnittstelle des Moduls als schmale C-API festhalten",
+        "Rust-Implementierung hinter derselben API bauen",
+        "Dieselben Tests gegen beide Implementierungen laufen lassen",
+        "Per Build-Schalter auf Rust umstellen und im Feld beobachten",
+        "Den alten C-Code löschen"
+      ],
+      "erklaerung": "Der entscheidende Trick sind dieselben Tests für beide Implementierungen: Sie belegen, dass die Rust-Version das gleiche Verhalten hat, inklusive der Eigenheiten, auf die sich andere Module verlassen. Der Build-Schalter macht den Wechsel umkehrbar, bis genug Erfahrung im Feld gesammelt ist."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Bei welchen Modulen spricht am meisten **gegen** eine Migration nach Rust?",
+      "optionen": [
+        "Ein zertifizierter, seit Jahren unveränderter Regelalgorithmus, dessen Neuzertifizierung Monate kosten würde",
+        "Ein Parser für Netzwerkpakete von unbekannten Geräten",
+        "Ein Modul mit vielen Pufferüberläufen in der Fehlerhistorie",
+        "Ein selten geändertes Modul, das eng mit vielen globalen Variablen verflochten ist"
+      ],
+      "korrekt": [0, 3],
+      "erklaerung": "Rust lohnt sich dort, wo Speicherfehler wahrscheinlich und teuer sind und wo Code sich noch ändert. Stabiler, geprüfter Code hat seine Fehler meist schon hinter sich. Und Code mit viel geteiltem globalem Zustand erzeugt eine breite, `unsafe`-lastige FFI-Grenze, die kaum Sicherheitsgewinn bringt. „Wir lassen es“ ist eine legitime Senior-Entscheidung.",
+      "begruendungen": [
+        "Richtig. Hoher Aufwand, geringer Gewinn.",
+        "Fremde Eingaben parsen ist der klassische Fall, in dem Rust viel bringt.",
+        "Genau hier entfaltet Rust seinen grössten Nutzen.",
+        "Richtig. Die Grenze würde breit und unsicher, der Nutzen klein."
+      ]
+    }
+  ],
+  "praxis": "Die meisten Rust-Projekte in der Industrie beginnen nicht auf der grünen Wiese, sondern neben bestehendem C oder C++. Als Senior wählst du das erste Modul so, dass es schnell einen sichtbaren Nutzen bringt, hältst die FFI-Grenze schmal und gut getestet und sorgst dafür, dass das Produkt jederzeit lieferbar bleibt. Genauso wichtig: Du sagst auch nein, wo eine Migration nur Aufwand ohne Gewinn wäre.",
+  "labor": {
+    "titel": "C-Code aus Rust aufrufen",
+    "anleitung": "Lege ein Crate an, das eine vorhandene C-Funktion (z. B. eine CRC-Berechnung in `c/crc.c`) über das `cc`-Crate mitbaut. Schreibe eine sichere Hülle und einen Test mit bekanntem Ergebnis.",
+    "befehle": [
+      "cargo new --lib altcode && cd altcode",
+      "cargo add --build cc",
+      "$EDITOR build.rs   # cc::Build::new().file(\"c/crc.c\").compile(\"altcode\");",
+      "cargo test",
+      "cargo clippy -- -W clippy::undocumented_unsafe_blocks"
+    ],
+    "beobachtung": "Der Test läuft gegen den C-Code. Wenn du später eine reine Rust-Version schreibst, nimmst du denselben Test und hast so den Nachweis, dass beide gleich rechnen. Clippy zeigt dir jeden `unsafe`-Block, dem die Begründung fehlt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Strangler Fig",
+      "englisch": "strangler fig pattern",
+      "erklaerung": "Schrittweise Ablösung eines Altsystems, indem Funktionen nach und nach in ein neues verlagert werden."
+    },
+    {
+      "begriff": "FFI-Grenze",
+      "englisch": "FFI boundary",
+      "erklaerung": "Stelle, an der Rust und C/C++ sich über die C-Aufrufkonvention aufrufen. Hier gelten die Garantien von Rust nicht."
+    },
+    {
+      "begriff": "Sichere Hülle",
+      "englisch": "safe wrapper",
+      "erklaerung": "Sichere Rust-Funktion, die einen unsicheren Aufruf kapselt und seine Voraussetzungen garantiert."
+    },
+    {
+      "begriff": "Big Bang",
+      "englisch": "big bang rewrite",
+      "erklaerung": "Ein System auf einmal komplett neu schreiben und umstellen, statt es schrittweise abzulösen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rustonomicon: Foreign Function Interface",
+      "url": "https://doc.rust-lang.org/nomicon/ffi.html"
+    },
+    {
+      "titel": "The bindgen User Guide",
+      "url": "https://rust-lang.github.io/rust-bindgen/"
+    },
+    {
+      "titel": "Martin Fowler: StranglerFigApplication",
+      "url": "https://martinfowler.com/bliki/StranglerFigApplication.html"
+    }
+  ]
+}

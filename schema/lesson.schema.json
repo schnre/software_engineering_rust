@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schnre.github.io/software_engineering/schema/lesson.schema.json",
+  "title": "Lektion der Engineering Academy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "phase", "modul", "titel", "lernziele", "dauerMinuten", "schritte", "praxis"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^p[1-9][0-9]?-m[0-9]{1,2}-l[0-9]{1,2}$" },
+    "phase": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "modul": { "type": "string", "pattern": "^[1-9][0-9]?\\.[0-9]{1,2} .+" },
+    "titel": { "type": "string", "minLength": 3, "maxLength": 90 },
+    "lernziele": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/definitions/text" } },
+    "dauerMinuten": { "type": "integer", "minimum": 3, "maximum": 7 },
+    "schritte": { "type": "array", "minItems": 5, "maxItems": 10, "items": { "$ref": "#/definitions/schritt" } },
+    "praxis": { "$ref": "#/definitions/text" },
+    "labor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anleitung"],
+      "properties": {
+        "titel": { "type": "string" },
+        "anleitung": { "$ref": "#/definitions/text" },
+        "befehle": { "type": "array", "items": { "type": "string" } },
+        "beobachtung": { "$ref": "#/definitions/text" }
+      }
+    },
+    "begriffe": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["begriff", "erklaerung"],
+        "properties": {
+          "begriff": { "type": "string", "minLength": 1 },
+          "englisch": { "type": "string" },
+          "erklaerung": { "$ref": "#/definitions/text" }
+        }
+      }
+    },
+    "weiterlesen": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["titel", "url"],
+        "properties": {
+          "titel": { "type": "string" },
+          "url": { "type": "string", "pattern": "^https://" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "text": { "type": "string", "minLength": 1 },
+    "basis": {
+      "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+      "hinweis": { "type": "string" }
+    },
+    "code": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sprache", "zeilen"],
+      "properties": {
+        "sprache": { "enum": ["rust", "toml", "cpp", "c", "bash", "cmake", "make", "yaml", "groovy", "json", "asm", "starlark", "python", "linker", "text"] },
+        "datei": { "type": "string" },
+        "zeilen": { "type": "array", "minItems": 1, "maxItems": 40, "items": { "type": "string" } },
+        "anmerkungen": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["zeile", "text"],
+            "properties": { "zeile": { "type": "integer", "minimum": 1 }, "text": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ausgabe"],
+      "properties": {
+        "befehl": { "type": "string" },
+        "ausgabe": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "korrekt": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } }
+      ]
+    },
+    "schritt": {
+      "type": "object",
+      "required": ["typ"],
+      "properties": { "typ": { "enum": ["erklaerung", "multiple-choice", "lueckentext", "reihenfolge", "zuordnen", "code-lesen", "fehler-finden", "terminal-deuten"] } },
+      "allOf": [
+        { "if": { "properties": { "typ": { "const": "erklaerung" } } }, "then": { "$ref": "#/definitions/erklaerung" } },
+        { "if": { "properties": { "typ": { "const": "multiple-choice" } } }, "then": { "$ref": "#/definitions/multipleChoice" } },
+        { "if": { "properties": { "typ": { "const": "lueckentext" } } }, "then": { "$ref": "#/definitions/lueckentext" } },
+        { "if": { "properties": { "typ": { "const": "reihenfolge" } } }, "then": { "$ref": "#/definitions/reihenfolge" } },
+        { "if": { "properties": { "typ": { "const": "zuordnen" } } }, "then": { "$ref": "#/definitions/zuordnen" } },
+        { "if": { "properties": { "typ": { "const": "code-lesen" } } }, "then": { "$ref": "#/definitions/codeLesen" } },
+        { "if": { "properties": { "typ": { "const": "fehler-finden" } } }, "then": { "$ref": "#/definitions/fehlerFinden" } },
+        { "if": { "properties": { "typ": { "const": "terminal-deuten" } } }, "then": { "$ref": "#/definitions/terminalDeuten" } }
+      ]
+    },
+    "erklaerung": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "text"],
+      "properties": {
+        "typ": { "const": "erklaerung" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "titel": { "type": "string" },
+        "text": { "$ref": "#/definitions/text" },
+        "code": { "$ref": "#/definitions/code" },
+        "terminal": { "$ref": "#/definitions/terminal" },
+        "tabelle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kopf", "zeilen"],
+          "properties": {
+            "kopf": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+            "zeilen": { "type": "array", "minItems": 1, "items": { "type": "array", "items": { "type": "string" } } }
+          }
+        },
+        "diagramm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["knoten"],
+          "properties": {
+            "knoten": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+            "beschriftung": { "type": "string" }
+          }
+        }
+      }
+    },
+    "multipleChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "optionen", "korrekt", "erklaerung"],
+      "properties": {
+        "typ": { "const": "multiple-choice" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "code": { "$ref": "#/definitions/code" },
+        "optionen": { "type": "array", "minItems": 3, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/definitions/text" } },
+        "korrekt": { "$ref": "#/definitions/korrekt" },
+        "erklaerung": { "$ref": "#/definitions/text" },
+        "begruendungen": { "type": "array", "items": { "$ref": "#/definitions/text" } },
+        "fest": { "type": "boolean" }
+      }
+    },
+    "codeLesen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "code", "optionen", "korrekt", "erklaerung"],
+      "properties": {
+        "typ": { "const": "code-lesen" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "code": { "$ref": "#/definitions/code" },
+        "optionen": { "type": "array", "minItems": 2, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/definitions/text" } },
+        "korrekt": { "$ref": "#/definitions/korrekt" },
+        "erklaerung": { "$ref": "#/definitions/text" },
+        "begruendungen": { "type": "array", "items": { "$ref": "#/definitions/text" } },
+        "fest": { "type": "boolean" }
+      }
+    },
+    "terminalDeuten": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "terminal", "optionen", "korrekt", "erklaerung"],
+      "properties": {
+        "typ": { "const": "terminal-deuten" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "terminal": { "$ref": "#/definitions/terminal" },
+        "code": { "$ref": "#/definitions/code" },
+        "optionen": { "type": "array", "minItems": 2, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/definitions/text" } },
+        "korrekt": { "$ref": "#/definitions/korrekt" },
+        "erklaerung": { "$ref": "#/definitions/text" },
+        "begruendungen": { "type": "array", "items": { "$ref": "#/definitions/text" } },
+        "fest": { "type": "boolean" }
+      }
+    },
+    "lueckentext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "luecken", "erklaerung"],
+      "oneOf": [{ "required": ["text"] }, { "required": ["code"] }],
+      "properties": {
+        "typ": { "const": "lueckentext" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "text": { "$ref": "#/definitions/text" },
+        "code": { "$ref": "#/definitions/code" },
+        "luecken": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["loesungen"],
+            "properties": { "loesungen": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/text" } } }
+          }
+        },
+        "auswahl": { "type": "array", "minItems": 2, "items": { "$ref": "#/definitions/text" } },
+        "erklaerung": { "$ref": "#/definitions/text" }
+      }
+    },
+    "reihenfolge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "elemente", "erklaerung"],
+      "properties": {
+        "typ": { "const": "reihenfolge" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "elemente": { "type": "array", "minItems": 3, "maxItems": 7, "uniqueItems": true, "items": { "$ref": "#/definitions/text" } },
+        "erklaerung": { "$ref": "#/definitions/text" }
+      }
+    },
+    "zuordnen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "paare", "erklaerung"],
+      "properties": {
+        "typ": { "const": "zuordnen" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "paare": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["links", "rechts"],
+            "properties": { "links": { "$ref": "#/definitions/text" }, "rechts": { "$ref": "#/definitions/text" } }
+          }
+        },
+        "erklaerung": { "$ref": "#/definitions/text" }
+      }
+    },
+    "fehlerFinden": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typ", "frage", "code", "fehlerZeile", "erklaerung"],
+      "properties": {
+        "typ": { "const": "fehler-finden" },
+        "id": { "$ref": "#/definitions/basis/id" },
+        "hinweis": { "$ref": "#/definitions/basis/hinweis" },
+        "frage": { "$ref": "#/definitions/text" },
+        "code": { "$ref": "#/definitions/code" },
+        "fehlerZeile": { "type": "integer", "minimum": 1 },
+        "erklaerung": { "$ref": "#/definitions/text" }
+      }
+    }
+  }
+}

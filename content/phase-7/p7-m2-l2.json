@@ -1,0 +1,217 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m2-l2",
+  "phase": 7,
+  "modul": "7.2 RTOS und Frameworks in Rust",
+  "titel": "Embassy: async/await auf dem Mikrocontroller",
+  "lernziele": [
+    "Erklären, wie der Embassy-Executor Tasks ohne Heap und ohne eigenen Stack pro Task ausführt",
+    "Tasks mit `#[embassy_executor::task]` definieren und mit dem `Spawner` starten",
+    "Tasks über `Channel` und `Signal` aus `embassy-sync` koppeln"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein FreeRTOS-Projekt mit 8 Tasks reserviert pro Task einen Stack von 1 KiB. Wie viel Stack braucht Embassy für 8 async Tasks?",
+      "optionen": [
+        "Nur den einen Haupt-Stack. Der Zustand jeder Task liegt in einer vom Compiler erzeugten Zustandsmaschine in einem `static`",
+        "Ebenfalls 8 KiB, weil jede Task einen eigenen Stack braucht",
+        "Gar keinen, async kommt ganz ohne Stack aus",
+        "Das hängt davon ab, wie viel Heap eingerichtet ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine `async fn` wird zu einer Zustandsmaschine (*Future*), die genau die Variablen enthält, die über ein `.await` hinweg leben. Das Makro `#[embassy_executor::task]` legt für jede Task einen `static`-Speicherplatz in passender Grösse an. Reicht das RAM nicht, meldet das schon der Linker. Während eine Task läuft, nutzt sie den gemeinsamen Stack ganz normal.",
+      "begruendungen": [
+        "Richtig.",
+        "Das gilt für Thread-basierte RTOS, nicht für async.",
+        "Während eine Task läuft, braucht sie natürlich Stack, nur eben den gemeinsamen.",
+        "Embassy braucht keinen Heap."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Executor, Tasks und Spawner",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "use embassy_executor::Spawner;",
+          "use embassy_time::Timer;",
+          "use {defmt_rtt as _, panic_probe as _};",
+          "",
+          "#[embassy_executor::task]",
+          "async fn blinken(mut led: Output<'static>) {",
+          "    loop {",
+          "        led.toggle();",
+          "        Timer::after_millis(500).await;",
+          "    }",
+          "}",
+          "",
+          "#[embassy_executor::main]",
+          "async fn main(spawner: Spawner) {",
+          "    let p = embassy_stm32::init(Default::default());",
+          "    let led = Output::new(p.PA5, Level::Low, Speed::Low);",
+          "    spawner.spawn(blinken(led).unwrap());",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 7, "text": "Legt einen statischen Platz für genau eine Instanz an" },
+          { "zeile": 11, "text": "Gibt die CPU ab, bis der Timer abläuft" },
+          { "zeile": 19, "text": "Seit embassy-executor 0.10: `blinken(...)` liefert `Result<SpawnToken, SpawnError>`" }
+        ]
+      },
+      "text": "Der **Executor** pollt nur Tasks, die geweckt wurden. Hat er nichts zu tun, schläft die CPU (`WFE`). Ein Interrupt, etwa vom Timer, weckt die passende Task über ihren **Waker**. Tasks erhalten Peripherie per Ownership: `Output<'static>` gehört danach allein der Task."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim zweiten `spawn`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[embassy_executor::task]",
+          "async fn blinken(nr: u32) {",
+          "    loop {",
+          "        println!(\"LED {nr}\");",
+          "        Timer::after_millis(100).await;",
+          "    }",
+          "}",
+          "",
+          "#[embassy_executor::main]",
+          "async fn main(spawner: Spawner) {",
+          "    spawner.spawn(blinken(1).unwrap());",
+          "    spawner.spawn(blinken(2).unwrap());",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Panik: `blinken(2)` liefert `Err(SpawnError::Busy)`, weil der Task-Pool standardmässig nur eine Instanz fasst",
+        "Beide Tasks laufen abwechselnd",
+        "Compilerfehler, weil `blinken` zweimal verwendet wird",
+        "Die erste Task wird beendet und durch die zweite ersetzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auf dem PC (Plattform `platform-std`) gibt das Programm aus: `called `Result::unwrap()` on an `Err` value: Busy - Too many instances of this task are already running. Check the `pool_size` attribute of the task.` Mit `#[embassy_executor::task(pool_size = 2)]` reserviert das Makro Platz für zwei Instanzen. Der Speicher ist also immer statisch begrenzt und bekannt.",
+      "begruendungen": [
+        "Richtig.",
+        "Dafür müsste `pool_size = 2` gesetzt sein.",
+        "Der Aufruf kompiliert, der Fehler kommt erst zur Laufzeit als `Result`.",
+        "Embassy ersetzt keine laufenden Tasks."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du übergibst einer Task eine Referenz auf eine lokale Variable aus `main`. Was sagt der Compiler?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0597]: `z` does not live long enough",
+          "  --> src/main.rs:15:26",
+          "   |",
+          "12 | #[embassy_executor::main]",
+          "   |                         - `z` dropped here while still borrowed",
+          "13 | async fn main(spawner: Spawner) {",
+          "14 |     let mut z = 0u32;",
+          "   |         ----- binding `z` declared here",
+          "15 |     spawner.spawn(zaehle(&mut z).unwrap());",
+          "   |                   -------^^^^^^-",
+          "   |                   |      |",
+          "   |                   |      borrowed value does not live long enough",
+          "   |                   argument requires that `z` is borrowed for `'static`"
+        ]
+      },
+      "optionen": [
+        "Task-Argumente müssen `'static` sein, weil die Task länger leben kann als `main`. Abhilfe: Wert per Move übergeben oder einen `StaticCell` verwenden",
+        "`main` darf in Embassy keine Variablen anlegen",
+        "Der Fehler verschwindet mit `pool_size = 2`",
+        "`&mut` ist in async-Funktionen grundsätzlich verboten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine gespawnte Task lebt unabhängig weiter, darum verlangt das Makro, dass alle Argumente `'static` sind. Für Puffer oder Treiber, die mehrere Tasks brauchen, legt man sie mit `static_cell::StaticCell` an und erhält ein `&'static mut T` (Lektion 7.3.1). Geteilte Daten laufen über Typen aus `embassy-sync`.",
+      "begruendungen": [
+        "Richtig.",
+        "Lokale Variablen sind erlaubt, nur nicht als nicht-statische Referenz für eine Task.",
+        "Die Poolgrösse hat mit Lebensdauern nichts zu tun.",
+        "Auch `async fn` darf `&mut`-Parameter haben, nur Tasks verlangen `'static`."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Synchronisationstypen aus `embassy-sync` zu.",
+      "paare": [
+        { "links": "`Channel<M, T, N>`", "rechts": "Warteschlange mit fester Kapazität N, `send().await` wartet, wenn sie voll ist" },
+        { "links": "`Signal<M, T>`", "rechts": "Hält nur den neuesten Wert, ein neuer überschreibt den alten" },
+        { "links": "`Mutex<M, T>` (async)", "rechts": "Exklusiver Zugriff über `lock().await`, auch über ein `.await` hinweg" },
+        { "links": "`CriticalSectionRawMutex`", "rechts": "Raw-Mutex für `M`, sicher auch zwischen Interrupt und Task" }
+      ],
+      "erklaerung": "Der Typparameter `M` legt fest, wie die interne Sperre funktioniert: `CriticalSectionRawMutex` sperrt kurz die Interrupts, `NoopRawMutex` ist für Daten, die nur ein Executor benutzt. Alle Typen sind `const`-konstruierbar und können in einem `static` liegen, ganz ohne Heap."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Erzeuger, der Messwerte an eine Logger-Task schickt.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static KANAL: Channel<CriticalSectionRawMutex, u32, 4> = Channel::{{?}}();",
+          "",
+          "#[embassy_executor::task]",
+          "async fn sensor() {",
+          "    let mut ticker = Ticker::every(Duration::from_millis(100));",
+          "    loop {",
+          "        KANAL.{{?}}(messen()).await;",
+          "        ticker.{{?}}().await;",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["new"] }, { "loesungen": ["send"] }, { "loesungen": ["next"] }],
+      "auswahl": ["new", "send", "next", "receive", "init", "wait"],
+      "erklaerung": "`Channel::new()` ist eine `const fn`, darum geht es im `static`. `send` wartet asynchron, wenn alle 4 Plätze belegt sind. `Ticker` liefert eine feste Periode ohne Drift, anders als `Timer::after` in einer Schleife, dessen Periode um die Laufzeit des Schleifenkörpers wächst. Die Gegenseite ruft `KANAL.receive().await` auf."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Task berechnet eine FFT über 4096 Werte und braucht dafür 15 ms ohne ein einziges `.await`. Was ist die Folge?",
+      "optionen": [
+        "Alle anderen Tasks desselben Executors müssen 15 ms warten, auch wenn ihre Ereignisse längst eingetroffen sind",
+        "Der Executor unterbricht die Task nach einer Zeitscheibe",
+        "Nichts, weil jede Task auf einem eigenen Kern läuft",
+        "Der Watchdog von Embassy beendet die Task"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Embassy ist **kooperativ**: Zwischen zwei `await` läuft eine Task ununterbrechbar. Lösungen: lange Berechnungen in Häppchen teilen und dazwischen `embassy_futures::yield_now().await` aufrufen, oder zeitkritische Tasks in einem `InterruptExecutor` auf höherer Priorität laufen lassen. Dann verdrängt dieser die Tasks des normalen Executors.",
+      "begruendungen": [
+        "Richtig.",
+        "Zeitscheiben gibt es in Embassy nicht.",
+        "Ein Executor läuft auf einem Kern, seine Tasks teilen ihn.",
+        "Embassy hat keinen eingebauten Task-Watchdog."
+      ]
+    }
+  ],
+  "praxis": "Embassy ist heute das verbreitetste async-Framework für Mikrocontroller, mit eigenen HALs für STM32, nRF, RP2040/RP235x und weitere sowie Netzwerk-Stack (`embassy-net`), USB und Bluetooth. Typische Architektur: eine Task pro Schnittstelle oder Funktion, verbunden über `Channel` und `Signal`. Prüfe bei jeder Task, wie lange sie maximal zwischen zwei `await` rechnet, und lege harte Echtzeit auf einen eigenen Interrupt-Executor.",
+  "labor": {
+    "titel": "Embassy auf dem PC",
+    "anleitung": "Baue mit `platform-std` ein Programm mit einer Sensor-Task, die über einen `Channel` Werte an eine Logger-Task schickt, und einem `Signal`, das `main` am Ende benachrichtigt.",
+    "befehle": [
+      "cargo new embassy-pc && cd embassy-pc",
+      "cargo add embassy-executor --features platform-std,executor-thread",
+      "cargo add embassy-time --features std",
+      "cargo add embassy-sync",
+      "cargo add critical-section --features std",
+      "cargo run"
+    ],
+    "beobachtung": "Die Ausgaben erscheinen im Takt des `Ticker`. Verkleinere die Kanal-Kapazität auf 1 und lass den Logger langsamer laufen: Der Sensor wartet dann bei `send().await`, statt Werte zu verlieren."
+  },
+  "begriffe": [
+    { "begriff": "Executor", "englisch": "executor", "erklaerung": "Teil der Laufzeit, der bereite Futures pollt und sonst die CPU schlafen legt." },
+    { "begriff": "Future", "englisch": "future", "erklaerung": "Wert, der eine noch laufende Berechnung darstellt; vom Compiler aus `async fn` erzeugt." },
+    { "begriff": "Waker", "englisch": "waker", "erklaerung": "Handle, mit dem ein Ereignis (z. B. ein Interrupt) eine Task beim Executor als bereit meldet." },
+    { "begriff": "Spawner", "englisch": "spawner", "erklaerung": "Handle zum Starten von Tasks auf einem Executor." }
+  ],
+  "weiterlesen": [
+    { "titel": "Embassy Book", "url": "https://embassy.dev/book/" },
+    { "titel": "docs.rs: embassy-executor", "url": "https://docs.rs/embassy-executor" },
+    { "titel": "docs.rs: embassy-sync", "url": "https://docs.rs/embassy-sync" }
+  ]
+}

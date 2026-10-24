@@ -1,0 +1,242 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m1-l2",
+  "phase": 9,
+  "modul": "9.1 Modularisierung und Separation of Concerns",
+  "titel": "Crates und Workspaces schneiden",
+  "lernziele": [
+    "Begründen, wann ein Teil ein eigenes Crate werden sollte",
+    "Schichten eines Systems als Crates in einem Workspace abbilden",
+    "Die Abhängigkeitsrichtung mit Cargo erzwingen und prüfen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Firmware ist ein einziges Crate mit 60 000 Zeilen. Nach jeder kleinen Änderung im Protokoll-Parser dauert `cargo build` lange. Welche Ursache ist am wahrscheinlichsten?",
+      "optionen": [
+        "Das Crate ist die Übersetzungseinheit von rustc: Bei einer Änderung wird das ganze Crate neu analysiert, und Teile laufen nicht parallel",
+        "Cargo lädt bei jedem Build alle Abhängigkeiten neu von crates.io",
+        "Rust kompiliert grundsätzlich jede Datei bei jeder Änderung neu, unabhängig von der Struktur",
+        "Grosse Crates werden immer im Release-Profil gebaut"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc übersetzt immer ein ganzes Crate. Inkrementelle Kompilierung hilft, aber Typprüfung und Borrow-Checking eines Riesen-Crates bleiben teuer. Mehrere Crates kann Cargo dagegen parallel bauen, und ein unverändertes Crate wird gar nicht angefasst (Modul 1.1).",
+      "begruendungen": [
+        "Richtig. Die Crate-Grenze ist die Einheit für Parallelität und Neubau.",
+        "Abhängigkeiten werden einmal geladen und dann aus dem Cache in `target/` verwendet.",
+        "Inkrementelle Kompilierung vermeidet viel Arbeit, aber eben innerhalb eines Crates.",
+        "Das Profil hängt vom Befehl ab (`--release`), nicht von der Grösse."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Gründe für ein eigenes Crate",
+      "text": "Ein Modul ist billig, ein Crate kostet etwas: eigenes `Cargo.toml`, Versionen, Grenzen für Generics und Inlining. Ein eigenes Crate lohnt sich, wenn mindestens einer dieser Gründe zutrifft:\n\n- **Buildzeit**: Teile lassen sich parallel und unabhängig bauen.\n- **Sichtbarkeit**: Was nicht `pub` ist, ist für andere Crates wirklich unerreichbar. `pub(crate)` wird zur harten Grenze.\n- **Wiederverwendung**: Derselbe Code läuft in Firmware, Host-Werkzeug und Tests.\n- **Abhängigkeiten trennen**: Die Fachlogik braucht kein `std`, kein Netzwerk, keine HAL. Als eigenes `no_std`-Crate kann sie das gar nicht erst.\n\nEin **Workspace** fasst mehrere Crates zusammen: ein gemeinsames `Cargo.lock`, ein gemeinsames `target/`."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Vervollständige das Wurzel-`Cargo.toml` des Workspaces. Die Crates sollen Edition und `heapless`-Version zentral erben.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[{{?}}]",
+          "members = [\"crates/*\"]",
+          "resolver = \"3\"",
+          "",
+          "[workspace.package]",
+          "edition = \"2024\"",
+          "",
+          "[workspace.{{?}}]",
+          "heapless = \"0.8\"",
+          "domain = { path = \"crates/domain\" }",
+          "",
+          "# crates/treiber/Cargo.toml:",
+          "# edition.workspace = true",
+          "# heapless.{{?}} = true"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "workspace"
+          ]
+        },
+        {
+          "loesungen": [
+            "dependencies"
+          ]
+        },
+        {
+          "loesungen": [
+            "workspace"
+          ]
+        }
+      ],
+      "auswahl": [
+        "workspace",
+        "dependencies",
+        "workspace",
+        "package",
+        "members",
+        "patch"
+      ],
+      "erklaerung": "`[workspace.dependencies]` legt Versionen einmal zentral fest, die Mitglieder schreiben nur `heapless.workspace = true`. So gibt es keine zwei verschiedenen `heapless`-Versionen im selben Projekt, die `cargo tree -d` als Duplikat melden würde.",
+      "hinweis": "Mitglieder erben mit `<schlüssel>.workspace = true`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Schichten als Crates",
+      "text": "Ein typischer Schnitt für ein Embedded-Projekt: Die Fachlogik (`domain`) ist reines `no_std` ohne Hardware. Treiber kennen die Hardware und die Fachtypen. Die Anwendung (`app`) verdrahtet alles. Abhängigkeiten zeigen **nur nach unten**, also zur Fachlogik.\n\nDer Vorteil gegenüber Modulen: Cargo **erzwingt** die Richtung. Steht `treiber` nicht in `domain/Cargo.toml`, kann `domain` nicht einmal den Namen `treiber` auflösen. Ein Verstoss ist kein Review-Kommentar mehr, sondern ein Compilerfehler.",
+      "diagramm": {
+        "knoten": [
+          "app (Binary, verdrahtet)",
+          "treiber (HAL, Register)",
+          "domain (no_std, Fachlogik)"
+        ],
+        "beschriftung": "Abhängigkeiten zeigen nach unten zur Fachlogik"
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Eine Kollegin hat in `crates/domain/src/lib.rs` die Zeile `treiber::add(1, 2);` ergänzt. Was sagt dir die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo build -p domain",
+        "ausgabe": [
+          "   Compiling domain v0.1.0 (/home/user/projekt/crates/domain)",
+          "error[E0433]: cannot find module or crate `treiber` in this scope",
+          "  --> crates/domain/src/lib.rs:15:14",
+          "   |",
+          "15 | pub fn f() { treiber::add(1, 2); }",
+          "   |              ^^^^^^^ use of unresolved module or unlinked crate `treiber`",
+          "   |",
+          "   = help: if you wanted to use a crate named `treiber`, use `cargo add treiber` to add it to your `Cargo.toml`"
+        ]
+      },
+      "optionen": [
+        "Die Schichtgrenze greift: `domain` hängt nicht von `treiber` ab und kann es deshalb nicht benutzen. Die Lösung ist ein Trait in `domain`, nicht `cargo add`",
+        "Es fehlt nur ein `use treiber;` am Anfang der Datei",
+        "Der Workspace ist kaputt und muss mit `cargo clean` repariert werden",
+        "`cargo add treiber` ausführen, wie die Hilfe vorschlägt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Compiler-Tipp ist technisch richtig, aber architektonisch falsch. Da `treiber` schon von `domain` abhängt, würde `cargo add` sogar einen Zyklus erzeugen, den Cargo ablehnt (Lektion 9.3). Die Fachlogik definiert stattdessen ein Trait, das der Treiber implementiert.",
+      "begruendungen": [
+        "Richtig. Genau dafür hat man die Schichten als Crates geschnitten.",
+        "`use` macht nur Namen kürzer. Ohne Eintrag in `Cargo.toml` ist das Crate gar nicht gelinkt.",
+        "Am Workspace ist nichts kaputt, die Grenze funktioniert wie gewollt.",
+        "Das würde die Abhängigkeitsrichtung umdrehen und hier einen Zyklus bilden."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was zeigt dieser Befehl über die Schichtung?",
+      "terminal": {
+        "befehl": "cargo tree -i domain",
+        "ausgabe": [
+          "domain v0.1.0 (/home/user/projekt/crates/domain)",
+          "├── app v0.1.0 (/home/user/projekt/crates/app)",
+          "└── treiber v0.1.0 (/home/user/projekt/crates/treiber)",
+          "    └── app v0.1.0 (/home/user/projekt/crates/app)"
+        ]
+      },
+      "optionen": [
+        "Wer von `domain` abhängt: `app` direkt und über `treiber`. `domain` ist die unterste Schicht",
+        "Welche Crates `domain` selbst benutzt",
+        "Dass es einen Zyklus zwischen `app` und `treiber` gibt",
+        "Dass `app` zweimal gebaut wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`-i` (invert) dreht den Baum um und zeigt die Nutzer eines Crates. So prüfst du schnell, ob eine Fachschicht wirklich nur von oben benutzt wird. Ohne `-i` zeigt `cargo tree -p domain`, wovon `domain` abhängt.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre der normale Baum ohne `-i`.",
+        "`app` erscheint zweimal, weil es über zwei Wege von `domain` abhängt, nicht wegen eines Zyklus.",
+        "Jedes Crate wird pro Build höchstens einmal gebaut, die Wiederholung zeigt nur einen weiteren Pfad."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Modul oder eigenes Crate? Ordne zu.",
+      "paare": [
+        {
+          "links": "Ein CRC-Helfer, den nur der UART-Treiber benutzt",
+          "rechts": "Privates Modul im Treiber-Crate"
+        },
+        {
+          "links": "Das Nachrichtenformat, das Firmware und PC-Werkzeug teilen",
+          "rechts": "Eigenes `no_std`-Crate"
+        },
+        {
+          "links": "Bindings an eine C-Bibliothek des Herstellers",
+          "rechts": "Eigenes `-sys`-Crate"
+        },
+        {
+          "links": "Ein Proc-Macro für Registerdefinitionen",
+          "rechts": "Eigenes Crate, technisch zwingend"
+        }
+      ],
+      "erklaerung": "Proc-Macros müssen in einem eigenen Crate vom Typ `proc-macro` liegen. Geteilte Datenformate gehören in ein `no_std`-Crate, damit beide Seiten es nutzen können. FFI-Bindings folgen der `-sys`-Konvention (Lektion 9.2). Alles, was nur einen Nutzer hat, bleibt ein Modul."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Team zerlegt sein Projekt in 80 Mini-Crates mit je 200 Zeilen. Welcher Nachteil ist realistisch?",
+      "optionen": [
+        "Viel Verwaltungsaufwand und mehr Grenzen für Inlining und Generics. Die Crate-Grenze sollte fachlich begründet sein, nicht nur nach Grösse",
+        "Cargo kann höchstens 64 Crates pro Workspace verwalten",
+        "Kleine Crates lassen sich nicht testen",
+        "Jedes Crate bekommt sein eigenes `Cargo.lock`, und die Versionen laufen auseinander"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zu feine Crates kosten Pflegeaufwand: viele `Cargo.toml`, viele `pub`-Schnittstellen, mehr Linkerarbeit. Nicht-generische Funktionen werden über Crate-Grenzen ohne `#[inline]` oder LTO nicht inlined. Schneide entlang von Schichten und Wiederverwendung.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine solche Grenze gibt es nicht. Sehr grosse Workspaces mit Hunderten Crates existieren.",
+        "Jedes Crate kann eigene Unit- und Integrationstests haben.",
+        "Im Workspace gibt es genau ein gemeinsames `Cargo.lock`."
+      ]
+    }
+  ],
+  "praxis": "Grosse Rust-Projekte wie rustc selbst, Embassy oder viele Firmen-Monorepos sind Workspaces mit Dutzenden Crates. Für dich als Senior heisst das: Neue Crates nur mit Begründung (Buildzeit, harte Grenze, Wiederverwendung), Abhängigkeiten zentral in `[workspace.dependencies]`, und die Schichtung regelmässig mit `cargo tree` prüfen. Im Review ist eine neue Zeile unter `[dependencies]` oft wichtiger als hundert Zeilen Code.",
+  "labor": {
+    "titel": "Einen Workspace mit drei Schichten bauen",
+    "anleitung": "Lege einen Workspace mit `domain`, `treiber` und `app` an. `treiber` hängt von `domain` ab, `app` von beiden. Versuche dann, aus `domain` heraus `treiber` zu benutzen.",
+    "befehle": [
+      "mkdir projekt && cd projekt && printf '[workspace]\\nmembers = [\"crates/*\"]\\nresolver = \"3\"\\n' > Cargo.toml",
+      "cargo new --lib crates/domain && cargo new --lib crates/treiber && cargo new crates/app",
+      "cargo add -p treiber domain --path crates/domain",
+      "cargo add -p app domain --path crates/domain && cargo add -p app treiber --path crates/treiber",
+      "cargo tree -i domain",
+      "cargo build --timings"
+    ],
+    "beobachtung": "`cargo tree -i domain` zeigt die Nutzer der Fachschicht. Ergänzt du in `domain` einen Aufruf von `treiber`, meldet rustc E0433. `cargo build --timings` legt unter `target/cargo-timings/` einen HTML-Bericht ab, der zeigt, welche Crates parallel gebaut wurden."
+  },
+  "begriffe": [
+    {
+      "begriff": "Workspace",
+      "englisch": "workspace",
+      "erklaerung": "Gruppe von Crates mit gemeinsamem `Cargo.lock` und gemeinsamem `target/`-Verzeichnis."
+    },
+    {
+      "begriff": "Workspace-Vererbung",
+      "englisch": "workspace inheritance",
+      "erklaerung": "Mitglieder übernehmen Felder und Abhängigkeiten aus `[workspace.package]` und `[workspace.dependencies]` mit `.workspace = true`."
+    },
+    {
+      "begriff": "Schichtenarchitektur",
+      "englisch": "layered architecture",
+      "erklaerung": "Aufteilung in Ebenen, bei der Abhängigkeiten nur in eine Richtung zeigen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Workspaces",
+      "url": "https://doc.rust-lang.org/cargo/reference/workspaces.html"
+    },
+    {
+      "titel": "The Rust Book: Cargo Workspaces",
+      "url": "https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m1-l2",
+  "phase": 7,
+  "modul": "7.1 Ablaufmodelle und Echtzeit",
+  "titel": "WCET, Rate Monotonic und Jitter",
+  "lernziele": [
+    "Die Auslastung periodischer Tasks berechnen und mit der RMS-Grenze vergleichen",
+    "Wissen, wie man die Worst-Case-Laufzeit auf einem Cortex-M misst",
+    "Begründen, warum Rust ohne GC und mit deterministischem Drop gut zu Echtzeit passt"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "erklaerung",
+      "titel": "WCET und Auslastung",
+      "text": "Die **WCET** (*worst-case execution time*) ist die längste mögliche Laufzeit einer Aufgabe. Man bestimmt sie durch **Messen** unter realistischer Last (mit Sicherheitszuschlag) oder durch **statische Analyse** des Maschinencodes.\n\nFür periodische Tasks mit Laufzeit C und Periode T ist die **Auslastung** U = Σ Cᵢ/Tᵢ. Über 100 % geht nie. Beim **Rate Monotonic Scheduling** (RMS) bekommt die Task mit der kürzesten Periode die höchste feste Priorität. Dann sind alle Fristen garantiert, wenn\n\nU ≤ n · (2^(1/n) − 1)\n\nDas sind rund 83 % bei zwei, 78 % bei drei und etwa 69 % bei sehr vielen Tasks."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein kleines Rust-Programm prüft drei Tasks (C=1/T=4, C=2/T=10, C=5/T=50, in ms). Was folgt aus der Ausgabe?",
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "Auslastung: 55.0 %",
+          "RMS-Grenze (n=3): 78.0 %",
+          "garantiert einplanbar: true"
+        ]
+      },
+      "optionen": [
+        "Mit Prioritäten nach Periode (4 ms höchste) halten alle Tasks ihre Fristen ein, sofern die WCET-Werte stimmen und die Tasks nicht aufeinander warten",
+        "Die Tasks verpassen ihre Fristen, weil 55 % über 50 % liegen",
+        "Das System ist zu 78 % ausgelastet",
+        "Die Prioritäten dürfen beliebig vergeben werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "1/4 + 2/10 + 5/50 = 0,55. Die RMS-Grenze ist eine **hinreichende** Bedingung: Darunter ist alles garantiert, darüber kann es trotzdem klappen, dann braucht es eine genauere Antwortzeitanalyse. Gemeinsame Ressourcen bringen Blockierzeiten hinzu (Lektion 7.2.3).",
+      "begruendungen": [
+        "Richtig.",
+        "50 % ist keine Grenze, massgebend ist n · (2^(1/n) − 1).",
+        "78 % ist die Grenze, nicht die Auslastung.",
+        "Die Garantie gilt nur für die Rate-Monotonic-Zuordnung."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "In RTIC hat jede Task eine feste `priority`. Wie setzt du RMS dort um?",
+      "optionen": [
+        "Die Task mit der kürzesten Periode bekommt die höchste `priority`-Zahl",
+        "Die Task mit der längsten Laufzeit bekommt die höchste Priorität",
+        "Alle Tasks bekommen dieselbe Priorität, RTIC teilt die Zeit gerecht auf",
+        "RTIC berechnet die Prioritäten selbst aus den Perioden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In RTIC bedeutet eine grössere Zahl eine höhere Priorität (intern wird das auf die NVIC-Logik abgebildet). RTIC kennt die Perioden nicht, die Zuordnung ist deine Aufgabe. Das statische Modell von RTIC (feste Prioritäten, ein Stack, Prioritäts-Ceiling) ist aber genau das, wofür die klassische Scheduling-Analyse gemacht ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Laufzeit spielt für RMS keine Rolle, nur die Periode.",
+        "Gleiche Priorität heisst in RTIC: Tasks unterbrechen sich nicht gegenseitig, sie laufen nacheinander (async Tasks bis zum nächsten `await`).",
+        "Prioritäten gibst du im Attribut explizit an."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wie misst dieser Code die Laufzeit auf einem Cortex-M?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut cp = cortex_m::Peripherals::take().unwrap();",
+          "cp.DCB.enable_trace();",
+          "cp.DWT.enable_cycle_counter();",
+          "",
+          "let mut max_takte = 0u32;",
+          "loop {",
+          "    let start = DWT::cycle_count();",
+          "    regelschritt();",
+          "    let takte = DWT::cycle_count().wrapping_sub(start);",
+          "    max_takte = max_takte.max(takte);",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Startet den Zykluszähler der Debug-Einheit (DWT)" },
+          { "zeile": 9, "text": "`wrapping_sub`, weil der 32-Bit-Zähler überlaufen kann" }
+        ]
+      },
+      "optionen": [
+        "Mit dem Zykluszähler `CYCCNT`, der jeden CPU-Takt zählt. Das Maximum über viele Durchläufe ist eine gemessene Obergrenze",
+        "Mit dem SysTick-Timer in Millisekunden",
+        "Mit einer Ausnahme nach jeder Instruktion",
+        "Es misst gar nichts, weil `cycle_count` immer 0 liefert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei 168 MHz ist das auf etwa 6 ns genau. `wrapping_sub` macht die Differenz auch über einen Zählerüberlauf hinweg korrekt, ein normales `-` würde im Debug-Build panicken. Gemessene Maxima sind keine bewiesene WCET, aber eine gute Basis, wenn unter realer Last mit allen Interrupts gemessen wird.",
+      "begruendungen": [
+        "Richtig.",
+        "SysTick wäre viel zu grob und nicht taktgenau.",
+        "Das würde die Laufzeit völlig verfälschen.",
+        "Nach `enable_cycle_counter` läuft der Zähler mit dem CPU-Takt."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein 1-kHz-Regler startet mal nach 1000 µs, mal nach 1040 µs. Wie heisst diese Schwankung, und was hilft dagegen?",
+      "optionen": [
+        "**Jitter**. Den Ausgang direkt im Timer-Interrupt oder per Hardware (Timer-Compare, DMA) setzen statt in einer niedrig priorisierten Task",
+        "**Latenz**. Den Takt erhöhen",
+        "**Drift**. Einen genaueren Quarz verwenden",
+        "**Overhead**. Weniger Tasks anlegen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Jitter** ist die Schwankung des Zeitpunkts einer periodischen Aktion. Er entsteht, wenn höher priorisierte Interrupts oder kritische Abschnitte den Start verzögern. Regelkreise reagieren empfindlich darauf. Abhilfe: zeitkritische Ausgabe so nah wie möglich an der Hardware, kurze kritische Abschnitte und eine durchdachte Prioritätsvergabe.",
+      "begruendungen": [
+        "Richtig.",
+        "Latenz ist die Verzögerung selbst, nicht deren Schwankung, und mehr Takt beseitigt die Ursache nicht.",
+        "Drift wäre ein langsames Auseinanderlaufen, nicht zufälliges Schwanken.",
+        "Die Zahl der Tasks ist nicht der Kern des Problems."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Warum passt Rust gut zu Echtzeit? Ordne zu.",
+      "paare": [
+        { "links": "Kein Garbage Collector", "rechts": "Keine unvorhersehbaren Pausen zur Laufzeit" },
+        { "links": "Deterministisches `Drop`", "rechts": "Ressourcen werden an einer bekannten Stelle im Code freigegeben" },
+        { "links": "`no_std` ohne Heap", "rechts": "Keine Allokation mit schwankender Laufzeit" },
+        { "links": "Ownership und `Send`/`Sync`", "rechts": "Datenrennen zwischen Interrupt und Task fallen schon beim Kompilieren auf" }
+      ],
+      "erklaerung": "Rust garantiert keine Echtzeit, eine Endlosschleife oder ein langer kritischer Abschnitt sind auch in Rust möglich. Aber Rust entfernt typische Quellen von Unvorhersagbarkeit und lässt keine versteckten Laufzeitmechanismen zu."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese RTIC-Task soll alle 1 ms laufen. Welche Zeile macht die WCET unvorhersagbar?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[task(binds = TIM2, priority = 3, local = [tim, verlauf])]",
+          "fn regler(cx: regler::Context) {",
+          "    cx.local.tim.clear_interrupt();",
+          "    let ist = lese_strom();",
+          "    let stell = pid(ist);",
+          "    cx.local.verlauf.push(ist);",
+          "    setze_pwm(stell);",
+          "}"
+        ]
+      },
+      "fehlerZeile": 6,
+      "erklaerung": "Ist `verlauf` ein `alloc::vec::Vec`, muss es beim Wachsen gelegentlich umkopieren: Die Laufzeit springt von wenigen Takten auf viele tausend, und irgendwann scheitert die Allokation. Mit `heapless::Vec` oder einem Ringpuffer fester Grösse ist die Laufzeit konstant (Modul 7.3)."
+    }
+  ],
+  "praxis": "In Projekten heisst Echtzeit-Engineering: Fristen pro Funktion dokumentieren, Laufzeiten mit `DWT` oder Pin-Toggles messen und bei jedem Release vergleichen, Reserven einplanen (oft höchstens 70 % Auslastung). Ein RTIC-Projekt eignet sich gut für eine Antwortzeitanalyse, weil alle Prioritäten und Ressourcen statisch im Code stehen.",
+  "labor": {
+    "titel": "RMS-Rechner in Rust",
+    "anleitung": "Schreibe ein Programm, das für eine Liste von Tasks (C, T) die Auslastung und die RMS-Grenze berechnet. Ergänze eine Antwortzeitanalyse: Rᵢ = Cᵢ + Σ ⌈Rᵢ/Tⱼ⌉ · Cⱼ über alle höher priorisierten Tasks j, iteriert bis zum Fixpunkt.",
+    "befehle": [
+      "cargo new rms && cd rms",
+      "cargo run"
+    ],
+    "beobachtung": "Für Tasksätze über der RMS-Grenze zeigt die Antwortzeitanalyse oft, dass alle Fristen trotzdem eingehalten werden, weil sie die konkreten Perioden berücksichtigt."
+  },
+  "begriffe": [
+    { "begriff": "WCET", "englisch": "worst-case execution time", "erklaerung": "Längste mögliche Ausführungszeit einer Aufgabe." },
+    { "begriff": "Rate Monotonic Scheduling", "englisch": "rate monotonic scheduling", "erklaerung": "Feste Prioritäten nach Periode, kürzeste Periode zuerst." },
+    { "begriff": "Auslastung", "englisch": "utilization", "erklaerung": "Summe aus Laufzeit durch Periode über alle periodischen Tasks." },
+    { "begriff": "Jitter", "englisch": "jitter", "erklaerung": "Schwankung des Zeitpunkts, zu dem eine periodische Aktion stattfindet." }
+  ],
+  "weiterlesen": [
+    { "titel": "RTIC Book", "url": "https://rtic.rs/" },
+    { "titel": "docs.rs: cortex-m (DWT)", "url": "https://docs.rs/cortex-m/latest/cortex_m/peripheral/struct.DWT.html" }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m3-l3",
+  "phase": 9,
+  "modul": "9.3 Abhängigkeiten managen",
+  "titel": "Fremde Crates im Griff behalten",
+  "lernziele": [
+    "Versionsanforderungen `^`, `~` und `=` in `Cargo.toml` richtig lesen und wählen",
+    "`Cargo.lock`, `[patch]`, private Registries und Vendoring gezielt einsetzen",
+    "Risiken der Lieferkette und der Feature-Unifikation einschätzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In `Cargo.toml` steht `heapless = \"0.8\"`. Version 0.9.3 ist erschienen. Was macht `cargo update`?",
+      "optionen": [
+        "Es bleibt bei 0.8.x. Bei Versionen unter 1.0 gilt die erste von null verschiedene Stelle als „Major“, 0.9 ist also inkompatibel",
+        "Es aktualisiert auf 0.9.3, weil `^` alles unter 1.0 erlaubt",
+        "Es fragt interaktiv nach, ob auf 0.9.3 aktualisiert werden soll",
+        "Es entfernt `heapless`, weil die Version veraltet ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Angabe ohne Operator ist in Cargo eine Caret-Anforderung: `\"0.8\"` heisst `^0.8` und erlaubt `>=0.8.0, <0.9.0`. Cargo sagt dir aber, dass es Neueres gibt: `cargo update --dry-run --verbose` zeigt `Unchanged heapless v0.8.0 (available: v0.9.3)`. Den Sprung musst du selbst in `Cargo.toml` machen.",
+      "begruendungen": [
+        "Richtig. Für 0.x ist jeder Sprung der zweiten Stelle ein Breaking Change.",
+        "Das wäre so bei npm-ähnlichen Regeln. Cargo behandelt 0.x strenger.",
+        "`cargo update` ist nicht interaktiv.",
+        "Cargo entfernt nie von selbst Abhängigkeiten."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Versionen erlaubt welche Anforderung?",
+      "paare": [
+        { "links": "`serde = \"1.0.200\"`", "rechts": "`>=1.0.200, <2.0.0`" },
+        { "links": "`heapless = \"0.8\"`", "rechts": "`>=0.8.0, <0.9.0`" },
+        { "links": "`log = \"~0.4.20\"`", "rechts": "`>=0.4.20, <0.5.0`" },
+        { "links": "`embedded-hal = \"=1.0.0\"`", "rechts": "genau `1.0.0`" }
+      ],
+      "erklaerung": "`^` (der Standard) erlaubt alle SemVer-kompatiblen Updates. `~` erlaubt nur Patch-Updates innerhalb der angegebenen Minor-Version. `=` pinnt exakt, das ist in Bibliotheken fast immer falsch, weil es anderen Crates im Graphen keine gemeinsame Version erlaubt. In Anwendungen erledigt das `Cargo.lock` besser."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Cargo.lock: festhalten, was gebaut wurde",
+      "text": "`Cargo.toml` sagt, was **erlaubt** ist. `Cargo.lock` hält fest, was **tatsächlich** aufgelöst wurde, mit Prüfsummen. Wer das Lockfile committet, baut morgen und in der CI dieselben Versionen.\n\nDie Cargo-Doku empfiehlt heute, `Cargo.lock` auch bei Bibliotheken zu committen. Nutzer deiner Bibliothek ignorieren es ohnehin, denn dort zählt nur ihr eigenes Lockfile. In der CI sorgt `cargo build --locked` dafür, dass der Build abbricht, statt das Lockfile still zu ändern.\n\nEin Embedded-Tipp: Mit `rust-version` im Manifest wählt der Resolver seit Rust 1.84 bevorzugt Versionen, die zu deiner MSRV passen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was zeigt diese Ausgabe in einem Firmware-Workspace?",
+      "terminal": {
+        "befehl": "cargo tree -d",
+        "ausgabe": [
+          "heapless v0.8.0",
+          "└── domain v0.1.0 (/home/user/projekt/crates/domain)",
+          "    ├── app v0.1.0 (/home/user/projekt/crates/app)",
+          "    └── treiber v0.1.0 (/home/user/projekt/crates/treiber)",
+          "        └── app v0.1.0 (/home/user/projekt/crates/app)",
+          "",
+          "heapless v0.9.3",
+          "└── treiber v0.1.0 (/home/user/projekt/crates/treiber) (*)"
+        ]
+      },
+      "optionen": [
+        "`heapless` ist zweimal im Binary, in zwei inkompatiblen Versionen. Ein `heapless::Vec` aus `domain` ist für `treiber` ein anderer Typ",
+        "Cargo hat die beiden Versionen zu einer zusammengeführt",
+        "`treiber` hängt zweimal von `domain` ab",
+        "Nur eine Warnung über veraltete Versionen, ohne Folgen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`-d` (duplicates) listet Crates, die in mehreren Versionen gebaut werden. Das kostet Flash und Buildzeit, und Typen aus 0.8 und 0.9 passen nicht zusammen, was zu verwirrenden Typfehlern führt. Abhilfe: die Version zentral in `[workspace.dependencies]` festlegen (Lektion 9.1).",
+      "begruendungen": [
+        "Richtig.",
+        "0.8 und 0.9 sind SemVer-inkompatibel und können nicht vereint werden.",
+        "Die Wiederholung zeigt nur weitere Pfade im Graphen.",
+        "Die Folgen sind real: doppelter Code und inkompatible Typen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug löst welches Problem?",
+      "paare": [
+        { "links": "Ein Bugfix in einem Fremd-Crate ist noch nicht veröffentlicht", "rechts": "`[patch.crates-io]` mit Git- oder Pfadangabe" },
+        { "links": "Interne Crates sollen nicht auf crates.io landen", "rechts": "Private Registry in `.cargo/config.toml`, im Manifest `registry = \"firma\"`" },
+        { "links": "Der Build-Server hat keinen Internetzugang", "rechts": "`cargo vendor` und Build mit `--offline`" },
+        { "links": "Bekannte Sicherheitslücken in Abhängigkeiten finden", "rechts": "`cargo audit` oder `cargo deny check advisories` gegen die RustSec-Datenbank" }
+      ],
+      "erklaerung": "`[patch]` ersetzt ein Crate im **ganzen** Graphen, auch dort, wo es indirekt benutzt wird. Das ist ideal für kurzfristige Fixes, sollte aber ein Ablaufdatum haben. `cargo vendor` kopiert alle Quellen ins Repository und gibt die passende Konfiguration aus."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Lieferkette und Feature-Unifikation",
+      "text": "Jedes Crate bringt fremden Code in dein Binary, `build.rs` und Proc-Macros laufen sogar beim Bauen auf deinem Rechner. Werkzeuge helfen beim Prüfen:\n\n- **cargo-vet**: Das Team hält fest, welche Crate-Versionen geprüft wurden, und kann Prüfungen anderer Organisationen importieren.\n- **cargo-crev**: verteilte, signierte Reviews von Entwicklern.\n- **cargo-deny**: Lizenzen, Quellen, Duplikate und Sicherheitsmeldungen als CI-Regeln.\n\n**Feature-Unifikation**: Cargo baut jedes Crate pro Build nur einmal, mit der **Vereinigung** aller angeforderten Features. Aktiviert irgendein Crate `std` bei einer Abhängigkeit, hat sie für alle `std`. Der Resolver ab Version 2 trennt immerhin Build-, Dev- und Ziel-spezifische Abhängigkeiten."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Dein `no_std`-Crate `domain` benutzt `serde` mit `default-features = false`. Nach dem Hinzufügen eines Host-Werkzeugs zum Workspace scheitert der Firmware-Build, weil `serde` plötzlich `std` braucht. Was ist die wahrscheinlichste Ursache?",
+      "optionen": [
+        "Feature-Unifikation: Das Host-Werkzeug aktiviert `serde/std`, und wird es im selben Cargo-Aufruf mitgebaut, gilt das Feature für alle Nutzer von `serde`",
+        "`default-features = false` wird in Workspaces ignoriert",
+        "`serde` unterstützt `no_std` grundsätzlich nicht",
+        "Das Lockfile wurde beschädigt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Features sind additiv und werden innerhalb eines Builds vereinigt. Baut man mit `cargo build --workspace` Host-Werkzeug und Firmware gemeinsam, bekommt `serde` die Summe aller Features. Abhilfe: Firmware und Host-Werkzeuge getrennt bauen (`-p`), in getrennte Workspaces legen oder die Abhängigkeit des Host-Werkzeugs so wählen, dass sie nicht kollidiert. `cargo tree -e features -i serde` zeigt, wer welches Feature einschaltet.",
+      "begruendungen": [
+        "Richtig. Ein klassischer Stolperstein in gemischten Embedded-Workspaces.",
+        "Die Angabe wirkt, nur aktiviert ein anderes Crate `std` wieder.",
+        "`serde` unterstützt `no_std`, wenn `std` aus ist.",
+        "Das Lockfile legt Versionen fest, keine Features."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Konfiguration: Ein Fork von `embedded-hal-bus` soll im ganzen Graphen den crates.io-Stand ersetzen, und interne Crates kommen aus der Firmen-Registry.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[dependencies]",
+          "messprotokoll = { version = \"2.1\", {{?}} = \"firma\" }",
+          "embedded-hal-bus = \"0.3\"",
+          "",
+          "[{{?}}.crates-io]",
+          "embedded-hal-bus = { git = \"https://git.firma.ch/fork/embedded-hal\", branch = \"fix-spi\" }"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["registry"] },
+        { "loesungen": ["patch"] }
+      ],
+      "auswahl": ["registry", "patch", "replace", "source", "workspace"],
+      "erklaerung": "Der Name `firma` muss in `.cargo/config.toml` unter `[registries]` mit einer Index-URL definiert sein. `[patch.crates-io]` ersetzt das Crate überall, wo es aus crates.io kommt. Die Version im Fork muss zur Anforderung passen, sonst ignoriert Cargo den Patch und warnt. `[replace]` ist veraltet."
+    }
+  ],
+  "praxis": "Jede neue Zeile unter `[dependencies]` ist eine Architekturentscheidung: neuer Code, neue Lizenz, neues Risiko, oft neue indirekte Abhängigkeiten. Etabliere im Team `cargo build --locked` in der CI, `cargo deny check` für Lizenzen, Quellen und Sicherheitsmeldungen, Versionen zentral im Workspace und eine Regel, wann ein `[patch]` wieder entfernt wird. Für sicherheitskritische Firmware lohnt sich `cargo vet`.",
+  "labor": {
+    "titel": "Den Abhängigkeitsgraphen untersuchen",
+    "anleitung": "Füge in einem Testprojekt eine Abhängigkeit mit älterer Version hinzu und schau dir an, was Cargo über neuere Versionen, Duplikate und Features verrät.",
+    "befehle": [
+      "cargo add heapless@0.8 serde --features serde/derive",
+      "cargo update --dry-run --verbose",
+      "cargo tree -d",
+      "cargo tree -e features -i serde",
+      "cargo vendor"
+    ],
+    "beobachtung": "`--verbose` zeigt `Unchanged heapless v0.8.0 (available: v0.9.3)`. `cargo tree -e features -i serde` zeigt, welches Crate welches Feature einschaltet. `cargo vendor` legt alle Quellen in `vendor/` ab und gibt den `[source]`-Abschnitt für `.cargo/config.toml` aus."
+  },
+  "begriffe": [
+    { "begriff": "Caret-Anforderung", "englisch": "caret requirement", "erklaerung": "Standard in Cargo: erlaubt alle SemVer-kompatiblen Versionen, z. B. `1.2` heisst `>=1.2.0, <2.0.0`." },
+    { "begriff": "Lockfile", "englisch": "lockfile", "erklaerung": "`Cargo.lock`: hält die exakt aufgelösten Versionen und Prüfsummen fest." },
+    { "begriff": "Feature-Unifikation", "englisch": "feature unification", "erklaerung": "Cargo baut jedes Crate pro Build einmal, mit der Vereinigung aller angeforderten Features." },
+    { "begriff": "Vendoring", "englisch": "vendoring", "erklaerung": "Alle Quellen der Abhängigkeiten ins eigene Repository kopieren, um offline und reproduzierbar zu bauen." },
+    { "begriff": "Lieferkette", "englisch": "supply chain", "erklaerung": "Alle fremden Komponenten und Werkzeuge, die in das eigene Produkt einfliessen." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Cargo Book: Specifying Dependencies", "url": "https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html" },
+    { "titel": "The Cargo Book: Features (Feature unification)", "url": "https://doc.rust-lang.org/cargo/reference/features.html" },
+    { "titel": "cargo-vet", "url": "https://mozilla.github.io/cargo-vet/" }
+  ]
+}

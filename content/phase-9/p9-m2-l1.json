@@ -1,0 +1,248 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m2-l1",
+  "phase": 9,
+  "modul": "9.2 Traits und öffentliche APIs als Verträge",
+  "titel": "Traits als Schnittstellen, APIs nach Leitfaden",
+  "lernziele": [
+    "Traits als schmale Verträge zwischen Modulen und Crates entwerfen",
+    "Namenskonventionen der Rust API Guidelines anwenden (`as_`, `to_`, `into_`, Getter ohne `get_`)",
+    "Erklären, welche Standard-Traits ein öffentlicher Typ implementieren sollte (C-COMMON-TRAITS)"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Die Fachlogik eines Datenloggers soll Messwerte speichern, ohne zu wissen, ob sie im internen Flash, auf einer SD-Karte oder im Test im RAM landen. Wie drückst du diesen Vertrag in Rust am besten aus?",
+      "optionen": [
+        "Ein kleines Trait `Speicher` in der Fachlogik, das die Speicher-Varianten implementieren",
+        "Ein `enum Speicher { Flash, SdKarte, Ram }` mit einem `match` in jeder Funktion der Fachlogik",
+        "Eine Struktur `Speicher` mit allen Feldern für Flash, SD-Karte und RAM",
+        "Ein Makro, das je nach Feature-Flag eine andere Funktion einsetzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Trait ist in Rust das Mittel für einen Vertrag: Es legt fest, **was** ein Typ können muss, nicht **wie**. Die Fachlogik hängt nur vom Trait ab. Neue Speicherarten kommen hinzu, ohne die Fachlogik zu ändern.",
+      "begruendungen": [
+        "Richtig. Das Trait ist die Schnittstelle zwischen den Modulen.",
+        "Ein `enum` ist gut für eine feste, bekannte Menge. Hier muss aber die Fachlogik jede Variante kennen, und für den Test-Speicher müsste sie Testcode enthalten.",
+        "Diese Struktur vermischt alle Varianten und koppelt die Fachlogik an jede davon.",
+        "Bedingte Kompilierung erlaubt nur eine Variante pro Build und ist schwer zu testen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein guter Trait-Vertrag",
+      "text": "Ein Trait an einer Modulgrenze sollte **klein** sein: nur die Methoden, die der Nutzer wirklich braucht. Wer ein Trait mit zwölf Methoden implementieren muss, nur um einen Test-Doppelgänger zu bauen, merkt schnell, dass es zu breit ist.\n\nDer Vertrag besteht aus mehr als Signaturen: Fehlertyp, Zusicherungen in der Doku (etwa „blockiert nie“) und Auto-Traits wie `Send` gehören dazu. Das Trait gehört in die Schicht, die es **benutzt**, nicht in die, die es implementiert.",
+      "code": {
+        "sprache": "rust",
+        "datei": "domain/src/speicher.rs",
+        "zeilen": [
+          "/// Persistenter Speicher für Messwerte.",
+          "pub trait Speicher {",
+          "    type Fehler: core::fmt::Debug;",
+          "",
+          "    /// Hängt einen Datensatz an. Blockiert höchstens bis der Puffer frei ist.",
+          "    fn anhaengen(&mut self, daten: &[u8]) -> Result<(), Self::Fehler>;",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 3,
+            "text": "Assoziierter Fehlertyp: Jede Implementierung bringt ihren eigenen mit."
+          },
+          {
+            "zeile": 6,
+            "text": "Nur eine Methode: genau das, was die Fachlogik braucht."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Du willst verschiedene Speicher zur Laufzeit wählen und schreibst `Box<dyn Speicher>`. Was meldet der Compiler zu diesem Trait?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Speicher {",
+          "    fn schreibe(&mut self, adr: u32, daten: &[u8]);",
+          "    fn kopie(&self) -> Self;",
+          "}",
+          "",
+          "struct Flash;",
+          "impl Speicher for Flash {",
+          "    fn schreibe(&mut self, _adr: u32, _daten: &[u8]) {}",
+          "    fn kopie(&self) -> Self { Flash }",
+          "}",
+          "",
+          "fn main() {",
+          "    let s: Box<dyn Speicher> = Box::new(Flash);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler",
+        "E0038: `Speicher` ist nicht dyn-kompatibel, weil `kopie` den Typ `Self` zurückgibt",
+        "E0277: `Flash` implementiert `Speicher` nicht",
+        "E0308: `Box<Flash>` ist nicht `Box<dyn Speicher>`"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Für `dyn Trait` braucht der Compiler eine vtable. Eine Methode, die `Self` als Wert zurückgibt, lässt sich darüber nicht aufrufen, denn hinter `dyn Speicher` ist die Grösse von `Self` unbekannt. Ob ein Trait dyn-kompatibel (dyn compatible, früher *object safe*) ist, gehört deshalb zur API-Entscheidung.",
+      "begruendungen": [
+        "rustc meldet `the trait `Speicher` is not dyn compatible`.",
+        "Richtig. Abhilfe: `kopie` in ein eigenes Trait verschieben oder mit `where Self: Sized` von der vtable ausnehmen.",
+        "`Flash` implementiert alle Methoden.",
+        "`Box<Flash>` wird automatisch zu `Box<dyn Speicher>`, sobald das Trait dyn-kompatibel ist."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Die Rust API Guidelines legen Präfixe für Umwandlungen fest. Ordne zu.",
+      "paare": [
+        {
+          "links": "`as_bytes(&self) -> &[u8]`",
+          "rechts": "Billig, nur eine andere Sicht auf dieselben Daten"
+        },
+        {
+          "links": "`to_string(&self) -> String`",
+          "rechts": "Teurer, erzeugt einen neuen Wert"
+        },
+        {
+          "links": "`into_inner(self) -> T`",
+          "rechts": "Verbraucht `self` und gibt den Inhalt heraus"
+        },
+        {
+          "links": "`temperatur(&self) -> Celsius`",
+          "rechts": "Getter, ohne `get_`-Präfix"
+        }
+      ],
+      "erklaerung": "Die Präfixe verraten Kosten und Ownership schon am Namen: `as_` ist kostenlos und borgt, `to_` kann kosten und kopieren, `into_` nimmt den Wert. Getter heissen wie das Feld, also `laenge()`, nicht `get_laenge()`. `get` bleibt für Fälle wie `Vec::get` reserviert, die etwas nachschlagen."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Namenskonventionen (C-CASE) für Rust-Bezeichner.",
+      "text": "Typen und Traits schreibt man in {{?}}, z. B. `MesswertPuffer`. Funktionen, Methoden und Module in {{?}}, z. B. `lese_kanal`. Konstanten und `static`s in {{?}}, z. B. `MAX_KANAELE`.",
+      "luecken": [
+        {
+          "loesungen": [
+            "UpperCamelCase"
+          ]
+        },
+        {
+          "loesungen": [
+            "snake_case"
+          ]
+        },
+        {
+          "loesungen": [
+            "SCREAMING_SNAKE_CASE"
+          ]
+        }
+      ],
+      "auswahl": [
+        "UpperCamelCase",
+        "snake_case",
+        "SCREAMING_SNAKE_CASE",
+        "kebab-case",
+        "lowerCamelCase"
+      ],
+      "erklaerung": "rustc warnt selbst bei Abweichungen (`non_camel_case_types`, `non_snake_case`, `non_upper_case_globals`). `kebab-case` begegnet dir nur bei Crate-Namen in `Cargo.toml`. Im Code wird daraus automatisch `snake_case`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "C-COMMON-TRAITS",
+      "text": "Wegen der Orphan Rule (Modul 1.2) können Nutzer Standard-Traits für **deine** Typen nicht selbst nachrüsten. Fehlt `Debug`, können sie deinen Typ nicht ausgeben, nicht in `assert_eq!` und nicht mit `unwrap()` auf `Result<_, DeinFehler>` verwenden. Die Guidelines empfehlen deshalb, eifrig zu implementieren, was sinnvoll ist:\n\n- **immer**: `Debug`\n- **meist**: `Clone`, `PartialEq`, `Eq`, `Hash`, `Default`\n- **wenn passend**: `Copy`, `PartialOrd`, `Ord`, `Display`\n\nAber Vorsicht: `Copy` später wieder zu entfernen, ist ein Breaking Change (Lektion 9.2)."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Nutzer deiner Bibliothek schreibt `treiber::init().unwrap();`. Was ist die richtige Reaktion als Bibliotheksautor?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: `Fehler` doesn't implement `Debug`",
+          "  --> src/main.rs:12:21",
+          "   |",
+          "12 |     treiber::init().unwrap();",
+          "   |                     ^^^^^^ the trait `Debug` is not implemented for `Fehler`",
+          "   |",
+          "   = note: add `#[derive(Debug)]` to `Fehler` or manually `impl Debug for Fehler`",
+          "note: required by a bound in `Result::<T, E>::unwrap`"
+        ]
+      },
+      "optionen": [
+        "`#[derive(Debug)]` an den öffentlichen Typ `Fehler` in der Bibliothek setzen. Der Nutzer kann das wegen der Orphan Rule nicht selbst tun",
+        "Dem Nutzer empfehlen, `impl Debug for treiber::Fehler` in seinem Crate zu schreiben",
+        "`unwrap` in der Bibliothek verbieten",
+        "Den Fehlertyp durch `()` ersetzen, damit `unwrap` immer funktioniert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Weder das Trait `Debug` noch der Typ `Fehler` gehören dem Nutzer, also darf er die Implementierung nicht schreiben. Mit `#![warn(missing_debug_implementations)]` im Crate-Root erinnert dich rustc an jeden öffentlichen Typ ohne `Debug`.",
+      "begruendungen": [
+        "Richtig. Das ist genau der Fall, den C-COMMON-TRAITS und C-DEBUG verhindern wollen.",
+        "Das verbietet die Orphan Rule: Fremdes Trait für fremden Typ geht nicht.",
+        "`unwrap` im Programm des Nutzers ist seine Entscheidung. Das Problem liegt beim fehlenden `Debug`.",
+        "Damit verliert der Nutzer jede Information über die Fehlerursache."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Signatur folgt den Guidelines am besten für einen Treiber, der einen Bus-Zugriff braucht und ihn am Ende zurückgeben kann?",
+      "optionen": [
+        "`fn new(bus: I2C) -> Self` und `fn release(self) -> I2C`",
+        "`fn get_new(bus: &mut I2C) -> Self` und `fn get_bus(&self) -> I2C`",
+        "`fn create(bus: I2C) -> Box<Self>` und `fn destroy(&mut self)`",
+        "`fn new() -> Self` mit einem globalen `static mut BUS`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Treiber übernimmt den Bus als Wert (Ownership) und gibt ihn mit einer verbrauchenden Methode zurück. Das ist das Muster vieler `embedded-hal`-Treiber. Konstruktoren heissen `new`, Getter haben kein `get_`, und globale veränderliche Zustände sind tabu (Lektion 9.3).",
+      "begruendungen": [
+        "Richtig. Klar in der Ownership und üblich im Embedded-Ökosystem.",
+        "`get_`-Präfixe sind unüblich, und `get_bus(&self) -> I2C` kann den Bus nicht herausgeben, ohne ihn zu kopieren.",
+        "`Box` erzwingt unnötig eine Heap-Allokation, auf `no_std` oft gar nicht verfügbar. `destroy(&mut self)` gibt den Bus nicht zurück.",
+        "`static mut` ist versteckte Kopplung und in Edition 2024 kaum noch sinnvoll benutzbar."
+      ]
+    }
+  ],
+  "praxis": "Die Rust API Guidelines sind die gemeinsame Sprache für Bibliotheken: Wer `into_inner`, `as_ref` oder `new` liest, weiss sofort, was passiert. Im Review deiner öffentlichen Typen fragst du: Hat jeder Typ `Debug`? Sind `Clone`, `PartialEq` und `Default` sinnvoll? Ist jedes Trait so klein, dass ein Test-Doppelgänger in fünf Zeilen geht? Clippy und `missing_debug_implementations` nehmen dir einen Teil davon ab.",
+  "labor": {
+    "titel": "Eine öffentliche API prüfen",
+    "anleitung": "Nimm ein eigenes Bibliotheks-Crate und füge als erste Zeile von `src/lib.rs` `#![warn(missing_debug_implementations)]` ein. Baue dann, lass Clippy laufen und schau dir die Dokumentation an.",
+    "befehle": [
+      "cargo build",
+      "cargo clippy",
+      "cargo doc --open"
+    ],
+    "beobachtung": "rustc meldet jeden öffentlichen Typ ohne `Debug`. In `cargo doc` siehst du pro Typ unter „Trait Implementations“, welche Standard-Traits vorhanden sind. Fehlen dort `Clone` oder `PartialEq` bei einfachen Datentypen, ist das ein Kandidat für ein `derive`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Trait",
+      "englisch": "trait",
+      "erklaerung": "Beschreibt Fähigkeiten, die ein Typ haben muss. In Rust das Mittel für Schnittstellen zwischen Modulen."
+    },
+    {
+      "begriff": "Dyn-Kompatibilität",
+      "englisch": "dyn compatibility",
+      "erklaerung": "Eigenschaft eines Traits, als `dyn Trait` hinter einem Zeiger benutzbar zu sein. Früher „object safety“ genannt."
+    },
+    {
+      "begriff": "Rust API Guidelines",
+      "englisch": "Rust API Guidelines",
+      "erklaerung": "Sammlung von Empfehlungen für Namen, Traits und Struktur öffentlicher Rust-APIs, mit Kürzeln wie C-CASE oder C-COMMON-TRAITS."
+    },
+    {
+      "begriff": "Orphan Rule",
+      "englisch": "orphan rule",
+      "erklaerung": "Ein Trait darf für einen Typ nur implementiert werden, wenn das Trait oder der Typ zum eigenen Crate gehört."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust API Guidelines",
+      "url": "https://rust-lang.github.io/api-guidelines/"
+    },
+    {
+      "titel": "Rust Reference: Traits",
+      "url": "https://doc.rust-lang.org/reference/items/traits.html"
+    }
+  ]
+}

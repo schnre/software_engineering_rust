@@ -1,0 +1,283 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m4-l1",
+  "phase": 3,
+  "modul": "3.4 Moderne Bibliothekstypen",
+  "titel": "Enums, Option und Result im Griff",
+  "lernziele": [
+    "Enums als Summentypen modellieren und erschöpfend mit `match` auswerten",
+    "`Option`- und `Result`-Kombinatoren statt verschachtelter `match`-Blöcke einsetzen",
+    "`if let`, `let else`, `matches!` und `#[non_exhaustive]` gezielt verwenden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "nicht-erschoepfend",
+      "frage": "Ein Kollege hat die Variante `Stopp` ergänzt. Was meldet der Compiler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "enum Befehl { Start, Stopp, Drehzahl(u16) }",
+          "",
+          "fn wert(b: Befehl) -> u16 {",
+          "    match b {",
+          "        Befehl::Start => 1,",
+          "        Befehl::Drehzahl(n) => n,",
+          "    }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0004]: non-exhaustive patterns: `Befehl::Stopp` not covered",
+          " --> src/main.rs:4:11",
+          "  |",
+          "4 |     match b {",
+          "  |           ^ pattern `Befehl::Stopp` not covered",
+          "  |",
+          "help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown",
+          "  |",
+          "6 ~         Befehl::Drehzahl(n) => n,",
+          "7 ~         Befehl::Stopp => todo!(),"
+        ]
+      },
+      "optionen": [
+        "`match` muss **erschöpfend** sein. Jede neue Variante zeigt alle Stellen, die sie noch nicht behandeln",
+        "Eine Warnung: `Stopp` wird zur Laufzeit ignoriert",
+        "Ein Laufzeitfehler, falls `Stopp` übergeben wird",
+        "`Stopp` hat keine Daten und muss darum nicht behandelt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Rust-`enum` ist ein **Summentyp** (*sum type*): genau eine von mehreren Varianten, jede mit eigenen Daten, gespeichert mit einem Tag. Anders als ein C-`enum` mit `switch` und `default` ist die Prüfung auf Vollständigkeit ein harter Fehler. Darum ist `_ => …` als Sammelfall bei eigenen Enums oft ein Nachteil: Er verschluckt künftige Varianten.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist ein Fehler (E0004), keine Warnung.",
+        "Der Code übersetzt gar nicht erst.",
+        "Jede Variante muss abgedeckt sein, mit oder ohne Daten."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Kombinatoren statt Treppen",
+      "text": "`Option<T>` und `Result<T, E>` sind gewöhnliche Enums. Ihre Methoden ersetzen die meisten `match`-Blöcke:",
+      "tabelle": {
+        "kopf": [
+          "Methode",
+          "Wirkung",
+          "Beispiel"
+        ],
+        "zeilen": [
+          [
+            "`map(f)`",
+            "Inhalt umwandeln, Hülle bleibt",
+            "`Some(2).map(|x| x * 3)` → `Some(6)`"
+          ],
+          [
+            "`and_then(f)`",
+            "Weiter mit einer Funktion, die selbst `Option`/`Result` liefert",
+            "`s.and_then(|s| s.parse().ok())`"
+          ],
+          [
+            "`ok_or(e)` / `ok_or_else(f)`",
+            "`Option` → `Result`",
+            "`None.ok_or(\"fehlt\")` → `Err(\"fehlt\")`"
+          ],
+          [
+            "`ok()`",
+            "`Result` → `Option`, Fehler verwerfen",
+            "`\"7\".parse::<u8>().ok()` → `Some(7)`"
+          ],
+          [
+            "`map_err(f)`",
+            "Fehler umwandeln",
+            "`.map_err(|e| e.to_string())`"
+          ],
+          [
+            "`unwrap_or(v)` / `unwrap_or_else(f)`",
+            "Standardwert, `f` nur bei Bedarf",
+            "`None.unwrap_or_else(|| teuer())`"
+          ],
+          [
+            "`?`",
+            "Fehler früh zurückgeben",
+            "`let n = s.parse::<u8>()?;`"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "map-vs-and-then",
+      "frage": "Welchen Typ und Wert hat `a`, welchen `b`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let roh: Option<&str> = Some(\"42\");",
+          "let a = roh.map(|s| s.parse::<u8>());",
+          "let b = roh.and_then(|s| s.parse::<u8>().ok());"
+        ]
+      },
+      "optionen": [
+        "`a`: `Option<Result<u8, ParseIntError>>` = `Some(Ok(42))`, `b`: `Option<u8>` = `Some(42)`",
+        "Beide `Option<u8>` = `Some(42)`",
+        "`a`: `Result<u8, _>` = `Ok(42)`, `b`: `Option<u8>` = `Some(42)`",
+        "`a` kompiliert nicht, weil `parse` ein `Result` liefert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`map` verpackt das Ergebnis der Closure in die äussere Hülle. Liefert die Closure selbst eine Hülle, entsteht eine Verschachtelung. `and_then` (in anderen Sprachen *flat_map* oder *bind*) entfernt sie. Wer ein `Option<Result<T, E>>` umdrehen muss, findet dafür `transpose()`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das gilt nur für `b`. `map` verschachtelt.",
+        "`map` behält die äussere `Option`.",
+        "`map` akzeptiert Closures mit beliebigem Rückgabetyp."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Funktion mit `let else`. `parse_kanal(\"CH7\")` soll `7` liefern, alles andere `0`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn parse_kanal(s: &str) -> u8 {",
+          "    let {{?}}(rest) = s.strip_prefix(\"CH\") else {",
+          "        return 0;",
+          "    };",
+          "    let {{?}}(n) = rest.parse::<u8>() else { return 0 };",
+          "    n",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Some"
+          ]
+        },
+        {
+          "loesungen": [
+            "Ok"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Some",
+        "Ok",
+        "Err",
+        "None"
+      ],
+      "erklaerung": "**`let else`** bindet Variablen, wenn das Muster passt, und muss im `else`-Zweig die Funktion verlassen (`return`, `break`, `continue` oder Panic). Das hält den Normalfall ohne Einrückung, ähnlich einem Guard. `if let Some(x) = …` passt dagegen, wenn nur im Erfolgsfall etwas geschehen soll."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "match-guard",
+      "frage": "Was ergibt `m`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let t = (3, -2);",
+          "let m = match t {",
+          "    (0, _) => \"a\",",
+          "    (x, y) if x > 0 && y < 0 => \"b\",",
+          "    _ => \"c\",",
+          "};",
+          "let ok = matches!(t.0, 1..=9);"
+        ]
+      },
+      "optionen": [
+        "`\"b\"`, und `ok` ist `true`",
+        "`\"c\"`, und `ok` ist `true`",
+        "`\"a\"`, und `ok` ist `false`",
+        "`\"b\"`, und `ok` ist `false`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Arme werden von oben nach unten geprüft. Der zweite passt dank **Guard** (`if …`). `matches!(wert, muster)` ist ein Makro, das zu `match wert { muster => true, _ => false }` expandiert und Muster wie Bereiche oder `Some(_)` direkt in Bedingungen erlaubt. Achtung: Guards zählen nicht zur Vollständigkeitsprüfung, darum ist hier der Sammelarm `_` nötig.",
+      "begruendungen": [
+        "Richtig.",
+        "Der zweite Arm passt schon, `_` wird nicht erreicht.",
+        "`t.0` ist 3, nicht 0.",
+        "3 liegt im Bereich `1..=9`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Deine Bibliothek veröffentlicht `pub enum FehlerArt { Zeitueberschreitung, Pruefsumme }`. Du willst später Varianten ergänzen, ohne einen Breaking Change. Was tust du?",
+      "optionen": [
+        "`#[non_exhaustive]` an das Enum setzen. Nutzer in anderen Crates müssen dann immer einen Sammelarm `_` schreiben",
+        "Die Varianten alphabetisch sortieren",
+        "Eine Variante `Andere(u32)` reservieren und nie verwenden",
+        "Nichts, neue Varianten sind nie ein Breaking Change"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `#[non_exhaustive]` bricht jede neue Variante den Code aller Nutzer, die erschöpfend matchen (E0004). Mit dem Attribut erzwingt der Compiler bei fremden Crates einen `_`-Arm. Im eigenen Crate gilt die Einschränkung nicht. `std::io::ErrorKind` ist ein bekanntes Beispiel. Der Preis: Nutzer verlieren die Vollständigkeitsprüfung. Für geschlossene Mengen wie Protokollbefehle lässt man es weg.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Reihenfolge ändert nichts an der Vollständigkeitsprüfung.",
+        "Ein Platzhalter ist unehrlich und löst das Problem nicht, neue Varianten brechen trotzdem.",
+        "Für öffentliche Enums ist jede neue Variante ohne `#[non_exhaustive]` ein Breaking Change."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "In welcher Reihenfolge laufen die Teile von `let kanal = roh.ok_or(Fehler::Fehlt)?.parse::<u8>().map_err(Fehler::Format)?;` ab, wenn `roh` den Wert `Some(\"x\")` hat?",
+      "elemente": [
+        "`ok_or` macht aus dem `Some` ein `Ok`",
+        "Das erste `?` packt den Text aus",
+        "`parse::<u8>()` liefert `Err(ParseIntError)`",
+        "`map_err` verpackt den Fehler in `Fehler::Format`",
+        "Das zweite `?` gibt den Fehler aus der Funktion zurück"
+      ],
+      "erklaerung": "Kombinatoren und `?` werden strikt von links nach rechts ausgewertet. `?` bricht beim ersten `Err` ab und ruft dabei `From::from` auf den Fehler auf, sodass auch unterschiedliche Fehlertypen zusammenpassen (Modul 2.7). Bei `roh == None` wäre schon das erste `?` mit `Fehler::Fehlt` ausgestiegen."
+    }
+  ],
+  "praxis": "Enums mit Daten modellieren Protokolle, Zustandsautomaten und Fehler, ohne Heap und mit Vollständigkeitsprüfung. Clippy hilft beim Aufräumen: `manual_map`, `option_map_unit_fn` und `single_match` schlagen die kompaktere Form vor. In Embedded-Code ersetzt `Option` die magischen Werte wie `0xFFFF` für „kein Messwert“. Dank Nischenoptimierung kostet `Option<NonZeroU16>` dabei keinen zusätzlichen Speicher.",
+  "labor": {
+    "titel": "Ein Befehlsparser",
+    "anleitung": "Schreibe `fn parse(zeile: &str) -> Result<Befehl, ParseFehler>` für Zeilen wie `START`, `STOPP` und `RPM 1200`. Verwende `split_once`, `let else`, `ok_or` und `map_err`. Ergänze danach eine Variante `Reset` und lass dir vom Compiler alle Stellen zeigen, die angepasst werden müssen.",
+    "befehle": [
+      "cargo new befehle && cd befehle",
+      "cargo test",
+      "cargo clippy -- -W clippy::pedantic"
+    ],
+    "beobachtung": "Nach dem Ergänzen von `Reset` meldet `cargo build` jede unvollständige `match`-Stelle mit E0004. Mit einem Sammelarm `_` wäre das unbemerkt geblieben."
+  },
+  "begriffe": [
+    {
+      "begriff": "Summentyp",
+      "englisch": "sum type / tagged union",
+      "erklaerung": "Typ, der genau eine von mehreren Varianten enthält, jede mit eigenen Daten."
+    },
+    {
+      "begriff": "Erschöpfendes match",
+      "englisch": "exhaustive match",
+      "erklaerung": "`match`, das alle möglichen Werte abdeckt. Rust verlangt das zwingend."
+    },
+    {
+      "begriff": "Kombinator",
+      "englisch": "combinator",
+      "erklaerung": "Methode wie `map` oder `and_then`, die Werte in `Option`/`Result` umwandelt, ohne die Hülle von Hand zu öffnen."
+    },
+    {
+      "begriff": "let else",
+      "englisch": "let-else",
+      "erklaerung": "Bindung mit Muster, deren `else`-Zweig die Funktion verlassen muss."
+    },
+    {
+      "begriff": "non_exhaustive",
+      "englisch": "non_exhaustive",
+      "erklaerung": "Attribut, das Erweiterungen eines öffentlichen Typs ohne Breaking Change erlaubt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::option (Dokumentation)",
+      "url": "https://doc.rust-lang.org/std/option/index.html"
+    },
+    {
+      "titel": "Rust Reference: The non_exhaustive attribute",
+      "url": "https://doc.rust-lang.org/reference/attributes/type_system.html"
+    }
+  ]
+}

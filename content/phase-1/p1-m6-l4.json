@@ -1,0 +1,167 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m6-l4",
+  "phase": 1,
+  "modul": "1.6 Build-Systeme",
+  "titel": "Reproduzierbare Builds und Cargo im grossen Massstab",
+  "lernziele": [
+    "Builds mit `--locked`, `cargo vendor` und `--offline` reproduzierbar und netzunabhängig machen",
+    "Absolute Pfade im Binary mit `--remap-path-prefix` entfernen",
+    "Einordnen, wann Bazel, Buck2, Corrosion oder sccache neben Cargo sinnvoll sind"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "In der CI läuft `cargo build --locked`. Ein Kollege hat `Cargo.toml` geändert, aber `Cargo.lock` nicht committet. Was passiert?",
+      "terminal": {
+        "befehl": "cargo build --locked",
+        "ausgabe": [
+          "    Updating crates.io index",
+          "error: cannot update the lock file /home/user/sensor/Cargo.lock because --locked was passed to prevent this",
+          "help: to generate the lock file without accessing the network, remove the --locked flag and use --offline instead."
+        ]
+      },
+      "optionen": [
+        "Der Build bricht ab, statt still neue Versionen aufzulösen. Genau das soll `--locked` bewirken",
+        "Cargo hat das Lockfile aktualisiert und nur gewarnt",
+        "Der crates.io-Index war nicht erreichbar"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `--locked` würde Cargo das Lockfile in der CI anpassen und mit Versionen bauen, die niemand geprüft hat. Mit `--locked` muss jede Änderung an den Abhängigkeiten als Commit sichtbar werden. `--frozen` verbietet zusätzlich jeden Netzzugriff.",
+      "begruendungen": [
+        "Richtig. Die CI soll genau das bauen, was im Repo steht.",
+        "Mit `--locked` ändert Cargo das Lockfile nicht, es bricht ab.",
+        "Der Index wurde ja aktualisiert („Updating crates.io index“)."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was „reproduzierbar“ heisst",
+      "text": "Ein Build ist **reproduzierbar** (reproducible), wenn dieselben Quellen auf einem anderen Rechner bitgenau dasselbe Binary ergeben. Dann kann jeder prüfen, dass eine ausgelieferte Firmware wirklich aus diesem Commit stammt. Bausteine:\n\n- gleiche Toolchain (`rust-toolchain.toml`)\n- gleiche Abhängigkeiten (`Cargo.lock`, `--locked`)\n- keine Zeitstempel im Binary (`SOURCE_DATE_EPOCH` für Werkzeuge, die Zeiten einbetten)\n- keine absoluten Pfade (`--remap-path-prefix`)\n\nrustc selbst bettet keine Zeitstempel ein: Zweimal sauber gebaut ergab im Test dieselbe SHA-256-Summe."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "`strings target/debug/app` zeigt `/home/anna/.cargo/registry/src/index.crates.io-…/heapless-0.7.17/src/vec.rs`. Warum stört das bei reproduzierbaren Builds?",
+      "optionen": [
+        "Der Pfad hängt vom Benutzernamen und Rechner ab. Auf einem anderen Rechner entsteht ein anderes Binary, und Interna werden preisgegeben",
+        "Der Pfad verlangsamt das Programm",
+        "Das Programm sucht zur Laufzeit nach dieser Datei und stürzt ab, wenn sie fehlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Pfade landen über Panic-Meldungen (`file!()`) und Debug-Informationen im Binary. Mit `RUSTFLAGS=\"--remap-path-prefix=$HOME/.cargo/registry/src=/cargo\"` ersetzt rustc den Präfix. Im Test stand danach `/cargo/index.crates.io-…/heapless-0.7.17/src/vec.rs` im Binary. Cargo arbeitet mit `trim-paths` an einer eingebauten Lösung, die zum Stand von Rust 1.97 aber noch instabil ist.",
+      "begruendungen": [
+        "Richtig. Gleiche Quellen, anderer Benutzer, anderes Binary.",
+        "Die Strings liegen in `.rodata` und kosten keine Rechenzeit.",
+        "Die Pfade dienen nur der Anzeige, gelesen wird die Datei nie."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ein Kunde verlangt, dass seine Firmware ohne Internetzugang gebaut werden kann. Ergänze die Befehle.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "cargo {{?}}                       # Quellen aller Abhängigkeiten nach vendor/ kopieren",
+          "# .cargo/config.toml: [source.crates-io] replace-with = \"vendored-sources\"",
+          "cargo build --{{?}} --locked     # ohne Netz, mit festem Lockfile"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["vendor"] },
+        { "loesungen": ["offline"] }
+      ],
+      "auswahl": ["vendor", "offline", "fetch", "release"],
+      "erklaerung": "`cargo vendor` gibt den nötigen Abschnitt für `.cargo/config.toml` gleich mit aus. Das Verzeichnis `vendor/` kommt ins Repo oder ins Archiv des Releases. So lässt sich derselbe Stand auch in zehn Jahren noch bauen, wichtig bei langen Produktlebenszyklen und Zertifizierungen. `cargo fetch` lädt nur in den lokalen Cache, ohne Kopie im Projekt."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug löst welches Problem?",
+      "paare": [
+        { "links": "sccache", "rechts": "Teilt Kompilate über Rechner und CI-Läufe hinweg (Cache, z. B. in S3)" },
+        { "links": "Bazel mit `rules_rust`", "rechts": "Ein Build-Graph über viele Sprachen in einem Monorepo, feingranular gecacht" },
+        { "links": "Corrosion", "rechts": "Bindet Cargo-Crates als Targets in ein bestehendes CMake-Projekt ein" },
+        { "links": "Buck2", "rechts": "Build-System von Meta, in Rust geschrieben, für sehr grosse Monorepos" }
+      ],
+      "erklaerung": "Für die meisten Rust-Projekte reicht Cargo. Bazel oder Buck2 lohnen sich, wenn Rust nur ein Teil eines grossen, mehrsprachigen Monorepos ist. Diese Systeme rufen rustc direkt auf und brauchen die Abhängigkeiten in ihrer eigenen Beschreibung. In C++-Firmen ist Corrosion oft der sanfteste Einstieg: Ein Rust-Modul wird in das vorhandene CMake eingehängt."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Die CI cacht das ganze Verzeichnis `target/` zwischen Läufen. Welche Probleme sind typisch?",
+      "optionen": [
+        "Der Cache wächst ständig, weil alte Artefakte nie entfernt werden",
+        "Nach einem Toolchain-Update ist der Cache wertlos, weil Cargo bei geänderter rustc-Version alles neu baut",
+        "Ein falscher Cache-Schlüssel ohne Hash von `Cargo.lock` liefert veraltete Abhängigkeiten aus",
+        "Cargo ignoriert den Inhalt von `target/` grundsätzlich, wenn es in der CI läuft"
+      ],
+      "korrekt": [0, 1],
+      "erklaerung": "Cargo prüft per Fingerabdruck, was aktuell ist, und baut Veraltetes neu. Ein falscher Cache macht den Build deshalb nicht falsch, aber langsam oder riesig. Bewährt: Schlüssel aus Toolchain und Hash von `Cargo.lock`, nur Abhängigkeiten cachen, z. B. mit `Swatinem/rust-cache` oder sccache (Phase 8).",
+      "begruendungen": [
+        "Richtig. `target/` räumt sich nicht von selbst auf.",
+        "Richtig. Die Compiler-Version gehört zum Fingerabdruck.",
+        "Cargo erkennt veraltete Artefakte selbst und baut sie neu. Ein schlechter Schlüssel kostet Zeit, nicht Korrektheit.",
+        "Cargo nutzt `target/` überall gleich. Es gibt keinen CI-Sondermodus."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Schritte einer Release-Pipeline für reproduzierbare Firmware in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Toolchain aus `rust-toolchain.toml` installieren",
+        "`cargo build --release --locked --offline` mit `--remap-path-prefix` bauen",
+        "SHA-256 des Binaries berechnen und mit einem zweiten, unabhängigen Build vergleichen",
+        "Binary signieren und zusammen mit Debug-Infos und `Cargo.lock` archivieren"
+      ],
+      "erklaerung": "Erst wenn zwei unabhängige Builds bitgleich sind, ist der Build wirklich reproduzierbar. Signiert wird das geprüfte Binary. Zum Archiv gehören Lockfile und Debug-Infos, damit man Abstürze im Feld später analysieren kann."
+    }
+  ],
+  "praxis": "Bei Produkten mit langer Lebensdauer, etwa in Medizintechnik oder Bahn, musst du Jahre später exakt dieselbe Firmware erneut bauen können. Dafür gehören `rust-toolchain.toml`, `Cargo.lock`, `--locked` und gegebenenfalls `vendor/` zur Grundausstattung. Bei Supply-Chain-Fragen (Phase 12) ist ein reproduzierbarer Build das Fundament: Nur dann lässt sich prüfen, dass das ausgelieferte Binary aus dem geprüften Quelltext stammt.",
+  "labor": {
+    "titel": "Reproduzierbarkeit prüfen",
+    "anleitung": "Baue ein kleines Projekt zweimal sauber und vergleiche die Prüfsummen. Suche anschliessend nach Pfaden im Binary.",
+    "befehle": [
+      "cargo build --release && sha256sum target/release/app",
+      "cargo clean && cargo build --release && sha256sum target/release/app",
+      "cargo build && strings target/debug/app | grep \"$HOME\" | head -3",
+      "RUSTFLAGS=\"--remap-path-prefix=$HOME=/home/user\" cargo build && strings target/debug/app | grep \"$HOME\" | head -3",
+      "cargo vendor && cargo build --offline --locked"
+    ],
+    "beobachtung": "Die Prüfsummen der beiden Release-Builds sind gleich. Nach dem Remapping tauchen keine Pfade mit deinem Benutzernamen mehr auf. Beachte: Ändern sich `RUSTFLAGS`, baut Cargo alle Abhängigkeiten neu."
+  },
+  "begriffe": [
+    {
+      "begriff": "Reproduzierbarer Build",
+      "englisch": "reproducible build",
+      "erklaerung": "Build, der aus denselben Quellen auf verschiedenen Rechnern bitgenau dasselbe Ergebnis liefert."
+    },
+    {
+      "begriff": "Vendoring",
+      "englisch": "vendoring",
+      "erklaerung": "Kopieren der Quellen aller Abhängigkeiten ins Projekt, damit ohne Netz gebaut werden kann."
+    },
+    {
+      "begriff": "Build-Cache",
+      "englisch": "build cache",
+      "erklaerung": "Zwischenspeicher für Kompilate, lokal in `target/` oder geteilt über Werkzeuge wie sccache."
+    },
+    {
+      "begriff": "Monorepo",
+      "englisch": "monorepo",
+      "erklaerung": "Ein Repository für viele Projekte und Sprachen. Oft mit Bazel oder Buck2 gebaut."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: cargo vendor",
+      "url": "https://doc.rust-lang.org/cargo/commands/cargo-vendor.html"
+    },
+    {
+      "titel": "The rustc book: Command-line Arguments",
+      "url": "https://doc.rust-lang.org/rustc/command-line-arguments.html"
+    },
+    {
+      "titel": "reproducible-builds.org",
+      "url": "https://reproducible-builds.org/"
+    }
+  ]
+}

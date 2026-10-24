@@ -1,0 +1,179 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m3-l3",
+  "phase": 4,
+  "modul": "4.3 Debugging",
+  "titel": "Regressionen eingrenzen",
+  "lernziele": [
+    "Mit `git bisect run` und `cargo test` den Commit finden, der einen Fehler eingeführt hat",
+    "Mit `cargo-bisect-rustc` eine Regression im Compiler eingrenzen",
+    "Eine minimale Reproduktion bauen, die andere nachvollziehen können"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "bisect-schritte",
+      "frage": "Zwischen dem letzten guten Release und `main` liegen 500 Commits. Ein Test ist inzwischen rot. Wie viele Commits muss `git bisect` höchstens testen?",
+      "optionen": ["Etwa 9", "Etwa 50", "Etwa 250", "Alle 500"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`git bisect` macht eine **binäre Suche** über die Historie: Es checkt den Commit in der Mitte aus, du sagst „gut“ oder „schlecht“, und die Hälfte der Kandidaten fällt weg. Bei 500 Commits sind das log₂(500) ≈ 9 Schritte. Auch bei 10 000 Commits wären es nur 14.",
+      "begruendungen": [
+        "Richtig. Jeder Schritt halbiert die Menge der Kandidaten.",
+        "Das wäre eine Suche in Zehnerschritten.",
+        "Das ist der Durchschnitt beim linearen Durchprobieren.",
+        "Nur, wenn man jeden Commit einzeln prüft."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "git bisect run",
+      "text": "Mit `git bisect run` übernimmt ein Befehl das Urteil. Sein Exit-Code entscheidet: **0** heisst gut, **1 bis 127** schlecht, **125** „diesen Commit überspringen“ (z. B. weil er nicht kompiliert). `cargo test` passt perfekt: Exit-Code 0 bei Erfolg, 101 bei fehlgeschlagenen Tests.",
+      "terminal": {
+        "befehl": "git bisect start HEAD HEAD~6 && git bisect run cargo test --quiet",
+        "ausgabe": [
+          "Bisecting: 2 revisions left to test after this (roughly 2 steps)",
+          "[8b5a6d0a2253989228b49121796d682c9c71cfc3] aenderung 3",
+          "running 'cargo' 'test' '--quiet'",
+          "Bisecting: 0 revisions left to test after this (roughly 1 step)",
+          "[7aaa7a032d802c7ed3a41e070b9c5815c89ea0a8] aenderung 5",
+          "running 'cargo' 'test' '--quiet'",
+          "Bisecting: 0 revisions left to test after this (roughly 0 steps)",
+          "[ab029494c9ee357080f61876f1b4ff63232b0e08] aenderung 4",
+          "running 'cargo' 'test' '--quiet'",
+          "ab029494c9ee357080f61876f1b4ff63232b0e08 is the first bad commit",
+          "bisect found first bad commit"
+        ]
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "bisect-ablauf",
+      "frage": "Bringe den Ablauf einer automatischen Suche in die richtige Reihenfolge.",
+      "elemente": [
+        "Einen Test schreiben, der den Fehler zeigt, und ihn ausserhalb des Repositorys speichern",
+        "`git bisect start <schlecht> <gut>`",
+        "`git bisect run ./pruefe.sh`",
+        "Den gemeldeten ersten schlechten Commit mit `git show` ansehen",
+        "`git bisect reset`, um zum Ausgangszustand zurückzukehren"
+      ],
+      "erklaerung": "Der Test muss in allen alten Commits verfügbar sein. Liegt er im Repository, existiert er dort noch nicht. Deshalb kopiert man ihn ausserhalb und lässt ein Skript ihn bei jedem Schritt einfügen und ausführen. Am Ende stellt `git bisect reset` den ursprünglichen Branch wieder her."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "pruefskript",
+      "frage": "Ergänze das Prüfskript: Commits, die nicht kompilieren, sollen übersprungen werden, statt als schlecht zu gelten.",
+      "code": {
+        "sprache": "bash",
+        "datei": "pruefe.sh",
+        "zeilen": [
+          "#!/bin/sh",
+          "cargo build --quiet || exit {{?}}",
+          "cargo test --quiet"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["125"] }
+      ],
+      "auswahl": ["125", "0", "1", "101"],
+      "erklaerung": "Exit-Code 125 ist für `git bisect run` reserviert und bedeutet „kann ich nicht beurteilen“. Ohne diese Zeile würde ein kaputter Zwischen-Commit als „schlecht“ zählen, und bisect könnte auf den falschen Commit zeigen. Die letzte Zeile liefert den Exit-Code von `cargo test` direkt zurück."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "bisect-rustc",
+      "frage": "Nach dem Update von Rust 1.96 auf 1.97 kompiliert dein Crate nicht mehr, ohne dass du Code geändert hast. Welches Werkzeug grenzt die Ursache ein?",
+      "optionen": [
+        "`cargo-bisect-rustc`: Es lädt Nightly-Builds von rustc herunter und findet den Compiler-Commit, ab dem der Fehler auftritt",
+        "`git bisect` im eigenen Repository",
+        "`cargo update`, weil das Problem sicher in einer Abhängigkeit liegt",
+        "`rustup self update`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wenn sich nur der Compiler geändert hat, liegt die Suche in der Historie von rustc. **cargo-bisect-rustc** installiert nacheinander Nightly-Toolchains zwischen zwei Datumsangaben, führt jeweils deinen Befehl aus und meldet am Ende den Nightly und meist sogar die zusammengeführten Pull Requests. Damit kannst du ein präzises Issue im rust-lang/rust-Repository schreiben. Oft stellt sich heraus, dass eine bewusste Änderung dahintersteckt, die in den Release Notes steht.",
+      "begruendungen": [
+        "Richtig.",
+        "Dein Repository hat sich nicht geändert, also findet bisect dort nichts.",
+        "Möglich, aber bei unverändertem `Cargo.lock` haben sich die Abhängigkeiten nicht geändert.",
+        "Das aktualisiert nur rustup selbst."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Minimale Reproduktion",
+      "text": "Eine **minimale Reproduktion** (minimal reproducible example) ist das kleinste Programm, das den Fehler noch zeigt. Sie ist der wichtigste Beitrag zu jedem Bug-Report und hilft auch dir: Oft findest du die Ursache beim Verkleinern selbst.\n\nVorgehen: In ein frisches `cargo new` kopieren, dann schrittweise entfernen (Abhängigkeiten, Module, Felder, Generics), nach jedem Schritt prüfen, ob der Fehler noch da ist. Ideal ist eine einzige `main.rs` ohne Abhängigkeiten, die man im **Rust Playground** (play.rust-lang.org) teilen kann. Werkzeuge wie `cargo-minimize` oder `treereduce` automatisieren das Verkleinern."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "gute-repro",
+      "frage": "Was gehört in einen guten Bug-Report mit Reproduktion?",
+      "optionen": [
+        "Die Ausgabe von `rustc -vV` bzw. `cargo -V` und das Zielsystem",
+        "Der minimale Code und der genaue Befehl, mit dem der Fehler auftritt",
+        "Was du erwartet hast und was tatsächlich passiert ist, inklusive vollständiger Fehlermeldung",
+        "Das komplette Firmenrepository als ZIP, damit nichts fehlt"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Ein Report muss ohne Rückfragen nachvollziehbar sein: Version, Code, Befehl, Erwartung, Ergebnis. Ein ganzes Repository ist für Fremde kaum zu untersuchen und darf oft aus rechtlichen Gründen gar nicht geteilt werden.",
+      "begruendungen": [
+        "Richtig. Viele Fehler hängen von Version und Target ab.",
+        "Richtig.",
+        "Richtig. Die Erwartung zeigt, ob es überhaupt ein Fehler ist.",
+        "Viel zu gross und oft vertraulich."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeug-situation",
+      "frage": "Welches Werkzeug passt zu welcher Situation?",
+      "paare": [
+        { "links": "Test seit irgendeinem Commit im Projekt rot", "rechts": "`git bisect run cargo test`" },
+        { "links": "Fehler erst seit dem Wechsel auf eine neue Rust-Version", "rechts": "`cargo-bisect-rustc`" },
+        { "links": "Fehler erst seit `cargo update`", "rechts": "`Cargo.lock` vergleichen und Abhängigkeiten einzeln mit `cargo update -p` aktualisieren" },
+        { "links": "Fehler soll an andere weitergegeben werden", "rechts": "Minimale Reproduktion im Playground" }
+      ],
+      "erklaerung": "Die Leitfrage ist immer: Was hat sich zwischen „gut“ und „schlecht“ geändert? Eigener Code, Compiler oder Abhängigkeiten. Weil `Cargo.lock` und `rust-toolchain.toml` eingecheckt sind, lassen sich alle drei sauber voneinander trennen."
+    }
+  ],
+  "praxis": "Wenn ein Kunde meldet „seit dem letzten Update geht X nicht mehr“, ist `git bisect run` oft der schnellste Weg zur Ursache, schneller als jedes Nachdenken über den Code. Voraussetzung sind kleine Commits, die jeweils kompilieren. Deshalb achtest du im Review darauf, dass ein Pull Request nicht aus einem einzigen riesigen Commit besteht, und dass die Toolchain mit `rust-toolchain.toml` festgelegt ist.",
+  "labor": {
+    "titel": "Den Übeltäter finden",
+    "anleitung": "Lege ein Repository mit einer Funktion `rabatt` und einem Test an. Erzeuge sechs Commits und baue in einem davon heimlich einen Fehler ein. Lass `git bisect run` den Commit finden.",
+    "befehle": [
+      "cargo new --lib bis && cd bis",
+      "git add -A && git commit -m start",
+      "# ... sechs Commits, einer davon ändert preis / 10 zu preis / 20 ...",
+      "git bisect start HEAD HEAD~6",
+      "git bisect run cargo test --quiet",
+      "git bisect reset"
+    ],
+    "beobachtung": "Nach höchstens drei Testläufen meldet git `is the first bad commit`. Probiere auch, einen Commit absichtlich nicht kompilierbar zu machen, und nutze ein Skript mit `exit 125`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Regression",
+      "englisch": "regression",
+      "erklaerung": "Ein Fehler in einer Funktion, die früher schon korrekt funktioniert hat."
+    },
+    {
+      "begriff": "Binäre Suche",
+      "englisch": "binary search",
+      "erklaerung": "Suchverfahren, das die Menge der Kandidaten in jedem Schritt halbiert."
+    },
+    {
+      "begriff": "Minimale Reproduktion",
+      "englisch": "minimal reproducible example",
+      "erklaerung": "Kleinstes Programm, das einen Fehler noch zuverlässig zeigt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "git-bisect Documentation",
+      "url": "https://git-scm.com/docs/git-bisect"
+    },
+    {
+      "titel": "cargo-bisect-rustc Guide",
+      "url": "https://rust-lang.github.io/cargo-bisect-rustc/"
+    }
+  ]
+}

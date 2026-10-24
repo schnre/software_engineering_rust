@@ -1,0 +1,248 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m3-l2",
+  "phase": 4,
+  "modul": "4.3 Debugging",
+  "titel": "Panics, Backtraces und Core Dumps",
+  "lernziele": [
+    "Eine Panic-Meldung und einen Backtrace lesen und die relevante Stelle finden",
+    "Den Unterschied zwischen `panic = \"unwind\"` und `panic = \"abort\"` erklären und einen Core Dump analysieren",
+    "`dbg!` für schnelle Fehlersuche und `tracing` bzw. `log` für dauerhafte Diagnose einsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "panic-meldung",
+      "frage": "Das Programm wird mit einer leeren Liste aufgerufen. Was sagt die Meldung?",
+      "terminal": {
+        "befehl": "./target/debug/dbg \"\"; echo \"exit=$?\"",
+        "ausgabe": [
+          "",
+          "thread 'main' (10852) panicked at src/main.rs:3:5:",
+          "attempt to divide by zero",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+          "exit=101"
+        ]
+      },
+      "optionen": [
+        "Im Hauptthread wurde in `src/main.rs` Zeile 3, Spalte 5 durch null geteilt. Ein Panic beendet den Prozess mit Code 101",
+        "Das Programm hat ein Signal `SIGFPE` vom Betriebssystem bekommen, wie in C",
+        "Der Fehler liegt im Thread mit der Nummer 10852, nicht in `main`",
+        "Exit-Code 101 bedeutet, dass ein Speicherfehler aufgetreten ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Panic-Meldung hat immer denselben Aufbau: welcher Thread, an welcher Stelle (`Datei:Zeile:Spalte`) und mit welcher Nachricht. Rust prüft Ganzzahldivisionen auf null und löst einen **Panic** aus, statt die Hardware einen Trap auslösen zu lassen. Das ist kein Undefined Behavior, sondern ein definierter Abbruch. Die Zahl in Klammern ist die Thread-ID des Betriebssystems, der Name des Threads ist `main`.",
+      "begruendungen": [
+        "Richtig.",
+        "In C wäre das so. Rust prüft die Division vorher und panikt kontrolliert.",
+        "Der Thread heisst `main`, die Zahl in Klammern ist nur seine Kennung im Betriebssystem.",
+        "101 ist der Exit-Code, den Rust nach einem nicht abgefangenen Panic im Hauptthread verwendet."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "backtrace-lesen",
+      "frage": "Mit `RUST_BACKTRACE=1` kommt dieser Backtrace. Wo beginnst du mit der Analyse?",
+      "terminal": {
+        "befehl": "RUST_BACKTRACE=1 ./target/debug/dbg \"\"",
+        "ausgabe": [
+          "thread 'main' (10853) panicked at src/main.rs:3:5:",
+          "attempt to divide by zero",
+          "stack backtrace:",
+          "   0: __rustc::rust_begin_unwind",
+          "             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5",
+          "   1: core::panicking::panic_fmt",
+          "             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14",
+          "   2: core::panicking::panic_const::panic_const_div_by_zero",
+          "             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:175:17",
+          "   3: dbg::mittelwert",
+          "             at ./src/main.rs:3:5",
+          "   4: dbg::main",
+          "             at ./src/main.rs:13:18",
+          "   5: <fn() as core::ops::function::FnOnce<()>>::call_once",
+          "             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs:250:5",
+          "note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace."
+        ]
+      },
+      "optionen": [
+        "Bei Frame 3 `dbg::mittelwert`, dem ersten Frame aus dem eigenen Crate. Dann in Frame 4 fragen, woher die leere Liste kam",
+        "Bei Frame 0, dort ist der Fehler entstanden",
+        "Bei Frame 5, weil `call_once` die Funktion aufgerufen hat",
+        "Bei Frame 2, die Standardbibliothek hat einen Fehler in `panicking.rs`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Frames 0 bis 2 sind die Panic-Maschinerie der Standardbibliothek, die korrekt arbeitet. Der erste Frame mit deinem Crate-Namen ist der Startpunkt. Die Ursache steckt oft eine Ebene höher: `mittelwert` teilt durch die Länge, aber `main` hat nicht geprüft, ob die Liste leer ist. `RUST_BACKTRACE=full` zeigt zusätzlich Adressen und die sonst ausgeblendeten Frames des Laufzeitsystems.",
+      "begruendungen": [
+        "Richtig.",
+        "Frame 0 ist die Stelle, an der das Abwickeln beginnt, nicht die Ursache.",
+        "Das ist der Start des Programms durch das Laufzeitsystem.",
+        "`panic_const_div_by_zero` meldet nur, was in Frame 3 passiert ist."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "unwind oder abort",
+      "text": "Standardmässig wird bei einem Panic der Stack **abgewickelt** (unwinding): `Drop` läuft für alle lebenden Werte, und andere Threads können den Panic mit `JoinHandle::join` bemerken. Mit `panic = \"abort\"` im Profil beendet sich der Prozess sofort über `abort()`. Das spart Code für das Abwickeln und ist auf Mikrocontrollern mit `no_std` der Normalfall.\n\nNach `abort` sendet das Betriebssystem `SIGABRT`. Ist es so eingerichtet, schreibt es einen **Core Dump** (Speicherabbild des Prozesses), den man nachträglich mit `rust-gdb ./app core` untersucht. Der Exit-Code ist dann 134 (128 + Signal 6) statt 101."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "core-dump",
+      "frage": "Ein Release-Build mit `panic = \"abort\"` und `debug = true` ist abgestürzt. Was zeigt der Core Dump?",
+      "terminal": {
+        "befehl": "rust-gdb -q -batch -ex bt target/release/dbg core",
+        "ausgabe": [
+          "Program terminated with signal SIGABRT, Aborted.",
+          "#0  __pthread_kill_implementation (no_tid=0, signo=6, threadid=<optimized out>) at ./nptl/pthread_kill.c:44",
+          "#4  0x00007fa7eca288ff in __GI_abort () at ./stdlib/abort.c:79",
+          "#5  0x000055d0ea952f7a in std::sys::pal::unix::abort_internal () at library/std/src/sys/pal/unix/mod.rs:303",
+          "#8  0x000055d0ea92be3a in panic_abort::__rust_start_panic () at library/panic_abort/src/lib.rs:50",
+          "#15 0x000055d0ea9676f9 in core::panicking::panic_const::panic_const_div_by_zero () at library/core/src/panicking.rs:175",
+          "#16 0x000055d0ea92b64b in dbg::mittelwert (werte=...) at src/main.rs:3",
+          "#17 dbg::main () at src/main.rs:13"
+        ]
+      },
+      "optionen": [
+        "Frame 16: Derselbe Fehler wie im Debug-Build. `mittelwert` wurde in `main` eingebettet, darum hat Frame 17 keine eigene Adresse",
+        "Die C-Bibliothek ist in `pthread_kill` abgestürzt",
+        "Der Core Dump ist unbrauchbar, weil das Binary optimiert ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Weg ist länger, weil `panic_abort` über `abort()` zum Signal führt, aber der erste eigene Frame bleibt der Einstieg. Dank `debug = true` kennt gdb Datei und Zeile auch im optimierten Build. Zeilen ohne Adresse wie `#17 dbg::main ()` stehen für eingebettete (inlined) Funktionen. `werte=...` deutet auf einen Wert, den man mit `frame 16` und `print werte` genauer ansehen kann, sofern er nicht wegoptimiert ist.",
+      "begruendungen": [
+        "Richtig.",
+        "`pthread_kill` sendet nur das Signal, das `abort()` angefordert hat.",
+        "Mit Debug-Informationen sind auch optimierte Builds gut analysierbar."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "dbg-makro",
+      "frage": "Was gibt dieses Programm bei `./dbg 3,6` aus?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "fn main() {",
+          "    let roh = std::env::args().nth(1).unwrap_or_default();",
+          "    let werte = lade_messwerte(&roh);",
+          "    let m = dbg!(mittelwert(&werte));",
+          "    println!(\"Mittelwert: {m}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Auf stderr `[src/main.rs:4:13] mittelwert(&werte) = 4`, dann auf stdout `Mittelwert: 4`",
+        "Nur `Mittelwert: 4`, weil `dbg!` im Debug-Build stumm ist",
+        "Compilerfehler: `dbg!` gibt nichts zurück",
+        "Auf stdout `mittelwert(&werte) = 4.5`, dann `Mittelwert: 4`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`dbg!` gibt Datei, Zeile, den Ausdruck als Text und seinen Wert mit `{:#?}` auf **stderr** aus und gibt den Wert danach zurück. Man kann es also mitten in einen Ausdruck setzen. Es ist auch im Release-Build aktiv. Darum gehört es nicht in eingecheckten Code. Clippy findet Überbleibsel mit dem Lint `dbg_macro`.",
+      "begruendungen": [
+        "Richtig.",
+        "`dbg!` ist in allen Profilen aktiv.",
+        "`dbg!` gibt den Wert des Ausdrucks zurück.",
+        "Die Ausgabe geht auf stderr, und `u32`-Division schneidet ab: 9 / 2 = 4."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "tracing und log statt println!",
+      "text": "Für Diagnose, die im Code bleiben soll, nutzt man eine Logging-Fassade. **log** bietet Makros wie `info!` und `warn!`, ein separates Backend (z. B. `env_logger`) entscheidet über die Ausgabe. **tracing** geht weiter: Es kennt **Spans** (Zeitabschnitte mit Kontext, etwa „Anfrage 42“) und strukturierte Felder, die `tracing-subscriber` ausgibt. Gefiltert wird zur Laufzeit, z. B. mit `RUST_LOG=sensor=debug`.\n\nAuf Mikrocontrollern übernimmt **defmt** diese Rolle. Es überträgt nur Indizes statt Formatstrings und ist dadurch sehr klein (Phase 9)."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "tracing",
+      "frage": "Ergänze: Die Funktion soll automatisch einen Span mit ihren Argumenten öffnen, und das Ergebnis wird auf Stufe Debug protokolliert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use tracing::{debug, instrument};",
+          "",
+          "#[{{?}}]",
+          "fn mittelwert(werte: &[u32]) -> u32 {",
+          "    let m = werte.iter().sum::<u32>() / werte.len() as u32;",
+          "    {{?}}!(m, \"Mittelwert berechnet\");",
+          "    m",
+          "}",
+          "",
+          "fn main() {",
+          "    tracing_subscriber::fmt::init();",
+          "    // ...",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["instrument"] },
+        { "loesungen": ["debug"] }
+      ],
+      "auswahl": ["instrument", "debug", "dbg", "println", "test"],
+      "erklaerung": "`#[instrument]` erzeugt einen Span mit dem Funktionsnamen und den Argumenten als Feldern. Alle Ereignisse darin tragen diesen Kontext. `debug!(m, \"…\")` speichert `m` als strukturiertes Feld, nicht bloss als Text. `tracing_subscriber::fmt::init()` gibt alles auf der Konsole aus und filtert nach `RUST_LOG`. Ohne Subscriber kosten die Makros fast nichts."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "abort-wann",
+      "frage": "Was ändert sich, wenn du im Profil `panic = \"abort\"` setzt?",
+      "optionen": [
+        "Das Binary wird kleiner, weil der Code zum Abwickeln entfällt",
+        "`Drop` läuft nach einem Panic nicht mehr, offene Dateien werden also nicht geleert",
+        "`std::panic::catch_unwind` kann einen Panic nicht mehr abfangen",
+        "Panics werden zu Compilerfehlern"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "`abort` ist eine Abwägung: kleiner und einfacher, aber ohne Aufräumen und ohne die Möglichkeit, einen Panic an einer Grenze (z. B. FFI oder ein Worker-Thread) aufzufangen. In Server-Software bleibt man meist bei `unwind`. In Firmware ohne Betriebssystem ruft ein Panic den `#[panic_handler]` auf, der z. B. das Gerät neu startet.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Gepufferte Daten in einem `BufWriter` gehen verloren.",
+        "Richtig. Der Prozess endet sofort.",
+        "Panics sind ein Laufzeitereignis. Das Profil ändert nur, wie darauf reagiert wird."
+      ]
+    }
+  ],
+  "praxis": "In Produktion gehören `RUST_BACKTRACE=1` und strukturiertes Logging mit tracing zur Grundausstattung. Für Dienste, die mit `panic = \"abort\"` laufen, richtest du Core Dumps ein und archivierst die Debug-Informationen pro Release. Im Review fallen dir `unwrap()` an Stellen auf, an denen Eingaben von aussen kommen, und vergessene `dbg!` (Clippy-Lint `dbg_macro`).",
+  "labor": {
+    "titel": "Panic, Backtrace, Core Dump",
+    "anleitung": "Baue ein Programm, das bei leerer Eingabe durch null teilt. Vergleiche Panic-Meldung, Backtrace und einen Core Dump im Release-Build mit `panic = \"abort\"`.",
+    "befehle": [
+      "cargo run -- ''",
+      "RUST_BACKTRACE=1 cargo run -- ''",
+      "printf '[profile.release]\\npanic = \"abort\"\\ndebug = true\\n' >> Cargo.toml",
+      "ulimit -c unlimited && cargo build --release && ./target/release/dbg ''",
+      "coredumpctl gdb dbg  # oder: rust-gdb target/release/dbg core"
+    ],
+    "beobachtung": "Der Exit-Code wechselt von 101 auf 134. Im Core Dump findest du hinter den Frames von `abort` und `panic_abort` dieselbe Stelle `dbg::mittelwert` wie im Backtrace."
+  },
+  "begriffe": [
+    {
+      "begriff": "Backtrace",
+      "englisch": "backtrace",
+      "erklaerung": "Liste der aktiven Funktionsaufrufe zum Zeitpunkt eines Fehlers, vom innersten zum äussersten."
+    },
+    {
+      "begriff": "Abwickeln",
+      "englisch": "unwinding",
+      "erklaerung": "Nach einem Panic werden die Stack-Frames nacheinander verlassen, dabei läuft `Drop` für alle lebenden Werte."
+    },
+    {
+      "begriff": "Core Dump",
+      "englisch": "core dump",
+      "erklaerung": "Abbild des Prozessspeichers beim Absturz, das sich nachträglich im Debugger untersuchen lässt."
+    },
+    {
+      "begriff": "Span",
+      "englisch": "span",
+      "erklaerung": "Zeitabschnitt mit Kontextfeldern in `tracing`, z. B. die Bearbeitung einer Anfrage."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Unrecoverable Errors with panic!",
+      "url": "https://doc.rust-lang.org/book/ch09-01-unrecoverable-errors-with-panic.html"
+    },
+    {
+      "titel": "tracing auf docs.rs",
+      "url": "https://docs.rs/tracing"
+    }
+  ]
+}

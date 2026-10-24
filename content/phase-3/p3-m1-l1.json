@@ -1,0 +1,267 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m1-l1",
+  "phase": 3,
+  "modul": "3.1 Traits und Generics für Fortgeschrittene",
+  "titel": "Assoziierte Typen und Blanket Implementations",
+  "lernziele": [
+    "Entscheiden, wann ein assoziierter Typ und wann ein generischer Parameter passt",
+    "Assoziierte Konstanten, Default-Methoden und Supertraits einsetzen",
+    "Blanket Implementations lesen und ihre Folgen für eigene Impls verstehen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "zwei-iterator-impls",
+      "frage": "Ein Zähler soll mal `u32`, mal `u64` liefern. Was meldet der Compiler?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "struct Zaehler { n: u32 }",
+          "",
+          "impl Iterator for Zaehler {",
+          "    type Item = u32;",
+          "    fn next(&mut self) -> Option<u32> { self.n += 1; Some(self.n) }",
+          "}",
+          "",
+          "impl Iterator for Zaehler {",
+          "    type Item = u64;",
+          "    fn next(&mut self) -> Option<u64> { None }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`error[E0119]: conflicting implementations of trait `Iterator` for type `Zaehler``",
+        "Nichts, der Aufrufer wählt mit `next::<u64>()` die Variante",
+        "Nichts, der Compiler leitet `Item` aus dem Kontext ab",
+        "`error[E0277]`: `Zaehler` ist kein Iterator"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Item` ist ein **assoziierter Typ** (*associated type*): Er ist ein *Ausgang* der Implementierung, nicht ein Eingang. Für jeden Typ gibt es höchstens eine `impl Iterator`, und damit genau einen `Item`-Typ. Darum kann `for x in zaehler` den Typ von `x` eindeutig bestimmen, ohne Annotation.",
+      "begruendungen": [
+        "Richtig. Ein Typ kann `Iterator` nur einmal implementieren.",
+        "`next` hat keinen Typparameter. Mehrere Varianten pro Typ ginge nur mit einem generischen Trait wie `From<T>`.",
+        "Es gibt keine Auswahl zwischen Impls über den Rückgabetyp, die zweite Impl ist schon für sich ein Konflikt.",
+        "Beide Impls sind für sich vollständig. Das Problem ist, dass es zwei sind."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Eingang oder Ausgang?",
+      "text": "Ein **generischer Parameter** am Trait (`trait From<T>`) erlaubt beliebig viele Impls pro Typ: `u64` implementiert `From<u8>`, `From<u16>`, `From<u32>`. Der Aufrufer bestimmt, welche gemeint ist.\n\nEin **assoziierter Typ** (`type Item;`) legt die Impl eindeutig fest. Er passt, wenn der Typ durch den Implementierer bestimmt ist: das Element eines Iterators, der Fehlertyp eines Treibers (`type Error;` in embedded-hal), das Ergebnis von `Add` (`type Output`).\n\nFaustregel: Kann es für denselben Typ sinnvoll mehrere Varianten geben? Dann Parameter, sonst assoziierter Typ.",
+      "tabelle": {
+        "kopf": ["", "Generischer Parameter", "Assoziierter Typ"],
+        "zeilen": [
+          ["Beispiel", "`From<T>`, `PartialEq<Rhs>`", "`Iterator::Item`, `Deref::Target`"],
+          ["Impls pro Typ", "beliebig viele", "höchstens eine"],
+          ["Wer wählt?", "der Aufrufer", "der Implementierer"],
+          ["In Bounds", "`T: From<u8>`", "`I: Iterator<Item = u8>`"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "assoziierte-konstante",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Sensor {",
+          "    const NAME: &'static str;",
+          "    const MAX_ROH: u16 = 4095;",
+          "    fn roh(&self) -> u16;",
+          "    fn prozent(&self) -> u32 {",
+          "        self.roh() as u32 * 100 / Self::MAX_ROH as u32",
+          "    }",
+          "}",
+          "",
+          "struct Ntc;",
+          "impl Sensor for Ntc {",
+          "    const NAME: &'static str = \"NTC\";",
+          "    const MAX_ROH: u16 = 1023;",
+          "    fn roh(&self) -> u16 { 512 }",
+          "}",
+          "",
+          "fn main() { println!(\"{} {}\", Ntc::NAME, Ntc.prozent()); }"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Assoziierte Konstante ohne Wert: Jede Impl muss sie angeben." },
+          { "zeile": 3, "text": "Mit Standardwert, eine Impl darf ihn überschreiben." },
+          { "zeile": 5, "text": "Default-Methode: nutzt die Pflichtmethode `roh` und die Konstante." }
+        ]
+      },
+      "optionen": ["`NTC 50`", "`NTC 12`", "Compilerfehler: `MAX_ROH` hat schon einen Wert", "`NTC 0`"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "**Assoziierte Konstanten** (*associated constants*) gehören zum Typ, nicht zu einem Wert, und sind zur Übersetzungszeit bekannt. `Self::MAX_ROH` in der **Default-Methode** greift auf den Wert der jeweiligen Impl zu, hier 1023: 512 · 100 / 1023 = 50. So beschreiben Embedded-Treiber oft Eigenschaften eines Chips (Auflösung, Adresse) ohne Laufzeitkosten.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre mit dem Standardwert 4095 gerechnet. Die Impl überschreibt ihn aber.",
+        "Ein Standardwert im Trait darf in der Impl überschrieben werden, genau wie eine Default-Methode.",
+        "512 · 100 wird in `u32` gerechnet, bevor geteilt wird, darum geht nichts verloren."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Bounds, damit die Funktion für alle vergleichbaren Typen kompiliert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn groesser<T>(a: T, b: T) -> T",
+          "where",
+          "    T: {{?}},",
+          "{",
+          "    if a > b { a } else { b }",
+          "}",
+          "",
+          "fn summe<I>(werte: I) -> u32",
+          "where",
+          "    I: Iterator<{{?}} = u32>,",
+          "{",
+          "    werte.sum()",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["PartialOrd"] }, { "loesungen": ["Item"] }],
+      "auswahl": ["PartialOrd", "Item", "Display", "Output", "Copy"],
+      "erklaerung": "Ohne Bound meldet rustc `error[E0369]: binary operation `>` cannot be applied to type `T`` und schlägt `PartialOrd` vor. Eine **where-Klausel** sammelt die Bounds unter der Signatur und hält lange Signaturen lesbar. `Iterator<Item = u32>` schränkt den assoziierten Typ ein."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "tostring-konflikt",
+      "frage": "Du willst für `Temperatur` sowohl `Display` als auch `ToString` selbst implementieren. Was sagt dir die Meldung?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl fmt::Display for Temperatur { /* … */ }",
+          "impl ToString for Temperatur { /* … */ }"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0119]: conflicting implementations of trait `ToString` for type `Temperatur`",
+          " --> src/main.rs:6:1",
+          "  |",
+          "6 | impl ToString for Temperatur {",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: conflicting implementation in crate `alloc`:",
+          "          - impl<T> ToString for T",
+          "            where T: std::fmt::Display, T: ?Sized;"
+        ]
+      },
+      "optionen": [
+        "Die Standardbibliothek hat eine **Blanket Implementation**: Jeder Typ mit `Display` bekommt `ToString` automatisch, eine zweite Impl ist ein Konflikt",
+        "`ToString` darf man für eigene Typen grundsätzlich nicht implementieren",
+        "Die Reihenfolge der beiden Impls ist falsch",
+        "`Temperatur` muss zuerst `Debug` implementieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine **Blanket Implementation** implementiert einen Trait für alle Typen, die eine Bedingung erfüllen: `impl<T: Display + ?Sized> ToString for T`. Das ist mächtig, aber endgültig: Niemand kann für einen solchen Typ eine eigene Impl ergänzen. Die Lösung ist einfach: nur `Display` implementieren, `to_string()` gibt es dann gratis.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `Display` dürfte man es. Es ist der Konflikt mit der Blanket Impl, der stört.",
+        "Die Reihenfolge von Items spielt in Rust keine Rolle.",
+        "`Debug` hat mit `ToString` nichts zu tun."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "supertrait",
+      "frage": "Was passiert beim Übersetzen?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::fmt::Debug;",
+          "",
+          "trait Geraet: Debug {",
+          "    fn name(&self) -> String;",
+          "}",
+          "",
+          "struct Pumpe;",
+          "",
+          "impl Geraet for Pumpe {",
+          "    fn name(&self) -> String { \"Pumpe\".into() }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`error[E0277]: `Pumpe` doesn't implement `Debug``",
+        "Kompiliert, `Geraet` erbt eine Debug-Implementierung",
+        "Kompiliert, `Debug` wird automatisch abgeleitet",
+        "`error[E0119]`: doppelte Implementierung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`trait Geraet: Debug` macht `Debug` zum **Supertrait** (*supertrait*): Wer `Geraet` implementiert, muss auch `Debug` implementieren. Im Gegenzug dürfen Default-Methoden und generischer Code mit `T: Geraet` `{:?}` verwenden. Das ist keine Vererbung von Code wie in C++, sondern nur eine Voraussetzung. rustc schlägt `#[derive(Debug)]` vor.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Supertrait liefert keine Implementierung, er verlangt eine.",
+        "`derive` muss man immer selbst hinschreiben.",
+        "Es gibt nur eine Impl von `Geraet`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welcher Aufruf kompiliert **nicht**?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Beschreibe { fn beschreibe(&self) -> String; }",
+          "",
+          "impl<T: Display> Beschreibe for T {",
+          "    fn beschreibe(&self) -> String { format!(\"<{self}>\") }",
+          "}",
+          "",
+          "struct Roh(u8);"
+        ]
+      },
+      "optionen": ["`Roh(1).beschreibe()`", "`42.beschreibe()`", "`\"ok\".beschreibe()`", "`3.5_f32.beschreibe()`"],
+      "korrekt": 0,
+      "erklaerung": "Die Blanket Impl gilt nur für Typen mit `Display`. Zahlen und `&str` haben es, `Roh` nicht: rustc meldet `error[E0599]` und verweist auf den unerfüllten Bound `Roh: std::fmt::Display`. Blanket Impls sind in Bibliotheken häufig, etwa `impl<T: Read + ?Sized> Read for &mut T` – deshalb kann man oft `&mut reader` statt `reader` übergeben.",
+      "begruendungen": [
+        "Richtig. `Roh` implementiert `Display` nicht.",
+        "`i32` implementiert `Display`.",
+        "`str` implementiert `Display`.",
+        "`f32` implementiert `Display`."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Sprachmittel ihrem Zweck zu.",
+      "paare": [
+        { "links": "`type Error;` im Trait", "rechts": "Der Implementierer legt genau einen Typ fest" },
+        { "links": "`trait Spi<Word>`", "rechts": "Ein Typ kann den Trait für mehrere Wortbreiten implementieren" },
+        { "links": "`trait Treiber: Debug`", "rechts": "Jede Impl muss zusätzlich `Debug` haben" },
+        { "links": "`impl<T: Display> X for T`", "rechts": "Ein Trait für alle Typen mit einer Eigenschaft" },
+        { "links": "`fn reset(&mut self) { … }` im Trait", "rechts": "Default-Methode, überschreibbar" }
+      ],
+      "erklaerung": "Genau diese Mischung findet man in `embedded-hal`: assoziierte Fehlertypen über `ErrorType`, generische Wortbreiten bei SPI und Supertraits, die gemeinsame Voraussetzungen ausdrücken. Mehr dazu in Phase 7."
+    }
+  ],
+  "praxis": "Beim Lesen von Bibliotheks-Dokumentation auf docs.rs lohnt sich ein Blick auf den Abschnitt „Blanket Implementations“ eines Typs: Dort steht, welche Traits er automatisch mitbringt (`ToString`, `Into`, `Borrow` …). Beim Entwurf eigener Traits ist die Frage „assoziierter Typ oder Parameter?“ eine der wichtigsten API-Entscheidungen, denn sie lässt sich später nur mit einem Breaking Change ändern.",
+  "labor": {
+    "titel": "Ein Sensor-Trait entwerfen",
+    "anleitung": "Lege ein Projekt an und schreibe einen Trait `Sensor` mit assoziiertem Typ `Messwert`, assoziierter Konstante `EINHEIT` und einer Default-Methode `beschreibe()`. Implementiere ihn für zwei Typen. Ergänze danach eine Blanket Impl `impl<S: Sensor> Protokoll for S` und versuche, `Protokoll` zusätzlich für einen der beiden Typen von Hand zu implementieren.",
+    "befehle": [
+      "cargo new sensor-traits && cd sensor-traits",
+      "cargo build",
+      "rustc --explain E0119",
+      "cargo doc --open"
+    ],
+    "beobachtung": "Die Handimplementierung scheitert mit E0119. In `cargo doc` siehst du bei jedem Sensor-Typ unter „Blanket Implementations“ die automatisch gewonnenen Traits."
+  },
+  "begriffe": [
+    { "begriff": "Assoziierter Typ", "englisch": "associated type", "erklaerung": "Typ, den jede Implementierung eines Traits genau einmal festlegt, z. B. `Iterator::Item`." },
+    { "begriff": "Assoziierte Konstante", "englisch": "associated constant", "erklaerung": "Konstante, die zu einem Trait oder Typ gehört und zur Übersetzungszeit bekannt ist." },
+    { "begriff": "Supertrait", "englisch": "supertrait", "erklaerung": "Trait, den ein anderer voraussetzt: `trait A: B` verlangt `B` für jede Impl von `A`." },
+    { "begriff": "Blanket Implementation", "englisch": "blanket implementation", "erklaerung": "Generische Impl für alle Typen, die einen Bound erfüllen, z. B. `impl<T: Display> ToString for T`." },
+    { "begriff": "where-Klausel", "englisch": "where clause", "erklaerung": "Schreibweise für Trait-Bounds nach der Signatur, besser lesbar bei vielen Bounds." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Advanced Traits", "url": "https://doc.rust-lang.org/book/ch20-02-advanced-traits.html" },
+    { "titel": "Rust Reference: Associated Items", "url": "https://doc.rust-lang.org/reference/items/associated-items.html" }
+  ]
+}

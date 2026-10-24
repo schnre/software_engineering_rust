@@ -1,0 +1,183 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m3-l2",
+  "phase": 11,
+  "modul": "11.3 Komponenten, Plugins und Pipelines",
+  "titel": "Pipes & Filters mit Iteratoren, Kanälen und Streams",
+  "lernziele": [
+    "Eine Verarbeitungskette als Iterator-Pipeline schreiben",
+    "Pipelinestufen über begrenzte Kanäle entkoppeln",
+    "Backpressure in Pipelines erkennen und gezielt einsetzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "ADC-Rohwerte sollen gefiltert und in Volt umgerechnet werden. Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let rohwerte = [512u16, 4095, 498, 0, 530];",
+          "rohwerte",
+          "    .iter()",
+          "    .filter(|&&r| r != 0 && r != 4095)",
+          "    .map(|&r| r as f32 * 3.3 / 4095.0)",
+          "    .inspect(|u| println!(\"{u:.3} V\"));"
+        ]
+      },
+      "optionen": [
+        "Nichts. Iteratoren sind faul (lazy), ohne konsumierenden Aufruf wird keine Stufe ausgeführt. Der Compiler warnt mit `unused_must_use`",
+        "Drei Spannungen, weil 0 und 4095 herausgefiltert werden",
+        "Fünf Spannungen",
+        "Einen Kompilierfehler wegen `&&r`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc meldet: „iterators are lazy and do nothing unless consumed“. Erst `for`, `collect`, `sum` oder `for_each` zieht Werte durch die Kette. Das ist der Kern einer **Pull-Pipeline**: Der Verbraucher fordert an, jede Stufe holt sich nur so viel, wie nötig ist. Kein Zwischenpuffer, und der Compiler verschmilzt die Stufen meist zu einer einzigen Schleife.",
+      "begruendungen": [
+        "Richtig, das ist die echte Warnung von rustc 1.97.",
+        "Das wäre die Ausgabe mit `.for_each(drop)` oder einer `for`-Schleife am Ende.",
+        "Der Filter würde zwei Werte entfernen, aber er läuft gar nicht.",
+        "`|&&r|` ist korrekt: `filter` übergibt `&&u16`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Drei Arten von Pipelines in Rust",
+      "text": "**Pipes & Filters** (Röhren und Filter) zerlegt Verarbeitung in unabhängige Stufen. In Rust gibt es drei typische Formen:\n\n- **Iterator-Kette**: alles in einem Thread, kein Puffer, sehr schnell. Gut für Berechnungen auf vorhandenen Daten.\n- **Threads oder Tasks mit Kanälen**: jede Stufe läuft parallel, ein Kanal (`std::sync::mpsc::sync_channel`, `tokio::sync::mpsc`, Embassy `Channel`) verbindet die Stufen. Gut, wenn Stufen unterschiedlich lange brauchen oder auf I/O warten.\n- **`futures::Stream`**: das asynchrone Gegenstück zum Iterator, mit Adaptern wie `map`, `filter`, `buffered` aus `StreamExt`.\n\nIn allen drei Formen besitzt jede Stufe die Daten, die sie gerade verarbeitet. Datenrennen zwischen Stufen sind damit ausgeschlossen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Erzeuger-Thread schickt fünf Blöcke über `mpsc::sync_channel(2)`. Der Verbraucher braucht 50 ms pro Block. Was zeigt die Ausgabe?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let (tx, rx) = mpsc::sync_channel::<Vec<i16>>(2);",
+          "let erzeuger = thread::spawn(move || {",
+          "    for i in 0..5 {",
+          "        tx.send(vec![i; 4]).unwrap();",
+          "        println!(\"gesendet {i}\");",
+          "    }",
+          "});",
+          "for block in rx {",
+          "    thread::sleep(Duration::from_millis(50));",
+          "    println!(\"verarbeitet {}\", block[0]);",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "gesendet 0",
+          "gesendet 1",
+          "gesendet 2",
+          "verarbeitet 0",
+          "gesendet 3",
+          "verarbeitet 1",
+          "gesendet 4",
+          "verarbeitet 2",
+          "verarbeitet 3",
+          "verarbeitet 4"
+        ]
+      },
+      "optionen": [
+        "Nach dem Vorlauf blockiert `send`, bis der Verbraucher Platz schafft. Der Erzeuger läuft im Takt des Verbrauchers, und nichts geht verloren",
+        "Der Erzeuger verwirft Blöcke, wenn der Kanal voll ist",
+        "Erzeuger und Verbraucher laufen völlig unabhängig, der Puffer wächst beliebig",
+        "Der Kanal verarbeitet Blöcke in umgekehrter Reihenfolge"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist **Backpressure**: Ein begrenzter Kanal überträgt den Druck der langsamsten Stufe zurück an die Quelle. Der Speicherbedarf bleibt beschränkt. Mit `mpsc::channel()` (unbegrenzt) würde der Erzeuger einfach weiterlaufen und der Speicher bei Dauerlast wachsen.",
+      "begruendungen": [
+        "Richtig, so lief es auf dem Testrechner.",
+        "`send` wartet, es verwirft nichts.",
+        "`sync_channel(2)` hat eine feste Grenze.",
+        "Kanäle sind FIFO."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was passiert an einer vollen Stufe? Ordne die Strategie zu.",
+      "paare": [
+        { "links": "Warten (`send().await`)", "rechts": "Der Erzeuger wird gebremst, nichts geht verloren" },
+        { "links": "Ältestes verwerfen", "rechts": "Neueste Werte zählen, z. B. Live-Anzeige" },
+        { "links": "Neues verwerfen (`try_send` scheitert)", "rechts": "Der Erzeuger darf nie blockieren, z. B. in einem Interrupt" },
+        { "links": "Unbegrenzter Puffer", "rechts": "Kurzfristig bequem, bei Dauerlast wächst der Speicher" }
+      ],
+      "erklaerung": "In einer ISR darf man nie warten. Dort nimmt man `try_send` und zählt verlorene Werte in einer Statistik. Für Steuerbefehle ist Warten oder ein Fehler an den Absender richtig, für Messwert-Anzeigen ist Verwerfen oft akzeptabel."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was macht diese asynchrone Pipeline?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use futures::stream::{self, StreamExt};",
+          "",
+          "let ergebnisse: Vec<Bericht> = stream::iter(geraete_ids)",
+          "    .map(|id| lese_status(id))",
+          "    .buffered(4)",
+          "    .filter_map(|r| async move { r.ok() })",
+          "    .collect()",
+          "    .await;"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "`lese_status` ist eine `async fn` und liefert einen Future" },
+          { "zeile": 5, "text": "Höchstens vier Futures laufen gleichzeitig" }
+        ]
+      },
+      "optionen": [
+        "Sie fragt Geräte ab, mit höchstens vier gleichzeitigen Anfragen, behält die Reihenfolge bei und verwirft Fehler",
+        "Sie fragt alle Geräte gleichzeitig ab, egal wie viele es sind",
+        "Sie fragt die Geräte strikt nacheinander ab",
+        "Sie bricht beim ersten Fehler ab"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`buffered(n)` begrenzt die Nebenläufigkeit, das ist Backpressure für asynchrone Pipelines. Ohne Grenze würden bei 10 000 Geräten 10 000 Verbindungen gleichzeitig geöffnet. `buffer_unordered(n)` liefert Ergebnisse in Ankunftsreihenfolge, wenn die Reihenfolge egal ist.",
+      "begruendungen": [
+        "Richtig.",
+        "`buffered(4)` begrenzt auf vier gleichzeitig.",
+        "Bis zu vier Anfragen laufen parallel.",
+        "`filter_map` mit `r.ok()` verwirft Fehler und läuft weiter."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wann ist eine Iterator-Kette besser als Threads mit Kanälen?",
+      "optionen": [
+        "Wenn die Stufen kurze Berechnungen ohne Warten auf I/O sind. Kanäle kosten Synchronisation und Kopien, die Iterator-Kette wird zu einer Schleife",
+        "Immer, Kanäle sind veraltet",
+        "Nie, weil Iteratoren nicht parallel laufen können",
+        "Nur in `no_std`-Code"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Parallelität lohnt sich, wenn Stufen lange brauchen, blockieren oder auf mehrere Kerne verteilt werden sollen. Für reine Datenparallelität über eine Kette gibt es `rayon` mit `par_iter()` (Phase 5), das eine Iterator-Kette ohne eigene Kanäle auf alle Kerne verteilt.",
+      "begruendungen": [
+        "Richtig.",
+        "Kanäle sind das richtige Mittel bei unabhängigen, unterschiedlich schnellen Stufen.",
+        "Mit `rayon` laufen Iterator-Ketten parallel.",
+        "Iteratoren sind auch mit `std` die erste Wahl für Berechnungen."
+      ]
+    }
+  ],
+  "praxis": "Pipelines findest du in Signalverarbeitung (ADC → Filter → Merkmale → Entscheidung), Logverarbeitung und Netzwerkdiensten. Zeichne die Stufen mit ihrer Rate und ihren Puffern auf. Die langsamste Stufe bestimmt den Durchsatz, und an jedem Puffer muss klar sein, was bei Überlast passiert.",
+  "labor": {
+    "titel": "Backpressure beobachten",
+    "anleitung": "Baue das Beispiel mit `sync_channel(2)` nach. Ersetze es dann durch `mpsc::channel()` und vergleiche die Ausgabe.",
+    "befehle": [
+      "cargo new pipeline && cd pipeline",
+      "cargo run"
+    ],
+    "beobachtung": "Mit dem unbegrenzten Kanal erscheinen alle `gesendet`-Zeilen sofort, die Verarbeitung hinkt hinterher. Bei einer endlosen Quelle würde der Speicher stetig wachsen."
+  },
+  "begriffe": [
+    { "begriff": "Pipes & Filters", "englisch": "pipes and filters", "erklaerung": "Verarbeitung als Kette unabhängiger Stufen, die über Datenströme verbunden sind." },
+    { "begriff": "Lazy Evaluation", "englisch": "lazy evaluation", "erklaerung": "Berechnung erst bei Bedarf. Rust-Iteratoren tun nichts, bis sie konsumiert werden." },
+    { "begriff": "Stream", "englisch": "stream", "erklaerung": "Asynchrone Folge von Werten, das async-Gegenstück zum Iterator." },
+    { "begriff": "Backpressure", "englisch": "backpressure", "erklaerung": "Eine überlastete Stufe bremst ihre Quelle, statt unbegrenzt zu puffern." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Processing a Series of Items with Iterators", "url": "https://doc.rust-lang.org/book/ch13-02-iterators.html" },
+    { "titel": "std::sync::mpsc::sync_channel", "url": "https://doc.rust-lang.org/std/sync/mpsc/fn.sync_channel.html" },
+    { "titel": "futures::stream::StreamExt", "url": "https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html" }
+  ]
+}

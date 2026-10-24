@@ -1,0 +1,176 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m5-l2",
+  "phase": 11,
+  "modul": "11.5 Automotive und Robotik",
+  "titel": "ROS 2 mit Rust und Zenoh",
+  "lernziele": [
+    "Nodes, Topics, Services und Actions in ROS 2 unterscheiden",
+    "Einen ROS-2-Node mit rclrs lesen und die Alternative r2r einordnen",
+    "Zenoh als in Rust geschriebene Middleware für ROS 2 kennen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Grundbegriffe von ROS 2 zu.",
+      "paare": [
+        { "links": "Node", "rechts": "Ein Programmbaustein mit einer Aufgabe, z. B. Lidar-Treiber oder Planer" },
+        { "links": "Topic", "rechts": "Benannter Publish-Subscribe-Kanal mit festem Nachrichtentyp, z. B. `/scan`" },
+        { "links": "Service", "rechts": "Anfrage und Antwort, z. B. „Karte speichern“" },
+        { "links": "Action", "rechts": "Lang laufender Auftrag mit Zwischenständen und Abbruch, z. B. „fahre zu Punkt X“" }
+      ],
+      "erklaerung": "**ROS 2** (*Robot Operating System*) ist kein Betriebssystem, sondern ein Framework mit Middleware, Werkzeugen und vielen Paketen. Architektonisch kombiniert es Stile aus dieser Phase: Topics sind Publish-Subscribe, Services sind Client-Server, Nodes sind lose gekoppelte Komponenten."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Rust-Client-Bibliotheken für ROS 2 gibt es?",
+      "optionen": [
+        "`rclrs` aus dem Projekt ros2-rust, das sich als offizielle Rust-Clientbibliothek etabliert, und `r2r`, ein eigenständiges Crate mit async-API, das mit `cargo build` gegen eine ROS-Installation baut",
+        "Es gibt keine, Rust-Code muss über Python angebunden werden",
+        "Nur `rclcpp`, das automatisch auch Rust unterstützt",
+        "Rust kann nur über eine Bridge mit ROS 1 sprechen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beide nutzen die C-Bibliothek `rcl` von ROS 2 über FFI und erzeugen Rust-Typen aus den Nachrichtendefinitionen. `rclrs` integriert sich in die ROS-Werkzeuge (colcon) und unterstützt aktuelle Distributionen. `r2r` verzichtet auf Callbacks zugunsten von Futures und Streams. Daneben gibt es `ros2-client`, das ganz ohne die C-Bibliotheken direkt auf RustDDS aufsetzt (nächste Lektion).",
+      "begruendungen": [
+        "Richtig.",
+        "Rust spricht ROS 2 direkt an.",
+        "`rclcpp` ist die C++-Bibliothek.",
+        "Die Bibliotheken zielen auf ROS 2."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was macht dieser Node mit `rclrs`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use rclrs::*;",
+          "",
+          "fn main() -> Result<(), RclrsError> {",
+          "    let context = Context::default_from_env()?;",
+          "    let mut executor = context.create_basic_executor();",
+          "    let node = executor.create_node(\"temperatur_monitor\")?;",
+          "",
+          "    let _sub = node.create_subscription(",
+          "        \"temperatur\",",
+          "        |msg: example_interfaces::msg::Float64| {",
+          "            if msg.data > 80.0 {",
+          "                println!(\"Warnung: {:.1} Grad\", msg.data);",
+          "            }",
+          "        },",
+          "    )?;",
+          "",
+          "    executor.spin(SpinOptions::default()).first_error()",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Liest ROS-Argumente und Umgebungsvariablen, z. B. `ROS_DOMAIN_ID`" },
+          { "zeile": 17, "text": "Der Executor ruft Callbacks auf, sobald Nachrichten eintreffen" }
+        ]
+      },
+      "optionen": [
+        "Ein Node abonniert das Topic `temperatur` und gibt eine Warnung aus, wenn ein Wert über 80 liegt. Der Executor verarbeitet eintreffende Nachrichten, bis das Programm beendet wird",
+        "Der Node veröffentlicht Temperaturwerte",
+        "Der Node bietet einen Service `temperatur` an",
+        "Der Code liest einen Temperatursensor über I2C"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Muster ist in allen ROS-2-Bibliotheken gleich: Kontext, Executor, Node, dann Publisher, Subscriptions, Services und Timer anlegen und den Executor laufen lassen (*spin*). Der Nachrichtentyp ist ein normaler Rust-Typ, der aus der `.msg`-Definition erzeugt wurde.",
+      "begruendungen": [
+        "Richtig.",
+        "Veröffentlichen ginge mit `create_publisher`.",
+        "Dafür gäbe es `create_service`.",
+        "Der Node empfängt die Werte über ROS, der Sensortreiber wäre ein anderer Node."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze einen Publisher mit Quality of Service: die letzten 10 Nachrichten puffern, zuverlässig zustellen.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let publisher = node.create_publisher::<example_interfaces::msg::Float64>(",
+          "    \"temperatur\".{{?}}(10).{{?}}()",
+          ")?;",
+          "publisher.{{?}}(example_interfaces::msg::Float64 { data: 21.5 })?;"
+        ]
+      },
+      "luecken": [{ "loesungen": ["keep_last"] }, { "loesungen": ["reliable"] }, { "loesungen": ["publish"] }],
+      "auswahl": ["keep_last", "reliable", "publish", "best_effort", "send", "keep_all"],
+      "erklaerung": "In `rclrs` lassen sich QoS-Einstellungen direkt an den Topic-Namen hängen. `keep_last(10)` begrenzt den Verlauf, `reliable()` verlangt Wiederholung verlorener Pakete. Für Sensordaten mit hoher Rate nimmt man oft `best_effort()`, weil ein alter Messwert nach einer Neuübertragung ohnehin veraltet ist. Mehr zu QoS in der nächsten Lektion."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zenoh: Middleware in Rust",
+      "text": "ROS 2 trennt die API von der Middleware über die **RMW-Schicht** (*ROS middleware interface*). Lange war DDS die einzige Tier-1-Middleware. **Eclipse Zenoh** ist ein Protokoll und eine Implementierung, die in Rust geschrieben ist: Publish-Subscribe, Abfragen und Speicher, vom Mikrocontroller (zenoh-pico) bis in die Cloud.\n\nMit **ROS 2 Kilted Kaiju** (Mai 2025) wurde Zenoh als Tier-1-Middleware unterstützt (`rmw_zenoh_cpp`). In der Standardkonfiguration finden sich die Nodes über einen Router (`rmw_zenohd`) statt über Multicast. Das hilft in WLAN- und Cloud-Umgebungen, in denen Multicast schlecht funktioniert. Rust-Programme können Zenoh auch direkt über das Crate `zenoh` nutzen, ohne ROS."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du startest einen ROS-2-Node mit Zenoh, siehst aber auf dem zweiten Rechner keine Topics. Was ist die wahrscheinlichste Ursache?",
+      "terminal": {
+        "befehl": "export RMW_IMPLEMENTATION=rmw_zenoh_cpp && ros2 topic list",
+        "ausgabe": [
+          "/parameter_events",
+          "/rosout"
+        ]
+      },
+      "optionen": [
+        "Es läuft kein Zenoh-Router, oder die Rechner sind nicht über einen Router verbunden. Ohne Router finden sich die Nodes in der Standardkonfiguration nicht",
+        "Zenoh unterstützt nur einen Rechner",
+        "`ros2 topic list` zeigt bei Zenoh grundsätzlich nur diese zwei Topics",
+        "Der Node ist in Rust geschrieben und deshalb unsichtbar"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Es erscheinen nur die Standard-Topics, die jeder ROS-2-Prozess anlegt. Abhilfe: `ros2 run rmw_zenoh_cpp rmw_zenohd` starten und die Router der Rechner miteinander verbinden (Konfiguration der Endpunkte). Dieses explizite Netzmodell ist bewusst gewählt: Man sieht und steuert, wer mit wem spricht.",
+      "begruendungen": [
+        "Richtig.",
+        "Zenoh ist gerade für verteilte Systeme entworfen.",
+        "Mit funktionierender Discovery erscheinen alle Topics.",
+        "Die Sprache des Nodes spielt für die Discovery keine Rolle."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum ist Rust für Robotik-Software interessant?",
+      "optionen": [
+        "Viele Nodes laufen nebenläufig und verarbeiten grosse Datenmengen. Rust verhindert Datenrennen und Speicherfehler ohne Garbage Collector, bei C++-ähnlicher Leistung",
+        "Weil ROS 2 nur noch Rust unterstützt",
+        "Weil Rust-Programme keine Tests brauchen",
+        "Weil Rust keine C-Bibliotheken benutzen kann und dadurch sicherer ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In Robotik-Systemen laufen Treiber, Wahrnehmung und Planung parallel mit Callbacks, die Daten teilen. Genau dort entstehen in C++ schwer zu findende Fehler. Das Ökosystem in Rust ist kleiner als in C++ und Python, deshalb ist ein gemischtes System mit einzelnen Rust-Nodes heute der übliche Weg.",
+      "begruendungen": [
+        "Richtig.",
+        "C++ und Python bleiben die Hauptsprachen von ROS 2.",
+        "Tests braucht man in jeder Sprache.",
+        "Rust bindet C-Bibliotheken über FFI an, auch `rcl` selbst."
+      ]
+    }
+  ],
+  "praxis": "Ein guter Einstieg ist ein einzelner Rust-Node in einem bestehenden ROS-2-System, z. B. ein Treiber oder eine Überwachung mit klarer Schnittstelle. Die Topics und Nachrichtentypen bleiben gleich, die anderen Nodes merken nichts von der Sprache. Prüfe vorher, welche ROS-Distribution dein Team nutzt und ob die gewählte Rust-Bibliothek sie unterstützt.",
+  "labor": {
+    "titel": "Zenoh ohne ROS ausprobieren",
+    "anleitung": "Zenoh lässt sich ohne ROS-Installation direkt aus Rust nutzen. Lege ein Projekt an, füge `zenoh` und `tokio` hinzu und baue die Beispiele `z_pub` und `z_sub` aus der Zenoh-Dokumentation nach.",
+    "befehle": [
+      "cargo new zenoh-test && cd zenoh-test",
+      "cargo add zenoh",
+      "cargo add tokio --features full",
+      "cargo run --bin z_sub & cargo run --bin z_pub"
+    ],
+    "beobachtung": "Im lokalen Netz finden sich Publisher und Subscriber ohne Router über Scouting. Der Schlüssel (*key expression*) wie `demo/temperatur` entspricht dem Topic in ROS 2, Platzhalter wie `demo/**` erlauben Abos auf ganze Bäume."
+  },
+  "begriffe": [
+    { "begriff": "ROS 2", "englisch": "Robot Operating System 2", "erklaerung": "Framework für Roboter-Software mit Middleware, Werkzeugen und Paketen." },
+    { "begriff": "Node", "englisch": "node", "erklaerung": "Programmbaustein in ROS 2 mit Publishern, Subscriptions, Services und Timern." },
+    { "begriff": "RMW", "englisch": "ROS middleware interface", "erklaerung": "Schicht, die ROS 2 von der konkreten Middleware wie DDS oder Zenoh trennt." },
+    { "begriff": "Zenoh", "englisch": "Eclipse Zenoh", "erklaerung": "In Rust geschriebenes Protokoll für Publish-Subscribe und Abfragen, Tier-1-Middleware für ROS 2." }
+  ],
+  "weiterlesen": [
+    { "titel": "rclrs", "url": "https://docs.rs/rclrs/latest/rclrs/" },
+    { "titel": "r2r", "url": "https://docs.rs/r2r/latest/r2r/" },
+    { "titel": "Eclipse Zenoh", "url": "https://zenoh.io/" }
+  ]
+}

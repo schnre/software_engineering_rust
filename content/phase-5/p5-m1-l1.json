@@ -1,0 +1,234 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m1-l1",
+  "phase": 5,
+  "modul": "5.1 Threads und Data Races",
+  "titel": "Threads starten mit spawn und scope",
+  "lernziele": [
+    "Threads mit `thread::spawn` starten, mit `JoinHandle::join` abwarten und Ergebnisse zurückholen",
+    "Erklären, warum `spawn` eine `move`-Closure mit `'static` verlangt",
+    "Mit `thread::scope` lokale Daten an Threads ausleihen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "spawn-ohne-move",
+      "frage": "Was meldet `cargo build`?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "use std::thread;",
+          "",
+          "fn main() {",
+          "    let daten = vec![1, 2, 3];",
+          "    let h = thread::spawn(|| {",
+          "        println!(\"{:?}\", daten);",
+          "    });",
+          "    h.join().unwrap();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0373: Die Closure könnte länger leben als `main`, leiht sich aber `daten` aus",
+        "Kompiliert, weil `main` mit `join` auf den Thread wartet",
+        "Fehler E0382: `daten` wurde verschoben und danach benutzt",
+        "Kompiliert, gibt aber nur manchmal `[1, 2, 3]` aus"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`thread::spawn` verlangt, dass die Closure `'static` ist: Sie darf nichts ausleihen, das vor ihr sterben könnte. Der Compiler prüft das an der Signatur, nicht am Programmfluss. Dass weiter unten `join` steht, sieht er nicht. Die Lösung schlägt er gleich selbst vor: `move ||` – dann gehört `daten` dem Thread.",
+      "begruendungen": [
+        "Richtig. Der Compiler schlägt im `help` direkt `move` vor.",
+        "Die Signatur von `spawn` kennt das `join` nicht. Ein `JoinHandle` könnte ja auch einfach fallen gelassen werden.",
+        "Verschoben wird hier gar nichts: Ohne `move` leiht sich die Closure `daten` nur aus.",
+        "In Rust gibt es keinen solchen Zufall: Der Compiler lehnt den Code ab, bevor er laufen kann."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "spawn, JoinHandle und 'static",
+      "text": "`thread::spawn(f)` startet sofort einen Betriebssystem-Thread und liefert einen `JoinHandle<T>`. `join()` wartet auf das Ende und liefert das Ergebnis der Closure als `Result<T, _>`. `Err` bedeutet: Der Thread hat gepanict.\n\nDie Signatur verlangt `F: FnOnce() -> T + Send + 'static`. `'static` heisst: Die Closure besitzt alles, was sie benutzt. Darum schreibt man fast immer `move ||`.\n\nAnders als `std::thread` in C++ bricht Rust nichts ab, wenn man den `JoinHandle` fallen lässt: Der Thread läuft losgelöst (*detached*) weiter, bis `main` endet und der Prozess alle Threads beendet.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let daten = vec![1, 2, 3];",
+          "let h = thread::spawn(move || daten.iter().sum::<i32>());",
+          "let summe: i32 = h.join().unwrap();"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "`move` verschiebt `daten` in die Closure, der Thread besitzt den Vektor." },
+          { "zeile": 3, "text": "`join` liefert den Rückgabewert der Closure, hier `6`." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-spawn",
+      "frage": "Ergänze: Vier Threads berechnen je ein Quadrat, `main` sammelt die Ergebnisse ein.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut handles = Vec::new();",
+          "for i in 1..=4 {",
+          "    handles.push(thread::spawn({{?}} || i * i));",
+          "}",
+          "let summe: u32 = handles",
+          "    .into_iter()",
+          "    .map(|h| h.{{?}}().unwrap())",
+          "    .sum();"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["move"] },
+        { "loesungen": ["join"] }
+      ],
+      "auswahl": ["move", "join", "ref", "wait", "detach"],
+      "erklaerung": "`move` kopiert hier `i` in die Closure (`u32` ist `Copy`), sonst würde sie die Schleifenvariable ausleihen, die nach dem Schleifendurchlauf nicht mehr existiert. `join` wartet auf jeden Thread und holt seinen Rückgabewert ab. Ein `detach` gibt es in Rust nicht: Losgelöst ist ein Thread, sobald sein `JoinHandle` fallen gelassen wird."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "join-panic",
+      "frage": "Ein gestarteter Thread panict. Was passiert in `main` bei `h.join()`?",
+      "optionen": [
+        "`join` liefert `Err` mit der Panic-Nutzlast, `main` läuft weiter",
+        "Der ganze Prozess wird sofort beendet",
+        "`join` blockiert für immer",
+        "`join` liefert `Ok(())`, die Panic ist im Thread geblieben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Panic wickelt nur den Stack des betroffenen Threads ab (*unwinding*). `join` meldet sie als `Err(Box<dyn Any + Send>)`. Mit `.unwrap()` gibt man sie an den aufrufenden Thread weiter, was meistens richtig ist. Nur mit `panic = \"abort\"` im Cargo-Profil endet sofort der ganze Prozess.",
+      "begruendungen": [
+        "Richtig.",
+        "Das gilt nur mit `panic = \"abort\"`, nicht im Standardprofil.",
+        "Der Thread ist ja beendet, `join` kehrt sofort zurück.",
+        "Die Panic wird nicht verschluckt, sondern als `Err` gemeldet."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "scope-split",
+      "frage": "Kompiliert das, und was wird ausgegeben?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let daten = vec![1, 2, 3, 4];",
+          "let (links, rechts) = daten.split_at(2);",
+          "",
+          "let (a, b) = thread::scope(|s| {",
+          "    let h1 = s.spawn(|| links.iter().sum::<i32>());",
+          "    let h2 = s.spawn(|| rechts.iter().sum::<i32>());",
+          "    (h1.join().unwrap(), h2.join().unwrap())",
+          "});",
+          "println!(\"{}\", a + b);"
+        ]
+      },
+      "optionen": [
+        "Kompiliert und gibt `10` aus",
+        "Fehler E0373, weil die Closures `links` und `rechts` ausleihen",
+        "Fehler E0499, weil zwei Threads gleichzeitig auf `daten` zugreifen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`thread::scope` garantiert, dass alle darin gestarteten Threads beendet sind, bevor `scope` zurückkehrt. Deshalb dürfen sie lokale Daten ausleihen, ganz ohne `move`, `'static` oder `Arc`. Zwei geteilte Ausleihen (`&[i32]`) sind erlaubt, nur exklusive (`&mut`) dürfen nicht doppelt vorkommen.",
+      "begruendungen": [
+        "Richtig.",
+        "E0373 tritt bei `thread::spawn` auf. `s.spawn` verlangt nur, dass die Ausleihe den Scope überlebt.",
+        "Beide Threads lesen nur. Mehrere `&`-Ausleihen gleichzeitig sind immer erlaubt."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "scope-zwei-mut",
+      "frage": "Dieser Code kompiliert nicht (E0499). In welcher Zeile meldet der Compiler die zweite exklusive Ausleihe?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::thread;",
+          "",
+          "fn main() {",
+          "    let mut summe = 0;",
+          "    let daten = vec![1, 2, 3, 4];",
+          "    thread::scope(|s| {",
+          "        s.spawn(|| summe += daten[0] + daten[1]);",
+          "        s.spawn(|| summe += daten[2] + daten[3]);",
+          "    });",
+          "    println!(\"{summe}\");",
+          "}"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "Beide Closures wollen `summe` verändern, brauchen also je ein `&mut summe` – gleichzeitig, denn beide Threads laufen parallel. Genau das verbietet der Borrow-Checker: `cannot borrow summe as mutable more than once at a time`. Lösungen: Jeder Thread liefert seine Teilsumme über `join` zurück, oder man nimmt einen `AtomicI32` bzw. `Mutex` (Module 5.2 und 5.3)."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Wann was?",
+      "text": "Faustregel: Arbeiten die Threads nur eine Weile auf vorhandenen Daten und das Ergebnis wird gleich danach gebraucht, ist `thread::scope` die einfachste Wahl. Läuft ein Thread unabhängig weiter, etwa als Hintergrunddienst, braucht er eigene Daten (`move`) oder geteilte über `Arc` (nächste Lektion).",
+      "tabelle": {
+        "kopf": ["", "`thread::spawn`", "`thread::scope` + `s.spawn`"],
+        "zeilen": [
+          ["Lebensdauer der Closure", "`'static`", "darf lokale Daten ausleihen"],
+          ["Ende des Threads", "beliebig, auch nach `main`", "spätestens am Ende von `scope`"],
+          ["Ohne `join`", "Thread läuft losgelöst weiter", "`scope` wartet automatisch"],
+          ["Typischer Einsatz", "Langlebige Worker, Dienste", "Arbeit aufteilen und Ergebnisse einsammeln"]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "thread-api",
+      "frage": "Was macht welche Funktion aus `std::thread`?",
+      "paare": [
+        { "links": "`thread::spawn(f)`", "rechts": "Startet einen Thread, die Closure muss `'static` sein" },
+        { "links": "`thread::scope(|s| …)`", "rechts": "Wartet am Ende auf alle darin gestarteten Threads" },
+        { "links": "`JoinHandle::join()`", "rechts": "Wartet auf das Ende und liefert das Ergebnis oder die Panic" },
+        { "links": "`thread::Builder::new().name(…)`", "rechts": "Setzt Name oder Stackgrösse, bevor der Thread startet" },
+        { "links": "`thread::available_parallelism()`", "rechts": "Schätzt, wie viele Threads sinnvoll parallel laufen können" }
+      ],
+      "erklaerung": "Benannte Threads sind Gold wert: Der Name erscheint in Panic-Meldungen (`thread 'sensor' (…) panicked at …`), in `ps -L` und im Debugger. `Builder::spawn` liefert übrigens ein `io::Result`, weil das Betriebssystem das Erzeugen verweigern kann. `thread::spawn` panict in diesem Fall."
+    }
+  ],
+  "praxis": "Im Review achtest du auf zwei Muster: `JoinHandle`s, die stillschweigend fallen gelassen werden (wer merkt es, wenn dieser Thread panict?), und `Arc::clone`-Kaskaden, nur um Daten kurz an Worker zu verteilen. Im zweiten Fall ist `thread::scope` meist einfacher und spart die Referenzzählung.",
+  "labor": {
+    "titel": "Benannte Threads beobachten",
+    "anleitung": "Starte in einem neuen Projekt vier Threads mit `thread::Builder::new().name(format!(\"worker-{i}\"))`, die je einige Sekunden rechnen. Beobachte sie, während das Programm läuft. Lass danach einen Thread absichtlich panicken.",
+    "befehle": [
+      "cargo new threads && cd threads",
+      "cargo run --release &",
+      "ps -L -p $! -o pid,lwp,pcpu,comm",
+      "rust-gdb -p $(pgrep threads) -batch -ex 'info threads'"
+    ],
+    "beobachtung": "`ps -L` zeigt jeden Thread mit eigener ID (LWP) und seinem Namen (unter Linux auf 15 Zeichen gekürzt). Die Panic-Meldung nennt den Namen und die Thread-ID: `thread 'worker-2' (…) panicked at src/main.rs:…`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Thread",
+      "englisch": "thread",
+      "erklaerung": "Ausführungsstrang innerhalb eines Prozesses mit eigenem Stack. Alle Threads eines Prozesses teilen sich den Speicher."
+    },
+    {
+      "begriff": "JoinHandle",
+      "englisch": "join handle",
+      "erklaerung": "Rückgabewert von `thread::spawn`. Mit `join` wartet man auf das Ende des Threads und erhält sein Ergebnis."
+    },
+    {
+      "begriff": "Scoped Thread",
+      "englisch": "scoped thread",
+      "erklaerung": "Thread, der innerhalb von `thread::scope` gestartet wird und garantiert vor dessen Ende fertig ist. Darf deshalb lokale Daten ausleihen."
+    },
+    {
+      "begriff": "Losgelöster Thread",
+      "englisch": "detached thread",
+      "erklaerung": "Thread, auf den niemand mehr wartet. In Rust entsteht er, wenn der `JoinHandle` fallen gelassen wird."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Using Threads to Run Code Simultaneously",
+      "url": "https://doc.rust-lang.org/book/ch16-01-threads.html"
+    },
+    {
+      "titel": "std::thread::scope",
+      "url": "https://doc.rust-lang.org/std/thread/fn.scope.html"
+    }
+  ]
+}

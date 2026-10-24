@@ -1,0 +1,196 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m4-l2",
+  "phase": 7,
+  "modul": "7.4 Rust auf Mikrocontrollern",
+  "titel": "Zero-Cost-Abstraktionen nachprüfen",
+  "lernziele": [
+    "Das Typestate-Muster für Pins verstehen und seine Kosten (keine) begründen",
+    "Treiber generisch über `embedded-hal`-Traits schreiben",
+    "Mit `objdump`, `nm` und `cargo asm` prüfen, ob eine Abstraktion wirklich nichts kostet"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Pin im Typestate-Muster. Was meldet der Compiler zu Zeile 17?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::marker::PhantomData;",
+          "pub struct Eingang;",
+          "pub struct Ausgang;",
+          "pub struct Pin<MODUS> { nr: u8, _m: PhantomData<MODUS> }",
+          "",
+          "impl Pin<Eingang> {",
+          "    pub fn into_ausgang(self) -> Pin<Ausgang> {",
+          "        Pin { nr: self.nr, _m: PhantomData }",
+          "    }",
+          "}",
+          "impl Pin<Ausgang> {",
+          "    pub fn setze_high(&mut self) { /* Register schreiben */ }",
+          "}",
+          "",
+          "fn main() {",
+          "    let mut taster = Pin::<Eingang> { nr: 5, _m: PhantomData };",
+          "    taster.setze_high();",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Der Modus existiert nur im Typ, `PhantomData` belegt 0 Byte" },
+          { "zeile": 7, "text": "Nimmt `self` per Wert: Der alte Eingangs-Pin ist danach verbraucht" }
+        ]
+      },
+      "optionen": [
+        "error[E0599]: no method named `setze_high` found for struct `Pin<Eingang>`",
+        "Es kompiliert, der Pin wird zur Laufzeit als Ausgang geschaltet",
+        "Eine Panik zur Laufzeit, weil der Pin ein Eingang ist",
+        "error[E0382]: use of moved value: `taster`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`setze_high` gibt es nur für `Pin<Ausgang>`. Der Fehler fällt beim Kompilieren auf, es gibt keine Laufzeitprüfung. Die HALs (z. B. `stm32f4xx-hal`, `rp2040-hal`) arbeiten genau so: `into_push_pull_output()` verbraucht den Pin und liefert einen neuen Typ. Weil der Modus nur im Typ steckt, ist der erzeugte Maschinencode derselbe wie bei direktem Registerzugriff.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust ruft keine Methode auf, die für diesen Typ nicht existiert.",
+        "Typestate verschiebt die Prüfung gerade auf die Übersetzungszeit.",
+        "Der Pin wurde hier nicht verschoben. E0382 bekämest du, wenn du `taster` nach `into_ausgang()` noch benutzt."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie viel RAM belegt `Pin<Ausgang>` aus dem Beispiel, wenn man das Feld `nr` weglässt und nur `PhantomData<MODUS>` behält?",
+      "optionen": ["0 Byte", "1 Byte", "4 Byte", "8 Byte"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`std::mem::size_of::<Pin<Ausgang>>()` liefert dann `0`. Ein **Zero-Sized Type** (ZST) existiert nur für den Compiler. Viele HALs kodieren auch Port und Pinnummer im Typ (z. B. `PA5<Output<PushPull>>`), sodass ein Pin-Objekt gar keinen Speicher braucht und jeder Zugriff zu einem einzigen Store auf eine feste Registeradresse wird.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne Felder mit Grösse belegt die Struktur nichts.",
+        "Das wäre ein `u32`, der hier nicht existiert.",
+        "Das wäre ein Zeiger auf einem 64-Bit-System."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Generisch über embedded-hal",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::{delay::DelayNs, digital::OutputPin};",
+          "",
+          "pub struct Blinker<P, D> { led: P, delay: D }",
+          "",
+          "impl<P: OutputPin, D: DelayNs> Blinker<P, D> {",
+          "    pub fn blinke(&mut self, n: u32) -> Result<(), P::Error> {",
+          "        for _ in 0..n {",
+          "            self.led.set_high()?;",
+          "            self.delay.delay_ms(100);",
+          "            self.led.set_low()?;",
+          "            self.delay.delay_ms(100);",
+          "        }",
+          "        Ok(())",
+          "    }",
+          "}"
+        ]
+      },
+      "text": "Ein Treiber, der nur die Traits aus `embedded-hal` 1.0 kennt, läuft auf jedem Chip mit passender HAL, unter Linux mit `linux-embedded-hal` und im Test mit `embedded-hal-mock`. Generics werden **monomorphisiert**: Für jede konkrete Kombination aus Pin- und Delay-Typ erzeugt der Compiler eine eigene Kopie, und die Trait-Aufrufe werden direkt eingesetzt (*inlined*). Es gibt keine vtable und keinen indirekten Sprung. Der Preis: mehr Code, wenn derselbe Treiber mit vielen verschiedenen Typen benutzt wird."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne zu: Was kostet die Abstraktion im erzeugten Code?",
+      "paare": [
+        { "links": "Typestate mit `PhantomData`", "rechts": "Nichts, der Modus existiert nur beim Kompilieren" },
+        { "links": "Generischer Treiber `T: OutputPin`", "rechts": "Direkter Aufruf, aber eine Kopie pro konkretem Typ" },
+        { "links": "`&mut dyn OutputPin<Error = E>`", "rechts": "Indirekter Aufruf über eine vtable, nur eine Kopie des Codes" },
+        { "links": "Iterator über ein Slice", "rechts": "Gleicher Code wie eine Schleife, meist ohne Bounds Checks" }
+      ],
+      "erklaerung": "„Zero-Cost“ heisst: Was du nicht benutzt, kostet nichts, und was du benutzt, könntest du von Hand nicht besser schreiben. `dyn` ist kein Fehler, sondern ein bewusster Tausch von etwas Laufzeit gegen weniger Flash. Bei vielen Treibervarianten kann das auf kleinen Chips die bessere Wahl sein."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du übersetzt drei Summenfunktionen (Indexschleife mit `n`, Iterator, Schleife über `&[u32; 8]`) und siehst dir das Object-File an. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "nm -C lib.o",
+        "ausgabe": [
+          "0000000000000000 T <u32 as core::iter::traits::accum::Sum<&u32>>::sum::<core::slice::iter::Iter<u32>>",
+          "0000000000000000 T <core::slice::iter::Iter<u32> as core::iter::traits::iterator::Iterator>::sum::<u32>",
+          "0000000000000000 T lib::summe_iter",
+          "0000000000000000 T lib::summe_array",
+          "0000000000000000 T lib::summe_index",
+          "                 U core::panicking::panic_bounds_check"
+        ]
+      },
+      "optionen": [
+        "Mindestens eine Funktion braucht einen Bounds Check. Welche, zeigt erst `objdump -d`: Nur `summe_index` ruft `panic_bounds_check` auf",
+        "Alle drei Funktionen enthalten einen Bounds Check",
+        "Das Object-File ist fehlerhaft, weil ein Symbol undefiniert ist",
+        "Die Iterator-Funktionen wurden nicht optimiert, weil sie als eigene Symbole erscheinen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`U` heisst: Das Symbol wird benutzt, aber anderswo definiert (in `core`). Bei `summe_array` kennt der Compiler die Länge 8 zur Übersetzungszeit und entfernt die Prüfung, beim Iterator ist sie unnötig. Dass die generischen `sum`-Instanzen als eigene Symbole auftauchen, liegt daran, dass ein Object-File einer Bibliothek sie für andere Crates bereitstellt. Im fertigen Binary werden sie mit LTO meist inlined.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei Array mit fester Länge und Iterator kann der Compiler die Prüfung weglassen.",
+        "Undefinierte Symbole sind in Object-Files normal, der Linker löst sie auf.",
+        "Eigene Symbole bedeuten nicht, dass nichts inlined wird."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Du willst prüfen, ob eine Abstraktion in deiner Firmware wirklich nichts kostet. Bringe die Schritte in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Release-Build mit demselben Profil wie im Produkt erzeugen",
+        "Die Funktion mit `#[inline(never)]` als eigene Funktion sichtbar machen",
+        "Den Maschinencode mit `cargo asm` oder `cargo objdump -- -d` ansehen",
+        "Mit einer Variante ohne Abstraktion vergleichen",
+        "Grösse mit `cargo size` und Laufzeit mit dem DWT-Zykluszähler messen"
+      ],
+      "erklaerung": "Ohne `#[inline(never)]` ist die Funktion oft gar nicht als eigenes Symbol auffindbar, weil sie in den Aufrufer inlined wurde. `cargo asm` aus dem Crate `cargo-show-asm` zeigt Assembler pro Funktion, `cargo objdump` kommt aus `cargo-binutils`. Am Ende zählen Messungen auf der Hardware."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieser Treiber für einen Temperatursensor soll auf beliebigen Chips laufen. Welche Zeile verhindert das?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::i2c::I2c;",
+          "",
+          "pub struct Tmp117<I> { i2c: I, adresse: u8 }",
+          "",
+          "impl<I: I2c> Tmp117<I> {",
+          "    pub fn new(i2c: I, adresse: u8) -> Self { Self { i2c, adresse } }",
+          "",
+          "    pub fn lese(&mut self, dp: &stm32f4xx_hal::pac::Peripherals) -> Result<i16, I::Error> {",
+          "        let mut buf = [0u8; 2];",
+          "        self.i2c.write_read(self.adresse, &[0x00], &mut buf)?;",
+          "        Ok(i16::from_be_bytes(buf))",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "Der Parameter `&stm32f4xx_hal::pac::Peripherals` bindet den Treiber an eine Chipfamilie, obwohl er gar nicht gebraucht wird. Ein portabler Treiber hängt nur von `embedded-hal` ab und bekommt alles Nötige über Trait-Bounds. So lässt er sich auch auf dem PC mit `embedded-hal-mock` testen."
+    }
+  ],
+  "praxis": "Bei Code-Reviews im Embedded-Bereich lohnt sich die Frage „Was kostet das?“. Die Antwort sollte aus einer Messung kommen, nicht aus dem Bauchgefühl. Typestate und generische Treiber sind in Rust in der Regel gratis, `dyn`, Formatierung und Panikpfade nicht. Viele Teams hinterlegen für kritische Funktionen (ISR, Regelschleife) einen Assembler-Schnappschuss und prüfen im CI, ob er sich unerwartet ändert.",
+  "labor": {
+    "titel": "Assembler einer Funktion ansehen",
+    "anleitung": "Installiere `cargo-show-asm` und sieh dir den Assembler von `summe_index` und `summe_iter` an. Ändere `summe_index` so, dass es vor der Schleife `let a = &a[..n];` schreibt, und vergleiche erneut.",
+    "befehle": [
+      "cargo install cargo-show-asm",
+      "cargo asm --lib --release summe_index",
+      "cargo asm --lib --release summe_iter"
+    ],
+    "beobachtung": "Mit dem vorgezogenen Slice prüft der Code die Grenze nur einmal vor der Schleife. Danach ist die Schleife frei von Bounds Checks und meist vektorisiert, genau wie die Iterator-Variante."
+  },
+  "begriffe": [
+    { "begriff": "Typestate", "englisch": "typestate pattern", "erklaerung": "Zustände eines Objekts werden als Typen kodiert, sodass ungültige Operationen nicht kompilieren." },
+    { "begriff": "Zero-Sized Type", "englisch": "zero-sized type", "erklaerung": "Typ ohne Daten, der zur Laufzeit keinen Speicher belegt." },
+    { "begriff": "Monomorphisierung", "englisch": "monomorphization", "erklaerung": "Der Compiler erzeugt für jede konkrete Typkombination eine eigene Kopie generischen Codes." },
+    { "begriff": "Zero-Cost-Abstraktion", "englisch": "zero-cost abstraction", "erklaerung": "Abstraktion, die keinen Laufzeitaufwand gegenüber handgeschriebenem Code hat." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Embedded Rust Book: Static Guarantees", "url": "https://docs.rust-embedded.org/book/static-guarantees/" },
+    { "titel": "docs.rs: embedded-hal", "url": "https://docs.rs/embedded-hal" }
+  ]
+}

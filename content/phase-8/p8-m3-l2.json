@@ -1,0 +1,224 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m3-l2",
+  "phase": 8,
+  "modul": "8.3 Jenkins",
+  "titel": "Ein Jenkinsfile für Cargo",
+  "lernziele": [
+    "Eine Declarative Pipeline für ein Cargo-Projekt lesen und schreiben",
+    "Testergebnisse mit cargo-nextest als JUnit-XML an Jenkins übergeben",
+    "Mit `post`, `when` und `archiveArtifacts` Ergebnisse melden und Artefakte sichern"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Die Stage `Clippy` schlägt fehl. Was passiert danach?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "Jenkinsfile",
+        "zeilen": [
+          "pipeline {",
+          "    agent { label 'linux && rust' }",
+          "    stages {",
+          "        stage('Clippy') {",
+          "            steps { sh 'cargo clippy --all-targets --locked -- -D warnings' }",
+          "        }",
+          "        stage('Test') {",
+          "            steps { sh 'cargo nextest run --profile ci --locked' }",
+          "        }",
+          "    }",
+          "    post {",
+          "        always  { junit allowEmptyResults: true, testResults: 'target/nextest/ci/junit.xml' }",
+          "        failure { echo 'Build fehlgeschlagen' }",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`Test` wird übersprungen, danach laufen `always` und `failure` aus dem `post`-Block",
+        "`Test` läuft trotzdem, danach `always`",
+        "Die Pipeline bricht sofort ab, `post` läuft nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Clippy endet mit Exit-Code 101, `sh` wertet jeden Exit-Code ungleich 0 als Fehler. Die Stage bricht ab, alle folgenden werden übersprungen. Der `post`-Block läuft aber immer am Ende und wählt die passenden Bedingungen. `allowEmptyResults: true` verhindert hier, dass `junit` zusätzlich meckert, weil gar keine Tests liefen.",
+      "begruendungen": [
+        "Richtig.",
+        "Nach einem Fehlschlag laufen die folgenden Stages nicht.",
+        "Genau dafür gibt es `post`: Es läuft auch nach Fehlern."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau einer Declarative Pipeline",
+      "text": "- `pipeline { }`: der äussere Rahmen\n- `agent`: wo die Pipeline läuft (oder pro Stage)\n- `environment { }`: Umgebungsvariablen, z. B. `CARGO_TERM_COLOR = 'always'`\n- `options { }`: z. B. `timeout(time: 30, unit: 'MINUTES')`, `timestamps()`\n- `stages { stage('Name') { steps { … } } }`: die eigentliche Arbeit, meist `sh 'cargo …'`\n- `post { }`: Aufräumen und Melden nach Ergebnis\n- `when { }`: Bedingung, ob eine Stage läuft\n- `parallel { }`: Stages gleichzeitig ausführen\n\nDie feste Struktur erlaubt Jenkins, die Pipeline vor dem Start zu prüfen und die Stages übersichtlich anzuzeigen."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Testergebnisse für Jenkins",
+      "text": "Der Jenkins-Schritt `junit` liest Testergebnisse im **JUnit-XML-Format** und zeigt daraus Trends, fehlgeschlagene Tests und deren Ausgabe. `cargo test` schreibt kein JUnit-XML. Zwei Wege:\n\n- **cargo-nextest**, ein alternativer Test-Runner, der jeden Test in einem eigenen Prozess startet. Er schreibt JUnit-XML, wenn ein Profil es in `.config/nextest.toml` verlangt.\n- **cargo2junit** wandelt die JSON-Ausgabe von `cargo test` um. Die dafür nötige Option `--format json` ist aber noch instabil und braucht nightly.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".config/nextest.toml",
+        "zeilen": [
+          "[profile.ci]",
+          "fail-fast = false",
+          "",
+          "[profile.ci.junit]",
+          "path = \"junit.xml\""
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "In der CI alle Tests ausführen, nicht beim ersten Fehler aufhören." },
+          { "zeile": 5, "text": "Relativ zu `target/nextest/ci/`." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Test-Stage und den `post`-Block.",
+      "code": {
+        "sprache": "groovy",
+        "zeilen": [
+          "stage('Test') {",
+          "    {{?}} {",
+          "        sh 'cargo nextest run --profile ci --locked'",
+          "    }",
+          "}",
+          "...",
+          "post {",
+          "    {{?}} { junit testResults: 'target/nextest/ci/junit.xml' }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["steps"] },
+        { "loesungen": ["always"] }
+      ],
+      "auswahl": ["steps", "always", "success", "script"],
+      "erklaerung": "Testergebnisse sollen auch dann eingelesen werden, wenn Tests fehlschlagen. Gerade dann will man sehen, welche. Deshalb `always` statt `success`."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wann laufen die `post`-Bedingungen?",
+      "paare": [
+        { "links": "`always`", "rechts": "Immer, unabhängig vom Ergebnis" },
+        { "links": "`success`", "rechts": "Nur, wenn alles erfolgreich war" },
+        { "links": "`failure`", "rechts": "Nur, wenn die Pipeline fehlgeschlagen ist" },
+        { "links": "`unstable`", "rechts": "Wenn der Build lief, aber z. B. `junit` fehlgeschlagene Tests fand (gelb)" },
+        { "links": "`cleanup`", "rechts": "Ganz am Schluss, nach allen anderen Bedingungen" }
+      ],
+      "erklaerung": "Achtung bei Rust: `cargo nextest run` endet bei fehlgeschlagenen Tests selbst mit einem Exit-Code ungleich 0. Die Stage wird dann rot (`failure`), nicht gelb. `cleanup` eignet sich für `cleanWs()`, um den Workspace zu leeren."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Diese Stages stehen in derselben Pipeline. Sie läuft für einen Pull Request vom Branch `feature/x`. Was passiert?",
+      "code": {
+        "sprache": "groovy",
+        "zeilen": [
+          "stage('Release-Build') {",
+          "    when { branch 'main' }",
+          "    steps {",
+          "        sh 'cargo build --release --locked'",
+          "        archiveArtifacts artifacts: 'target/release/sensord', fingerprint: true",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "`fingerprint` merkt sich die Prüfsumme; so lässt sich später nachverfolgen, aus welchem Build eine Datei stammt." }
+        ]
+      },
+      "optionen": [
+        "Die Stage wird übersprungen und als ausgelassen angezeigt, die Pipeline bleibt grün",
+        "Die Stage läuft, aber `archiveArtifacts` findet nichts",
+        "Die Pipeline bricht mit einem Fehler ab"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`when` wertet die Bedingung vor der Stage aus. Ist sie falsch, werden die Schritte gar nicht ausgeführt. So dient dieselbe Pipeline für Pull Requests und `main`. Nur Stände auf `main` erzeugen ein archiviertes Release-Binary.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Schritte werden gar nicht erst ausgeführt.",
+        "Eine falsche `when`-Bedingung ist kein Fehler."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile ist ein Sicherheitsproblem?",
+      "code": {
+        "sprache": "groovy",
+        "zeilen": [
+          "stage('Publish') {",
+          "    when { buildingTag() }",
+          "    steps {",
+          "        sh 'cargo publish --locked --token cio_8f2kQ7vX1mZ'",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Der crates.io-Token steht im Repository, in der Git-Historie und im Build-Log. Zugangsdaten gehören in den Credentials-Speicher von Jenkins: `withCredentials([string(credentialsId: 'crates-io', variable: 'CARGO_REGISTRY_TOKEN')]) { sh 'cargo publish --locked' }`. Cargo liest die Umgebungsvariable `CARGO_REGISTRY_TOKEN` selbst, und Jenkins maskiert den Wert im Log. Ein geleakter Token muss sofort widerrufen werden."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wozu dient `options { timeout(time: 30, unit: 'MINUTES') }`?",
+      "optionen": [
+        "Ein hängender Build, etwa ein Test in einem Deadlock, wird nach 30 Minuten abgebrochen, statt einen Agent unbegrenzt zu blockieren",
+        "Jede Stage darf höchstens 30 Minuten auf einen freien Agent warten",
+        "Die Pipeline startet erst 30 Minuten nach dem Push"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Test, der auf einem `Mutex` hängt, würde den Agent sonst für immer belegen, und bald stauen sich alle anderen Builds. Ein Timeout gehört in jede Pipeline, mit Puffer über der normalen Laufzeit. nextest kann zusätzlich einzelne langsame Tests mit `slow-timeout` abbrechen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Timeout auf Pipeline-Ebene umfasst die ganze Laufzeit, auch das Warten.",
+        "Für Verzögerungen gibt es andere Mittel, etwa `quietPeriod`."
+      ]
+    }
+  ],
+  "praxis": "Ein Jenkinsfile ist Code und wird genauso reviewt: Gibt es ein Timeout? Steht überall `--locked`? Werden Testergebnisse auch bei Fehlern eingelesen? Liegen Tokens im Credentials-Speicher? Wird nur von `main` oder von Tags veröffentlicht? Und steht die eigentliche Logik in `cargo`-Befehlen oder einem Skript, das man auch lokal ausführen kann, statt in langen Groovy-Blöcken?",
+  "labor": {
+    "titel": "JUnit-XML mit nextest erzeugen",
+    "anleitung": "Installiere cargo-nextest, lege `.config/nextest.toml` mit einem Profil `ci` wie oben an und lass einen absichtlich fehlschlagenden Test laufen.",
+    "befehle": [
+      "cargo install cargo-nextest --locked",
+      "cargo nextest run --profile ci; echo \"Exit: $?\"",
+      "head -20 target/nextest/ci/junit.xml"
+    ],
+    "beobachtung": "Die XML-Datei enthält pro Test ein `<testcase>`, der fehlgeschlagene zusätzlich ein `<failure>` mit der Panic-Meldung. Genau das zeigt Jenkins nach `junit` in der Testübersicht an."
+  },
+  "begriffe": [
+    {
+      "begriff": "Jenkinsfile",
+      "englisch": "Jenkinsfile",
+      "erklaerung": "Datei im Repository, die die Pipeline als Code beschreibt."
+    },
+    {
+      "begriff": "Declarative Pipeline",
+      "englisch": "declarative pipeline",
+      "erklaerung": "Pipeline mit fester Struktur (`pipeline`, `stages`, `steps`, `post`), die Jenkins prüfen und anzeigen kann."
+    },
+    {
+      "begriff": "JUnit-XML",
+      "englisch": "JUnit XML",
+      "erklaerung": "Verbreitetes XML-Format für Testergebnisse, das CI-Systeme einlesen und darstellen."
+    },
+    {
+      "begriff": "cargo-nextest",
+      "englisch": "cargo-nextest",
+      "erklaerung": "Alternativer Test-Runner für Rust, der Tests parallel in eigenen Prozessen ausführt und JUnit-XML schreiben kann."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Jenkins: Pipeline Syntax",
+      "url": "https://www.jenkins.io/doc/book/pipeline/syntax/"
+    },
+    {
+      "titel": "cargo-nextest: Dokumentation",
+      "url": "https://nexte.st/"
+    },
+    {
+      "titel": "Jenkins: Using credentials",
+      "url": "https://www.jenkins.io/doc/book/using/using-credentials/"
+    }
+  ]
+}

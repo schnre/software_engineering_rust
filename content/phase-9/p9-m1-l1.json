@@ -1,0 +1,224 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m1-l1",
+  "phase": 9,
+  "modul": "9.1 Modularisierung und Separation of Concerns",
+  "titel": "Module, Kohäsion und Sichtbarkeit",
+  "lernziele": [
+    "Kohäsion und Kopplung an Rust-Modulen beurteilen",
+    "Module über das Dateilayout und `pub use` sauber aufbauen",
+    "`pub`, `pub(crate)` und `pub(super)` gezielt als Architekturwerkzeug einsetzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In einer Firmware gibt es ein Modul `utils` mit CRC-Berechnung, Zeitformatierung, einem UART-Logger und dem Parsen der Konfigurationsdatei. Was ist das Hauptproblem?",
+      "optionen": [
+        "Das Modul hat niedrige Kohäsion: Völlig verschiedene Belange liegen beisammen und haben viele unabhängige Gründe, sich zu ändern",
+        "Das Modul ist zu klein, man sollte noch mehr Hilfsfunktionen dort sammeln",
+        "Rust erlaubt höchstens vier Funktionen pro Modul",
+        "Der Name `utils` verstösst gegen die Namenskonvention `snake_case`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wer `utils` importiert, holt sich CRC, Zeit, UART und Konfiguration auf einmal ins Blickfeld. Jede Änderung an einem Belang berührt das Modul aller anderen. Besser sind kleine Module mit präzisen Namen: `crc`, `zeitformat`, `log`, `konfig`.",
+      "begruendungen": [
+        "Richtig. Ein Sammelmodul wächst immer weiter, weil „irgendwo muss es ja hin“.",
+        "Mehr Hilfsfunktionen verschlimmern das Problem nur.",
+        "Eine solche Grenze gibt es nicht, es geht um Zusammengehörigkeit, nicht um Anzahl.",
+        "`utils` ist gültiges `snake_case`. Das Problem ist der Inhalt, nicht die Schreibweise."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Kohäsion, Kopplung und das Rust-Modul",
+      "text": "- **Kohäsion** (cohesion): Wie stark gehören die Teile **innerhalb** eines Moduls zusammen? Hoch ist gut.\n- **Kopplung** (coupling): Wie viel wissen **verschiedene** Module voneinander? Lose ist gut.\n\nIn Rust ist das Modul (`mod`) die kleinste Einheit dafür. Ein Modul ist ein Namensraum **und** eine Sichtbarkeitsgrenze: Alles ist standardmässig privat. Ein Modul entsteht mit `mod name;` in der Elterndatei. Rust sucht dann `name.rs` neben der Elterndatei oder, für ein Modul in einem Unterordner, `eltern/name.rs`. Die ältere Form `name/mod.rs` funktioniert weiterhin, ist aber im Editor schwerer zu unterscheiden.",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "src/",
+          "├── lib.rs           // mod sensor;",
+          "├── sensor.rs        // mod filter; mod kalibrierung;",
+          "└── sensor/",
+          "    ├── filter.rs",
+          "    └── kalibrierung.rs"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Der Crate-Root deklariert das Modul `sensor`." },
+          { "zeile": 3, "text": "`sensor.rs` ist das Modul selbst und deklariert seine Untermodule." },
+          { "zeile": 4, "text": "Die Untermodule liegen in einem Ordner mit demselben Namen." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du hast in `src/sensor.rs` die Zeile `mod kalibrierung;` ergänzt. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling sensorik v0.1.0 (/home/user/sensorik)",
+          "error[E0583]: file not found for module `kalibrierung`",
+          " --> src/sensor.rs:2:1",
+          "  |",
+          "2 | mod kalibrierung;",
+          "  | ^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = help: to create the module `kalibrierung`, create file \"src/sensor/kalibrierung.rs\" or \"src/sensor/kalibrierung/mod.rs\""
+        ]
+      },
+      "optionen": [
+        "Die Datei des Moduls fehlt. Weil `sensor` selbst ein Modul ist, sucht rustc sie im Ordner `src/sensor/`",
+        "`kalibrierung` muss in `lib.rs` deklariert werden, nicht in `sensor.rs`",
+        "Untermodule brauchen immer eine Datei `mod.rs`",
+        "In `Cargo.toml` fehlt ein Eintrag für das neue Modul"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Module sind kein Cargo-Thema, sondern reine Sache von rustc: Der Modulbaum ergibt sich aus den `mod`-Deklarationen, und das Dateisystem muss ihm folgen. Die Hilfe-Zeile nennt beide erlaubten Orte.",
+      "begruendungen": [
+        "Richtig. `src/sensor/kalibrierung.rs` anlegen genügt.",
+        "Ein Untermodul wird in seinem Elternmodul deklariert, hier also in `sensor.rs`.",
+        "`mod.rs` ist nur eine von zwei Möglichkeiten, wie die Hilfe-Zeile zeigt.",
+        "Cargo kennt nur Crates. Module innerhalb eines Crates stehen nie in `Cargo.toml`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sichtbarkeit als Werkzeug",
+      "text": "Rust bietet abgestufte Sichtbarkeit. Damit legst du fest, **wer** von einem Detail abhängen darf, und der Compiler setzt es durch.\n\nMit `pub use` (Re-Export) zeigst du nach aussen einen schmalen, flachen Pfad, egal wie tief der Typ intern liegt. Nutzer schreiben `sensorik::Tiefpass` statt `sensorik::sensor::filter::Tiefpass`, und du darfst die innere Struktur später umbauen.",
+      "tabelle": {
+        "kopf": ["Sichtbarkeit", "Wer darf zugreifen?", "Typischer Einsatz"],
+        "zeilen": [
+          ["(nichts)", "nur das eigene Modul und seine Untermodule", "Implementierungsdetails"],
+          ["`pub(super)`", "zusätzlich das Elternmodul", "Helfer eines Untermoduls für sein Elternmodul"],
+          ["`pub(crate)`", "das ganze Crate", "interne Schnittstellen zwischen Modulen"],
+          ["`pub`", "alle, sofern der Pfad erreichbar ist", "öffentliche API"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim Bauen dieses Crates?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "mod sensor {",
+          "    pub mod filter {",
+          "        pub(super) fn glatt(x: u16) -> u16 {",
+          "            x / 2",
+          "        }",
+          "    }",
+          "",
+          "    pub fn lese() -> u16 {",
+          "        filter::glatt(84)",
+          "    }",
+          "}",
+          "",
+          "pub fn roh() -> u16 {",
+          "    sensor::filter::glatt(84)",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler",
+        "Fehler E0603 in Zeile 14: `glatt` ist privat",
+        "Fehler E0603 in Zeile 9: `glatt` ist privat",
+        "Fehler, weil `filter` mit `pub mod` öffentlich ist, `sensor` aber nicht"
+      ],
+      "korrekt": 1,
+      "erklaerung": "`pub(super)` macht `glatt` nur für das Elternmodul `sensor` sichtbar. `sensor::lese` darf es aufrufen, die Funktion `roh` im Crate-Root nicht. rustc meldet `error[E0603]: function `glatt` is private`.",
+      "begruendungen": [
+        "Zeile 14 liegt ausserhalb von `sensor` und darf `glatt` nicht sehen.",
+        "Richtig. Der Crate-Root ist nicht das Elternmodul von `filter`.",
+        "`lese` liegt in `sensor`, also genau dort, wofür `pub(super)` gedacht ist.",
+        "Ein `pub mod` in einem privaten Modul ist erlaubt. Es ist dann nur so weit erreichbar wie sein Elternmodul."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Sichtbarkeit passt zu welchem Element?",
+      "paare": [
+        { "links": "Der Typ `Tiefpass`, den Kunden deiner Bibliothek benutzen", "rechts": "`pub` plus `pub use` im Crate-Root" },
+        { "links": "Eine Registertabelle, die drei Treibermodule im selben Crate brauchen", "rechts": "`pub(crate)`" },
+        { "links": "Ein Rechenhelfer in `sensor::filter`, den nur `sensor` aufruft", "rechts": "`pub(super)`" },
+        { "links": "Das Feld `zustand` einer Zustandsmaschine", "rechts": "privat, Zugriff nur über Methoden" }
+      ],
+      "erklaerung": "Faustregel: so privat wie möglich, so öffentlich wie nötig. Jede Stufe nach oben vergrössert die Zahl der Stellen, die von einem Detail abhängen dürfen, und damit die Kopplung."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Diese Warnung erscheint beim Bauen einer Bibliothek. Was bedeutet sie für die Architektur?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: type `Rohwert` is more private than the item `lese`",
+          " --> src/lib.rs:4:5",
+          "  |",
+          "4 |     pub fn lese() -> Rohwert {",
+          "  |     ^^^^^^^^^^^^^^^^^^^^^^^^ function `lese` is reachable at visibility `pub`",
+          "  |",
+          "note: but type `Rohwert` is only usable at visibility `pub(crate)`",
+          " --> src/lib.rs:2:5",
+          "  |",
+          "2 |     pub(crate) struct Rohwert(pub u16);",
+          "  |     ^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  = note: `#[warn(private_interfaces)]` on by default"
+        ]
+      },
+      "optionen": [
+        "Die öffentliche Funktion `lese` gibt einen Typ zurück, den Nutzer nicht benennen können. Entweder `Rohwert` bewusst veröffentlichen oder `lese` nicht `pub` machen",
+        "Harmlos, die Warnung betrifft nur Debug-Builds",
+        "`Rohwert` wird automatisch öffentlich, weil `lese` öffentlich ist",
+        "Die Funktion `lese` wird vom Compiler entfernt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die öffentliche Schnittstelle zeigt einen internen Typ. Das ist ein halber Zustand: Nutzer bekommen einen `Rohwert`, können ihn aber nicht in eigene Signaturen schreiben. Entscheide bewusst, ob der Typ zur API gehört.",
+      "begruendungen": [
+        "Richtig. Die Lint `private_interfaces` deckt eine unklare API-Grenze auf.",
+        "Die Warnung hängt nicht vom Profil ab, sondern von der Sichtbarkeit.",
+        "Sichtbarkeit wird nie automatisch erweitert. Genau deshalb warnt rustc.",
+        "Die Funktion bleibt erhalten und ist aufrufbar."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Du willst `sensor::filter::Tiefpass` intern nach `dsp::tiefpass::Tiefpass` verschieben, ohne Nutzer deiner Bibliothek zu stören. Was hilft am meisten?",
+      "optionen": [
+        "Den Typ von Anfang an über `pub use` im Crate-Root anbieten. Dann ändert sich nur die interne Zeile `pub use dsp::tiefpass::Tiefpass;`",
+        "Alle Module `pub` machen, damit jeder Pfad erreichbar bleibt",
+        "Den Typ in beide Module kopieren",
+        "Nutzern empfehlen, immer mit `use sensorik::*;` zu importieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Fassade (facade) aus `pub use` entkoppelt den öffentlichen Pfad vom internen Ort. Viele grosse Crates sind so aufgebaut: tiefe private Modulbäume, oben eine kleine Liste von Re-Exports.",
+      "begruendungen": [
+        "Richtig. Der öffentliche Pfad bleibt stabil.",
+        "Dann wird jeder interne Pfad zur öffentlichen API, und jede Umstrukturierung wird ein Breaking Change.",
+        "Zwei Kopien sind zwei verschiedene Typen und führen zu Typfehlern bei Nutzern.",
+        "Glob-Importe verschleiern nur, woher Namen kommen, und können neue Namenskonflikte auslösen."
+      ]
+    }
+  ],
+  "praxis": "In grossen Rust-Codebasen ist Sichtbarkeit das billigste Architekturwerkzeug: `pub(crate)` statt `pub`, und der Compiler verhindert, dass andere Crates von Interna abhängen. Im Review fragst du bei jedem neuen `pub`: Gehört das wirklich zur API? Und bei jedem neuen Modul: Kann ich in einem Satz sagen, wofür es da ist?",
+  "labor": {
+    "titel": "Modulbaum und öffentliche API ansehen",
+    "anleitung": "Lege ein Bibliotheks-Crate mit einem Modul `sensor` und einem Untermodul `filter` an. Probiere `pub(super)`, `pub(crate)` und `pub use` aus und schau dir die erzeugte Dokumentation an: Sie zeigt genau die öffentliche API.",
+    "befehle": [
+      "cargo new --lib sensorik && cd sensorik",
+      "mkdir src/sensor && touch src/sensor.rs src/sensor/filter.rs",
+      "cargo build",
+      "cargo doc --open"
+    ],
+    "beobachtung": "In `cargo doc` erscheinen nur `pub`-Elemente, die vom Crate-Root aus erreichbar sind. Re-Exportierte Typen stehen direkt auf der Startseite. Mit `cargo doc --document-private-items` siehst du zum Vergleich auch alles Interne."
+  },
+  "begriffe": [
+    { "begriff": "Kohäsion", "englisch": "cohesion", "erklaerung": "Wie stark die Teile eines Moduls zu einer gemeinsamen Aufgabe gehören. Hoch ist gut." },
+    { "begriff": "Kopplung", "englisch": "coupling", "erklaerung": "Wie stark Module voneinander abhängen. Lose ist gut." },
+    { "begriff": "Re-Export", "englisch": "re-export", "erklaerung": "`pub use` macht ein Element unter einem weiteren, meist kürzeren öffentlichen Pfad verfügbar." },
+    { "begriff": "Eingeschränkte Sichtbarkeit", "englisch": "restricted visibility", "erklaerung": "`pub(crate)`, `pub(super)` oder `pub(in pfad)` machen ein Element nur für einen Teil des Crates sichtbar." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Packages, Crates und Module", "url": "https://doc.rust-lang.org/book/ch07-00-managing-growing-projects-with-packages-crates-and-modules.html" },
+    { "titel": "Rust Reference: Visibility and Privacy", "url": "https://doc.rust-lang.org/reference/visibility-and-privacy.html" }
+  ]
+}

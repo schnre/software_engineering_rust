@@ -1,0 +1,141 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m7-l1",
+  "phase": 11,
+  "modul": "11.7 Architektur dokumentieren und bewerten",
+  "titel": "Architektur dokumentieren mit arc42 und C4",
+  "lernziele": [
+    "Die Gliederung von arc42 kennen",
+    "Die vier Ebenen des C4-Modells auf ein Rust-System abbilden",
+    "Diagramme als Code neben dem Rust-Code pflegen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Wozu dokumentiert man eine Architektur, wenn es doch `cargo doc` gibt?",
+      "optionen": [
+        "`cargo doc` erklärt die API einzelner Crates. Architekturdokumentation erklärt das Zusammenspiel, die Verteilung auf Geräte und die Gründe für Entscheidungen",
+        "Weil `cargo doc` nur für öffentliche Crates auf crates.io funktioniert",
+        "Weil der Prozess es verlangt, gelesen wird sie nicht",
+        "Um den Code zu ersetzen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Code und Rustdoc zeigen, *wie* etwas gebaut ist, aber selten *warum*, und nie, auf welchem Steuergerät welcher Prozess läuft. Gute Architekturdokumentation ist kurz, aktuell und beantwortet die Fragen, die immer wieder gestellt werden.",
+      "begruendungen": [
+        "Richtig.",
+        "`cargo doc` funktioniert für jedes Crate, auch private.",
+        "Ungelesene Dokumentation ist schlechte Dokumentation, kein Beweis für fehlenden Nutzen.",
+        "Sie ergänzt den Code, sie ersetzt ihn nicht."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die arc42-Kapitel ihrem Inhalt zu.",
+      "paare": [
+        { "links": "Einführung und Ziele", "rechts": "Aufgabe des Systems und die drei bis fünf wichtigsten Qualitätsziele" },
+        { "links": "Kontextabgrenzung", "rechts": "Das System als Blackbox mit allen Nachbarsystemen und Schnittstellen" },
+        { "links": "Bausteinsicht", "rechts": "Zerlegung in Binaries, Crates und Module, schrittweise verfeinert" },
+        { "links": "Laufzeitsicht", "rechts": "Wichtige Abläufe, z. B. Start oder Firmware-Update, als Sequenzen" },
+        { "links": "Verteilungssicht", "rechts": "Welches Binary läuft auf welcher Hardware oder welchem Prozessor" },
+        { "links": "Architekturentscheidungen", "rechts": "Wichtige Entscheidungen mit Begründung, z. B. als ADRs" }
+      ],
+      "erklaerung": "**arc42** ist eine freie Vorlage mit zwölf Kapiteln, verbreitet besonders im deutschsprachigen Raum. Weitere Kapitel: Randbedingungen, Lösungsstrategie, Querschnittliche Konzepte, Qualitätsanforderungen, Risiken und Glossar. Man füllt nur, was dem Leser hilft."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Das **C4-Modell** beschreibt Software auf vier Zoomstufen. Was entspricht in einem Rust-System welcher Ebene?",
+      "paare": [
+        { "links": "Context", "rechts": "Das Gesamtsystem mit Benutzern und Nachbarsystemen" },
+        { "links": "Container", "rechts": "Ein ausführbares Artefakt, z. B. die Firmware oder ein Linux-Dienst" },
+        { "links": "Component", "rechts": "Ein grosser Baustein innerhalb eines Binaries, oft ein Crate im Workspace" },
+        { "links": "Code", "rechts": "Structs, Traits und Funktionen, meist aus dem Code erzeugt oder weggelassen" }
+      ],
+      "erklaerung": "„Container“ hat im C4-Modell nichts mit Docker zu tun: Gemeint ist jede eigenständig ausführbare oder speichernde Einheit. Für die Code-Ebene kann man Diagramme erzeugen lassen, z. B. mit `cargo-modules`, statt sie von Hand zu pflegen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was beschreibt dieses Diagramm in Structurizr DSL?",
+      "code": {
+        "sprache": "text",
+        "datei": "docs/architektur/workspace.dsl",
+        "zeilen": [
+          "workspace {",
+          "  model {",
+          "    techniker = person \"Servicetechniker\"",
+          "    ladestation = softwareSystem \"Ladestation\" {",
+          "      firmware = container \"Leistungsregelung\" \"Regelt Ladestrom\" \"Rust, RTIC auf STM32\"",
+          "      gateway  = container \"Kommunikation\" \"OCPP, Updates\" \"Rust, Tokio auf Embedded Linux\"",
+          "    }",
+          "    backend = softwareSystem \"Betreiber-Backend\"",
+          "    techniker -> gateway \"konfiguriert über Web-UI\"",
+          "    gateway -> firmware \"Sollwerte\" \"postcard über CAN\"",
+          "    gateway -> backend \"Ladevorgänge, Status\" \"OCPP über WebSocket\"",
+          "  }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Ein Containerdiagramm der Ladestation: zwei Rust-Programme auf verschiedenen Prozessoren, ein Benutzer und ein externes System, alle Beziehungen mit Technologie",
+        "Den Entwurf der Structs in der Firmware",
+        "Den zeitlichen Ablauf eines Ladevorgangs",
+        "Die Abhängigkeiten aus `Cargo.lock`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Diagramme als Code (Structurizr, PlantUML, Mermaid) liegen in Git neben dem Code, Änderungen sind im Review sichtbar, und aus einem Modell entstehen mehrere konsistente Sichten. Für Embedded-Systeme ist die Containerebene besonders wertvoll, weil sie die Verteilung auf Prozessoren und Busse zeigt.",
+      "begruendungen": [
+        "Richtig.",
+        "Structs wären die Code-Ebene, die hier fehlt.",
+        "Abläufe gehören in die Laufzeitsicht, z. B. als Sequenzdiagramm.",
+        "Crate-Abhängigkeiten sind ein anderes, feineres Thema."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile in dieser Architekturbeschreibung ist für einen Leser am wenigsten hilfreich?",
+      "code": {
+        "sprache": "text",
+        "datei": "docs/architektur/README.md",
+        "zeilen": [
+          "## Kontext",
+          "Die Ladestation kommuniziert über OCPP 2.0.1 mit dem Betreiber-Backend.",
+          "## Qualitätsziele",
+          "1. Sicherheit: Kein Laden ohne gültige Freigabe und intakte Schutzleiterprüfung.",
+          "2. Die Software soll performant, wartbar, sicher und in idiomatischem Rust geschrieben sein.",
+          "3. Verfügbarkeit: 99,5 % pro Jahr, Updates ohne Unterbrechung laufender Ladevorgänge."
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "„Performant, wartbar, sicher, idiomatisch“ gilt für jedes System und hilft bei keiner Entscheidung. Gute Qualitätsziele sind priorisiert, konkret und messbar, wie Zeile 4 und 6. Die nächste Lektion zeigt, wie man sie als Szenarien formuliert."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Das C4-Modell hat die Ebenen Context, {{?}}, Component und Code. Eine Vorlage mit zwölf Kapiteln für Architekturdokumentation heisst {{?}}. Diagramme, die als Text in Git liegen, nennt man Diagramme als {{?}}.",
+      "luecken": [{ "loesungen": ["Container"] }, { "loesungen": ["arc42"] }, { "loesungen": ["Code"] }],
+      "auswahl": ["Container", "arc42", "Code", "Crate", "UML", "Bild"],
+      "erklaerung": "Mermaid-Diagramme lassen sich sogar direkt in Markdown-Dateien einbetten und werden von GitHub und GitLab gerendert. So bleibt die Architekturdokumentation Teil normaler Pull Requests."
+    }
+  ],
+  "praxis": "Ein guter Start in einem bestehenden Rust-Projekt: Ordner `docs/architektur` mit Kontextdiagramm, Containerdiagramm, Liste der Qualitätsziele und den wichtigsten ADRs (Modul 10.7), alles als Markdown und Diagramm-Code. Das ist an einem Tag gemacht. Halte es aktuell, indem Pull Requests, die Crates oder Binaries hinzufügen, die Diagramme mit anpassen.",
+  "labor": {
+    "titel": "Ein C4-Diagramm erstellen",
+    "anleitung": "Beschreibe ein eigenes System (oder die Ladestation) mit Structurizr DSL und lass es lokal darstellen. Erzeuge zum Vergleich die Modulstruktur eines eigenen Crates mit `cargo-modules`.",
+    "befehle": [
+      "docker run -it --rm -p 8080:8080 -v $(pwd):/usr/local/structurizr structurizr/lite",
+      "cargo install cargo-modules",
+      "cargo modules structure --lib"
+    ],
+    "beobachtung": "Structurizr zeigt aus einem Modell mehrere Sichten. `cargo modules` zeigt die Code-Ebene automatisch und damit immer aktuell. Die oberen Ebenen musst du selbst pflegen, weil sie Absichten und Verteilung beschreiben, die nicht im Code stehen."
+  },
+  "begriffe": [
+    { "begriff": "arc42", "englisch": "arc42", "erklaerung": "Freie Vorlage zur Dokumentation von Software-Architekturen mit zwölf Kapiteln." },
+    { "begriff": "C4-Modell", "englisch": "C4 model", "erklaerung": "Darstellung von Software auf den vier Ebenen Context, Container, Component und Code." },
+    { "begriff": "Diagramme als Code", "englisch": "diagrams as code", "erklaerung": "Diagramme werden textuell beschrieben, versioniert und daraus erzeugt." }
+  ],
+  "weiterlesen": [
+    { "titel": "arc42", "url": "https://arc42.org/" },
+    { "titel": "The C4 model", "url": "https://c4model.com/" },
+    { "titel": "The rustdoc book", "url": "https://doc.rust-lang.org/rustdoc/" }
+  ]
+}

@@ -1,0 +1,274 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m4-l1",
+  "phase": 10,
+  "modul": "10.4 Entwurfsmuster",
+  "titel": "State Machines: enum, match und Typestate",
+  "lernziele": [
+    "Eine Zustandsmaschine mit `enum` und erschöpfendem `match` umsetzen",
+    "Erklären, warum `_` in solchen `match`-Ausdrücken neue Zustände versteckt",
+    "Das Typestate-Muster lesen: Zustände als Typen, ungültige Übergänge kompilieren nicht"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Gerätetreiber merkt sich seinen Zustand in `gestartet: bool`, `bereit: bool` und `fehler: bool`. Was ist das Problem?",
+      "optionen": [
+        "Es gibt acht Kombinationen, aber nur vier sinnvolle Zustände. Unmögliche Kombinationen wie „bereit und fehlerhaft“ lassen sich trotzdem herstellen",
+        "Drei `bool` belegen zu viel Speicher",
+        "Rust erlaubt nicht mehr als zwei `bool`-Felder in einer Struktur",
+        "Kein Problem, so bleibt der Treiber am flexibelsten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ist ein Zustand auf mehrere Flags verteilt, muss jede Stelle im Code sie konsistent halten. Irgendwann setzt jemand `bereit = true` und vergisst `fehler = false`. Ein einziges `enum` mit den vier gültigen Zuständen macht ungültige Kombinationen **unrepräsentierbar**.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Speicher ist nicht das Problem, drei Bytes fallen kaum ins Gewicht.",
+        "Eine solche Grenze gibt es nicht.",
+        "Gerade diese Flexibilität erzeugt die Fehler."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zustandsmaschine mit enum und match",
+      "text": "Eine **Zustandsmaschine** (state machine) besteht aus Zuständen, Ereignissen und Übergängen. In Rust ist die einfachste Form ein `enum` für den Zustand und eine reine Funktion, die mit `match` auf das Paar `(Zustand, Ereignis)` den nächsten Zustand liefert.\n\n`match` ist **erschöpfend** (exhaustive): Fehlt eine Kombination, bricht der Build mit `E0004` ab. Anders als `switch` in C/C++ ist das keine Warnung, die man übersehen kann.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/zustand.rs",
+        "zeilen": [
+          "#[derive(Debug, Clone, Copy, PartialEq)]",
+          "enum Zustand { Aus, Startet, Bereit, Fehler }",
+          "",
+          "#[derive(Debug, Clone, Copy)]",
+          "enum Ereignis { Einschalten, Fertig, Stoerung, Reset }",
+          "",
+          "fn naechster(z: Zustand, e: Ereignis) -> Zustand {",
+          "    use Ereignis as E;",
+          "    use Zustand as Z;",
+          "    match (z, e) {",
+          "        (Z::Aus, E::Einschalten) => Z::Startet,",
+          "        (Z::Startet, E::Fertig) => Z::Bereit,",
+          "        (Z::Startet | Z::Bereit, E::Stoerung) => Z::Fehler,",
+          "        (Z::Fehler, E::Reset) => Z::Aus,",
+          "        (Z::Aus | Z::Startet | Z::Bereit | Z::Fehler, _) => z,",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 10, "text": "Match auf das Tupel aus Zustand und Ereignis." },
+          { "zeile": 13, "text": "Or-Patterns fassen gleiche Übergänge zusammen." },
+          { "zeile": 15, "text": "Alle übrigen Ereignisse ignorieren, aber die Zustände ausdrücklich aufzählen." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Mit der Funktion `naechster` von eben: Was liefert `naechster(Zustand::Bereit, Ereignis::Einschalten)`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "match (z, e) {",
+          "    (Z::Aus, E::Einschalten) => Z::Startet,",
+          "    (Z::Startet, E::Fertig) => Z::Bereit,",
+          "    (Z::Startet | Z::Bereit, E::Stoerung) => Z::Fehler,",
+          "    (Z::Fehler, E::Reset) => Z::Aus,",
+          "    (Z::Aus | Z::Startet | Z::Bereit | Z::Fehler, _) => z,",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`Zustand::Bereit`",
+        "`Zustand::Startet`",
+        "`Zustand::Aus`",
+        "Panic, weil der Übergang nicht definiert ist"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`(Bereit, Einschalten)` passt auf keinen der ersten vier Arme, sondern erst auf den letzten, der `z` unverändert zurückgibt. Ob „ignorieren“ fachlich richtig ist oder ein unerwartetes Ereignis als Fehler gelten soll, ist eine bewusste Entscheidung, die das `match` sichtbar macht.",
+      "begruendungen": [
+        "Richtig.",
+        "Nach `Startet` führt nur `Einschalten` aus `Aus`.",
+        "Nach `Aus` führt nur `Reset` aus `Fehler`.",
+        "Ein `match` ist erschöpfend, es gibt keinen undefinierten Fall und damit keinen Panic."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Das Gerät startet in `Aus` und bekommt nacheinander `Einschalten`, `Fertig`, `Stoerung`, `Reset`. Welche Zustände durchläuft es?",
+      "elemente": [
+        "`Startet`",
+        "`Bereit`",
+        "`Fehler`",
+        "`Aus`"
+      ],
+      "erklaerung": "Genau so sieht ein Unit-Test für eine Zustandsmaschine aus: eine Folge von Ereignissen und die erwartete Folge von Zuständen. Weil `naechster` eine reine Funktion ohne Seiteneffekte ist, braucht der Test weder Hardware noch Mocks."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Jemand ergänzt den Zustand `Wartung` im `enum`, passt aber `naechster` nicht an. Was sagt dir die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling geraet v0.1.0 (/home/user/projekt)",
+          "error[E0004]: non-exhaustive patterns: `(Zustand::Wartung, _)` not covered",
+          "  --> src/main.rs:8:11",
+          "   |",
+          " 8 |     match (z, e) {",
+          "   |           ^^^^^^ pattern `(Zustand::Wartung, _)` not covered",
+          "   |",
+          "   = note: the matched value is of type `(Zustand, Ereignis)`",
+          "",
+          "error: could not compile `geraet` (bin \"geraet\") due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "Der Compiler verlangt, dass für `Wartung` mit jedem Ereignis ein Übergang festgelegt wird. Der Build schlägt fehl, bis das geschehen ist",
+        "Nur eine Warnung, das Programm läuft, `Wartung` wird ignoriert",
+        "Das Programm kompiliert, stürzt aber im Zustand `Wartung` zur Laufzeit ab",
+        "Ein Fehler im `enum`: Zustände dürfen nachträglich nicht ergänzt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist der grösste Vorteil gegenüber `switch` in C/C++: Ein neuer Zustand ist ein Compilerfehler an **jeder** Stelle, die ihn behandeln muss. Der Compiler wird zur Checkliste für die Erweiterung.",
+      "begruendungen": [
+        "Richtig.",
+        "`E0004` ist ein Fehler, keine Warnung.",
+        "Es entsteht gar kein Programm, der Build bricht ab.",
+        "Das `enum` ist in Ordnung, nur das `match` ist unvollständig."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese Version kompiliert auch nach dem Hinzufügen von `Wartung` ohne Fehler, obwohl `Wartung` nie behandelt wird. Welche Zeile ist dafür verantwortlich?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn naechster(z: Zustand, e: Ereignis) -> Zustand {",
+          "    use Ereignis as E;",
+          "    use Zustand as Z;",
+          "    match (z, e) {",
+          "        (Z::Aus, E::Einschalten) => Z::Startet,",
+          "        (Z::Startet, E::Fertig) => Z::Bereit,",
+          "        (Z::Startet | Z::Bereit, E::Stoerung) => Z::Fehler,",
+          "        (Z::Fehler, E::Reset) => Z::Aus,",
+          "        _ => z,",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 9,
+      "erklaerung": "Der Platzhalter `_` passt auf alles, auch auf jeden künftigen Zustand. Damit verschenkt man die Prüfung des Compilers. Besser die Zustände ausdrücklich aufzählen wie `(Z::Aus | Z::Startet | …, _)`. Clippy findet solche Stellen mit dem Lint `clippy::wildcard_enum_match_arm` (nicht standardmässig aktiv)."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Typestate: Zustände als Typen",
+      "text": "Beim **Typestate-Muster** (typestate pattern) ist der Zustand kein Wert, sondern ein **Typparameter**. Jeder Zustand ist ein eigener, leerer Typ. Methoden gibt es nur in dem `impl`-Block des Zustands, in dem sie erlaubt sind. Übergänge nehmen `self` per Wert und geben einen Wert mit neuem Typ zurück.\n\nEin ungültiger Übergang ist dann kein Laufzeitfehler, sondern kompiliert nicht. Die Zustandstypen haben die Grösse null, es entstehen also keine Laufzeitkosten. Embedded-HALs nutzen das für Pins (`Input`/`Output`), mehr dazu in Phase 6.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::marker::PhantomData;",
+          "",
+          "struct Offen;",
+          "struct Geschlossen;",
+          "",
+          "struct Tuer<Z> { _zustand: PhantomData<Z> }",
+          "",
+          "impl Tuer<Geschlossen> {",
+          "    fn neu() -> Self { Tuer { _zustand: PhantomData } }",
+          "    fn oeffnen(self) -> Tuer<Offen> { Tuer { _zustand: PhantomData } }",
+          "}",
+          "",
+          "impl Tuer<Offen> {",
+          "    fn schliessen(self) -> Tuer<Geschlossen> { Tuer { _zustand: PhantomData } }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "`PhantomData<Z>` merkt sich den Zustand nur im Typ, ohne Speicher." },
+          { "zeile": 10, "text": "`self` per Wert: Die alte Tür ist danach verbraucht." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert beim Kompilieren dieses `main` mit der `Tuer` von eben?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let t = Tuer::neu();",
+          "    let t = t.oeffnen();",
+          "    let t = t.oeffnen();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, die Tür ist danach einfach weiterhin offen",
+        "Fehler `E0599`: Für `Tuer<Offen>` gibt es keine Methode `oeffnen`",
+        "Fehler `E0382`: `t` wurde bereits verschoben",
+        "Kompiliert, panickt aber zur Laufzeit"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Nach Zeile 3 hat `t` den Typ `Tuer<Offen>`, und dort existiert `oeffnen` nicht. rustc meldet `no method named oeffnen found for struct Tuer<Offen>` und weist sogar auf die frühere Variable vom Typ `Tuer<Geschlossen>` hin. Der Fehler ist rein statisch, zur Laufzeit gibt es keine Prüfung.",
+      "begruendungen": [
+        "Die Methode existiert für diesen Typ gar nicht.",
+        "Richtig.",
+        "Jedes `let t` erzeugt eine neue Variable (Shadowing), es wird nichts doppelt benutzt. `E0382` gäbe es, wenn man zweimal dieselbe Variable `t` öffnen würde.",
+        "Typestate prüft zur Kompilierzeit, Laufzeitprüfungen gibt es keine."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Umsetzung passt zu welcher Situation?",
+      "paare": [
+        { "links": "`enum` + `match`", "rechts": "Zustand hängt von Laufzeit-Ereignissen ab, z. B. Meldungen über CAN" },
+        { "links": "Typestate", "rechts": "Reihenfolge der Aufrufe steht beim Programmieren fest, z. B. Peripherie konfigurieren, dann benutzen" },
+        { "links": "`enum` mit Daten in den Varianten", "rechts": "Der Zustand `Fehler` braucht einen Fehlercode, `Startet` einen Zeitstempel" },
+        { "links": "Explizite Aufzählung statt `_`", "rechts": "Neue Zustände sollen an jeder betroffenen Stelle einen Compilerfehler auslösen" }
+      ],
+      "erklaerung": "Typestate kann nur prüfen, was zur Kompilierzeit feststeht. Hängt der nächste Zustand von einer Nachricht oder einem Sensorwert ab, braucht man einen Laufzeitwert, also ein `enum`. Beide Muster lassen sich kombinieren: Typestate für die Initialisierung, `enum` für den Betrieb."
+    }
+  ],
+  "praxis": "Viele `bool`-Felder, die gemeinsam einen Ablauf steuern, oder Bedingungen wie `if gestartet && !fehler && bereit` verraten eine versteckte Zustandsmaschine. Mach sie als `enum` sichtbar, verzichte auf `_` im `match` und teste die Übergangstabelle. In HALs wie `stm32f4xx-hal` oder `embassy` begegnet dir Typestate täglich, etwa wenn `into_push_pull_output()` einen Pin in einen anderen Typ verwandelt.",
+  "labor": {
+    "titel": "Die Übergangstabelle testen",
+    "anleitung": "Lege ein Projekt an, kopiere `Zustand`, `Ereignis` und `naechster` hinein und schreibe einen Test, der alle 16 Kombinationen prüft. Ergänze danach die Variante `Wartung` und beobachte den Build. Ersetze anschliessend den letzten Arm durch `_ => z` und lass Clippy laufen.",
+    "befehle": [
+      "cargo new --lib geraet && cd geraet",
+      "cargo test",
+      "cargo clippy -- -W clippy::wildcard_enum_match_arm"
+    ],
+    "beobachtung": "Mit expliziter Aufzählung bricht `cargo test` nach dem Hinzufügen von `Wartung` mit `E0004` ab. Mit `_ => z` kompiliert alles still, nur der zusätzlich aktivierte Clippy-Lint meldet `wildcard match will also match any future added variants`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Zustandsmaschine",
+      "englisch": "state machine, finite state machine",
+      "erklaerung": "Modell eines Systems aus Zuständen, Ereignissen und Übergängen."
+    },
+    {
+      "begriff": "Erschöpfendes match",
+      "englisch": "exhaustive match",
+      "erklaerung": "Ein `match` muss jeden möglichen Wert abdecken, sonst meldet rustc den Fehler `E0004`."
+    },
+    {
+      "begriff": "Typestate-Muster",
+      "englisch": "typestate pattern",
+      "erklaerung": "Der Zustand eines Objekts steckt in seinem Typ. Ungültige Übergänge kompilieren nicht."
+    },
+    {
+      "begriff": "PhantomData",
+      "englisch": "PhantomData",
+      "erklaerung": "Markertyp der Grösse null, mit dem ein Typparameter genutzt wird, ohne Daten dieses Typs zu speichern."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Embedded Rust Book: Typestate Programming",
+      "url": "https://docs.rust-embedded.org/book/static-guarantees/typestate-programming.html"
+    },
+    {
+      "titel": "The Rust Programming Language",
+      "url": "https://doc.rust-lang.org/book/"
+    }
+  ]
+}

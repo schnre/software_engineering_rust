@@ -1,0 +1,223 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m3-l1",
+  "phase": 5,
+  "modul": "5.3 Atomics und Speichermodell",
+  "titel": "Atomics und Memory Ordering",
+  "lernziele": [
+    "Atomare Typen aus `std::sync::atomic` mit `load`, `store`, `fetch_add` und `compare_exchange` benutzen",
+    "`Relaxed`, `Acquire`, `Release` und `SeqCst` unterscheiden",
+    "Mit Release/Acquire eine Happens-before-Beziehung zwischen Threads herstellen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "zaehler-wahl",
+      "frage": "Viele Threads zählen empfangene Pakete. Was ist die einfachste korrekte Lösung?",
+      "optionen": [
+        "`static PAKETE: AtomicU64` und `PAKETE.fetch_add(1, Ordering::Relaxed)`",
+        "`static mut PAKETE: u64` und `unsafe { PAKETE += 1 }`",
+        "`Arc<RefCell<u64>>` an jeden Thread geben",
+        "`Arc<u64>` klonen und im Thread `*p += 1`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine atomare Operation (*atomic operation*) ist unteilbar: Kein Inkrement geht verloren. Atomics haben **innere Veränderbarkeit** (*interior mutability*): `fetch_add` braucht nur `&self`, deshalb kann ein `static` ohne `mut` sie benutzen. Für einen reinen Zähler genügt `Relaxed`, dazu gleich mehr.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist ein Data Race und damit Undefined Behavior. Rust verlangt dafür nicht ohne Grund `unsafe`.",
+        "`RefCell` ist nicht `Sync`, der Compiler lehnt das ab.",
+        "Über ein `Arc` bekommt man nur `&u64`, Veränderung ist nicht möglich."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Atomare Typen",
+      "text": "`std::sync::atomic` bietet `AtomicBool`, `AtomicU8` bis `AtomicU64`, `AtomicUsize`, die vorzeichenbehafteten Varianten und `AtomicPtr<T>`. Jede Operation bekommt ein `Ordering` als Argument, es gibt keinen versteckten Standardwert wie in C++.\n\nAuf x86-64 und Cortex-M3 und höher werden sie zu einzelnen Maschinenbefehlen bzw. kurzen Befehlsfolgen, ganz ohne Sperre. Atomics schützen aber nur **eine** Variable. Gehören mehrere Werte zu einer Invariante, braucht es einen `Mutex`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let a = AtomicU64::new(10);",
+          "a.fetch_add(5, Ordering::Relaxed);   // liefert 10, a ist jetzt 15",
+          "a.swap(1, Ordering::Relaxed);        // liefert 15, a ist jetzt 1",
+          "a.compare_exchange(1, 7, Ordering::AcqRel, Ordering::Acquire); // Ok(1)"
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-cas",
+      "frage": "Ergänze: Ein gemeinsames Maximum wird ohne Sperre aktualisiert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn aktualisiere_maximum(max: &AtomicUsize, wert: usize) {",
+          "    let mut bisher = max.load(Ordering::Relaxed);",
+          "    while bisher < wert {",
+          "        match max.{{?}}(bisher, wert, Ordering::Relaxed, Ordering::Relaxed) {",
+          "            Ok(_) => break,",
+          "            {{?}}(aktuell) => bisher = aktuell,",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["compare_exchange_weak"] },
+        { "loesungen": ["Err"] }
+      ],
+      "auswahl": ["compare_exchange_weak", "Err", "fetch_add", "swap", "None", "Some"],
+      "erklaerung": "`compare_exchange_weak(erwartet, neu, …)` schreibt nur, wenn der Wert noch `erwartet` ist (*compare-and-swap*, CAS). Sonst liefert es `Err` mit dem aktuellen Wert, und die Schleife versucht es erneut. Die `weak`-Variante darf auch grundlos scheitern und ist dafür in Schleifen auf ARM effizienter. Für genau diesen Fall gibt es übrigens schon `max.fetch_max(wert, Ordering::Relaxed)`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Warum Ordering?",
+      "text": "Compiler und CPU dürfen Speicherzugriffe umordnen, solange **ein** Thread nichts davon merkt. Für andere Threads können Schreibzugriffe deshalb in anderer Reihenfolge sichtbar werden. Das `Ordering` legt fest, welche Reihenfolge garantiert ist:\n\n- **`Relaxed`**: nur die Operation selbst ist atomar, keine Aussage über andere Variablen.\n- **`Release`** (bei `store`): Alles, was dieser Thread *vorher* geschrieben hat, wird mit diesem Wert veröffentlicht.\n- **`Acquire`** (bei `load`): Wer den veröffentlichten Wert liest, sieht auch alles, was davor geschrieben wurde.\n- **`AcqRel`**: beides, für Lese-Ändere-Schreibe-Operationen.\n- **`SeqCst`**: zusätzlich eine einzige globale Reihenfolge aller `SeqCst`-Operationen."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "release-acquire",
+      "frage": "Thread A veröffentlicht einen Wert, Thread B wartet darauf. Was gibt B garantiert aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static DATEN: AtomicU64 = AtomicU64::new(0);",
+          "static BEREIT: AtomicBool = AtomicBool::new(false);",
+          "",
+          "// Thread A",
+          "DATEN.store(42, Ordering::Relaxed);",
+          "BEREIT.store(true, Ordering::Release);",
+          "",
+          "// Thread B",
+          "while !BEREIT.load(Ordering::Acquire) {",
+          "    std::hint::spin_loop();",
+          "}",
+          "println!(\"{}\", DATEN.load(Ordering::Relaxed));"
+        ]
+      },
+      "optionen": [
+        "Immer `42`",
+        "`0` oder `42`, weil `DATEN` nur `Relaxed` geschrieben wird",
+        "Immer `0`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Das `Release`-Store auf `BEREIT` und das `Acquire`-Load, das `true` liest, bilden ein Paar. Daraus entsteht eine **Happens-before-Beziehung**: Alles vor dem Release in A ist für B nach dem Acquire sichtbar. Wären beide Zugriffe auf `BEREIT` `Relaxed`, könnte B tatsächlich `0` sehen, auf ARM-Prozessoren auch in der Praxis.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Release/Acquire-Paar auf `BEREIT` ordnet auch den `Relaxed`-Zugriff auf `DATEN` davor ein.",
+        "B wartet, bis `BEREIT` gesetzt ist, und dann ist `42` garantiert sichtbar."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "store-acquire",
+      "frage": "Was will dir der Compiler sagen?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: atomic stores cannot have `Acquire` or `AcqRel` ordering",
+          "  --> src/main.rs:12:16",
+          "   |",
+          "12 |     v.store(1, Ordering::Acquire);",
+          "   |                ^^^^^^^^^^^^^^^^^",
+          "   |",
+          "   = help: consider using ordering modes `Release`, `SeqCst` or `Relaxed`",
+          "   = note: `#[deny(invalid_atomic_ordering)]` on by default"
+        ]
+      },
+      "optionen": [
+        "Ein `store` schreibt nur und kann deshalb nichts „erwerben“. Gültig sind `Release`, `SeqCst` oder `Relaxed`",
+        "`Acquire` ist auf x86 nicht verfügbar",
+        "Man muss zuerst `load` mit `Acquire` aufrufen, bevor man `store` darf",
+        "Es ist nur eine Warnung, das Programm wird trotzdem gebaut"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Acquire gehört zu Lesezugriffen, Release zu Schreibzugriffen. Ein Lint, der standardmässig auf `deny` steht, fängt die falsche Kombination ab. Die Std-Dokumentation sagt zusätzlich, dass solche Aufrufe zur Laufzeit panicken würden. Gleiches gilt umgekehrt für `load` mit `Release`.",
+      "begruendungen": [
+        "Richtig.",
+        "Es geht um die Bedeutung, nicht um die Plattform.",
+        "Die beiden Operationen sind unabhängig. `store` allein ist erlaubt, nur nicht mit `Acquire`.",
+        "Es heisst `error` und `deny`: Der Build bricht ab."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "ordering-wahl",
+      "frage": "Welche Ordnung passt?",
+      "paare": [
+        { "links": "Statistikzähler, nur am Ende ausgelesen", "rechts": "`Relaxed`" },
+        { "links": "Flag setzen, nachdem ein Puffer befüllt wurde", "rechts": "`Release` beim `store`" },
+        { "links": "Flag prüfen, bevor der Puffer gelesen wird", "rechts": "`Acquire` beim `load`" },
+        { "links": "Unsicher, welche nötig ist", "rechts": "`SeqCst` – und jemanden fragen" }
+      ],
+      "erklaerung": "`SeqCst` ist die stärkste und einfachste Ordnung. Auf x86 kostet sie bei Loads nichts zusätzlich, bei Stores etwas. Schwächere Ordnungen lohnen sich vor allem auf ARM, wo zusätzliche Barrieren (`dmb`) nötig sind. Wer schwächere Ordnungen verwendet, sollte im Code begründen, warum sie reichen."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "volatile",
+      "frage": "Ein C-Entwickler fragt: „Reicht nicht `ptr::read_volatile` für das Flag?“ Was antwortest du?",
+      "optionen": [
+        "Nein. Volatile verhindert nur, dass der Compiler den Zugriff weglässt. Es ist nicht atomar und ordnet nichts zwischen Threads",
+        "Ja, volatile ist die Embedded-Variante von Atomics",
+        "Ja, solange das Flag ein `bool` ist",
+        "Nein, `read_volatile` gibt es in Rust nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Volatile ist für Speicher gedacht, der sich ausserhalb des Programms ändert, z. B. Hardware-Register (Phase 6). Für die Synchronisation zwischen Threads sind ausschliesslich Atomics und Sperren zuständig. Wie in C++ ist ein Data Race über volatile Zugriffe in Rust Undefined Behavior.",
+      "begruendungen": [
+        "Richtig.",
+        "Auch auf Mikrocontrollern synchronisiert man zwischen Interrupt und Hauptprogramm mit Atomics oder kritischen Abschnitten.",
+        "Die Grösse ändert nichts daran, dass keine Ordnung garantiert wird.",
+        "`core::ptr::read_volatile` existiert, ist aber für etwas anderes gedacht."
+      ]
+    }
+  ],
+  "praxis": "Die drei häufigsten guten Einsätze von Atomics: Zähler für Statistiken (`Relaxed`), ein Stopp-Flag (`AtomicBool`, für einfache Fälle mit `SeqCst` oder Release/Acquire) und „einmal veröffentlichen, dann nur lesen“ (Release/Acquire). Bei allem, was darüber hinausgeht, ist ein `Mutex` fast immer schnell genug und viel leichter richtig zu machen.",
+  "labor": {
+    "titel": "Ordering im Maschinencode",
+    "anleitung": "Schreibe zwei Funktionen, die ein `AtomicU32` speichern, einmal mit `Relaxed` und einmal mit `SeqCst`. Erzeuge Assembler für x86-64 und vergleiche.",
+    "befehle": [
+      "cargo new --lib ordering && cd ordering",
+      "cargo rustc --release -- --emit=asm",
+      "grep -A6 'store_' target/release/deps/*.s"
+    ],
+    "beobachtung": "Auf x86-64 wird der `Relaxed`-Store zu einem einfachen `mov`, der `SeqCst`-Store zu `xchg`. Ein `Release`-Store ist auf x86 ebenfalls nur ein `mov`, weil die Architektur Stores ohnehin geordnet sichtbar macht. Auf ARM sähe man zusätzliche `dmb`-Barrieren."
+  },
+  "begriffe": [
+    {
+      "begriff": "Atomare Operation",
+      "englisch": "atomic operation",
+      "erklaerung": "Unteilbare Operation: Kein anderer Thread sieht einen halb fertigen Zustand."
+    },
+    {
+      "begriff": "Compare-and-Swap",
+      "englisch": "compare-and-swap, CAS",
+      "erklaerung": "Schreibt einen neuen Wert nur, wenn der aktuelle dem erwarteten entspricht. In Rust `compare_exchange`."
+    },
+    {
+      "begriff": "Speicherordnung",
+      "englisch": "memory ordering",
+      "erklaerung": "Legt fest, welche Reihenfolge von Speicherzugriffen andere Threads garantiert beobachten."
+    },
+    {
+      "begriff": "Happens-before",
+      "englisch": "happens-before",
+      "erklaerung": "Garantie, dass die Wirkungen einer Operation für eine andere sichtbar sind. Entsteht z. B. durch ein Release/Acquire-Paar."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::sync::atomic",
+      "url": "https://doc.rust-lang.org/std/sync/atomic/index.html"
+    },
+    {
+      "titel": "The Rustonomicon: Atomics",
+      "url": "https://doc.rust-lang.org/nomicon/atomics.html"
+    },
+    {
+      "titel": "Mara Bos: Rust Atomics and Locks (online frei lesbar)",
+      "url": "https://marabos.nl/atomics/"
+    }
+  ]
+}

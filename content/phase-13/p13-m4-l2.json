@@ -1,0 +1,196 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m4-l2",
+  "phase": 13,
+  "modul": "13.4 Kommunikation und Mentoring",
+  "titel": "Andere weiterbringen",
+  "lernziele": [
+    "Juniors beim Kampf mit dem Borrow-Checker so begleiten, dass sie das Prinzip verstehen",
+    "Pairing und Code-Reviews gezielt als Lehrmittel einsetzen",
+    "Psychologische Sicherheit im Team durch eigenes Verhalten fördern"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Junior kommt zum dritten Mal mit einem Borrow-Checker-Fehler und fragt: „Kann ich nicht einfach überall `.clone()` hinschreiben?“ Was bringt ihn am meisten weiter?",
+      "optionen": [
+        "Gemeinsam die Fehlermeldung lesen und fragen: „Wem gehören diese Daten, und wer braucht sie wie lange?“",
+        "„Ja, mach das, Performance ist später.“",
+        "Den Code schnell selbst umbauen und ihm das Ergebnis schicken",
+        "Ihn auf das Rust Book verweisen und allein weitermachen lassen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Borrow-Checker prüft eine Frage, die man in C++ nur im Kopf stellt: Wer besitzt die Daten, und wer leiht sie wie lange aus? Wer diese Frage selbst beantworten lernt, braucht die Hilfe beim nächsten Mal nicht mehr. Ein einzelnes `clone()` ist manchmal die richtige Lösung, als Reflex verdeckt es aber das Verständnis.",
+      "begruendungen": [
+        "Richtig.",
+        "Das löst das Symptom und erzeugt Clone-Schulden (siehe Lektion 13.1).",
+        "Das spart heute fünf Minuten, aber er lernt nichts daraus.",
+        "Das Buch ist gut, aber ohne Begleitung verliert er womöglich Stunden und den Mut."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ihr lest diese Meldung gemeinsam. Mit welcher Frage führst du den Junior am besten zur Ursache?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0502]: cannot borrow `messwerte` as mutable because it is also borrowed as immutable",
+          " --> src/main.rs:5:13",
+          "  |",
+          "3 |     for wert in &messwerte {",
+          "  |                 ----------",
+          "  |                 |",
+          "  |                 immutable borrow occurs here",
+          "  |                 immutable borrow later used here",
+          "4 |         if *wert > 15 {",
+          "5 |             messwerte.push(*wert / 2);",
+          "  |             ^^^^^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here"
+        ]
+      },
+      "optionen": [
+        "„Was könnte mit dem Iterator passieren, wenn `push` den Vektor vergrössert und neu anlegt?“",
+        "„Hast du schon `messwerte.clone()` versucht?“",
+        "„Warum hast du `&messwerte` statt `messwerte` geschrieben?“",
+        "„Kennst du `RefCell`?“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Frage führt zum Kern: Ein `push` kann den Speicher neu anlegen, und der Iterator würde dann auf freigegebenen Speicher zeigen. In C++ ist genau das ein bekannter Fehler (Iterator-Invalidierung), den der Compiler nicht findet. Wer das verstanden hat, sieht den Borrow-Checker als Helfer, nicht als Gegner, und findet die Lösung selbst: erst sammeln, dann anhängen.",
+      "begruendungen": [
+        "Richtig.",
+        "Das bringt den Fehler zum Schweigen, ohne dass der Junior versteht, wovor er schützt.",
+        "Ohne `&` würde die Schleife den Vektor verbrauchen, und das Problem wäre nur verschoben.",
+        "`RefCell` würde den Fehler zur Laufzeit als Panic auslösen, statt ihn zu beheben."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Formen der Unterstützung",
+      "text": "Gutes **Mentoring** passt die Unterstützung an Person und Situation an:\n\n- **Pair Programming**: gemeinsam an einer Aufgabe, um Denkweise und Werkzeuge zu zeigen, z. B. wie man `rustc --explain E0502` und die Hinweise des Compilers nutzt\n- **Leitende Fragen**: wenn jemand nah an der Lösung ist\n- **Direkt sagen**: bei Notfällen oder wenn Wissen fehlt, das man nicht herleiten kann\n- **Delegieren mit Sicherheitsnetz**: Verantwortung übergeben, mit festen Punkten für Rückfragen\n- **Reviews als Lerngelegenheit**: erklären, warum, nicht nur was\n\nBeim Pairing gilt: Die weniger erfahrene Person tippt (*Driver*), du navigierst. Wer die Tastatur hat, lernt mehr."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Form passt zu welcher Situation?",
+      "paare": [
+        { "links": "Pair Programming", "rechts": "Ein Junior baut zum ersten Mal einen Treiber mit `embedded-hal`-Traits" },
+        { "links": "Leitende Fragen", "rechts": "Der Junior ist nah an der Lösung eines Lifetime-Fehlers" },
+        { "links": "Direkt sagen", "rechts": "Ein Panic legt Geräte im Feld lahm, die Ursache ist dir klar" },
+        { "links": "Delegieren mit Rückfragen", "rechts": "Eine erfahrene Kollegin soll das neue Logging-Modul verantworten" }
+      ],
+      "erklaerung": "Nach einem Notfall lohnt sich oft eine kurze Nachbesprechung: „Wie hätten wir das schneller gefunden?“ So wird auch aus der direkten Lösung noch eine Lerngelegenheit."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Im Review siehst du bei einem Junior diese Signatur: `fn sende(paket: Vec<u8>)`. Danach muss er beim Aufrufer `paket.clone()` schreiben. Welcher Review-Kommentar ist am lehrreichsten?",
+      "optionen": [
+        "„Die Funktion liest das Paket nur. Mit `paket: &[u8]` leiht sie es aus, und das `clone()` beim Aufrufer fällt weg. Faustregel: nur besitzen, was man behalten oder verändern will.“",
+        "„Falscher Parametertyp.“",
+        "„Bitte `&[u8]` verwenden.“",
+        "„Das `clone()` ist unnötig teuer, bitte entfernen.“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein guter Review-Kommentar erklärt das **Warum** und gibt eine übertragbare Regel mit. Dann ist die nächste Signatur von Anfang an richtig. Der Compiler gibt übrigens denselben Tipp: Bei E0382 schlägt er vor, den Parameter auszuleihen, statt den Wert zu klonen. Den Junior auf solche Hinweise aufmerksam zu machen, ist ebenfalls Mentoring.",
+      "begruendungen": [
+        "Richtig.",
+        "Er weiss danach weder, was falsch ist, noch warum.",
+        "Richtig als Anweisung, aber ohne Begründung lernt er nur diese eine Stelle.",
+        "Das Entfernen allein führt zu E0382. Die eigentliche Ursache ist die Signatur."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Psychologische Sicherheit",
+      "text": "Googles Studie *Project Aristotle* fand, dass der wichtigste Faktor für erfolgreiche Teams **psychologische Sicherheit** ist: das Gefühl, Fragen stellen, Fehler zugeben und Bedenken äussern zu können, ohne belächelt zu werden.\n\nGerade beim Umstieg auf Rust fühlen sich erfahrene Leute plötzlich wieder wie Anfänger. Seniors prägen das Klima durch ihr Verhalten: „Den Lifetime-Fehler verstehe ich auch nicht sofort, lass uns nachsehen“ sagen, eigene Fehler offen ansprechen, Fragen ernst nehmen. Nach Vorfällen hilft ein **Blameless Postmortem**: eine Nachbesprechung, die Ursachen im System sucht, nicht Schuldige."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein `unwrap()` eines Juniors hat im Feld Geräte neu starten lassen. Wie gehst du damit um?",
+      "optionen": [
+        "Gemeinsam beheben, dann fragen, warum Review und CI das durchgelassen haben, und z. B. den Lint `clippy::unwrap_used` in der CI aktivieren",
+        "In der Teamrunde deutlich machen, wer den Fehler gemacht hat",
+        "Dem Junior vorerst keine Pull Requests mehr erlauben",
+        "Nichts sagen, damit er sich nicht schlecht fühlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wenn ein einzelnes `unwrap` eines Menschen zu einem Ausfall führen kann, fehlt im System eine Prüfung. Ein Lint in der CI verhindert den nächsten Fall bei allen, nicht nur bei einer Person. Schuldzuweisung erreicht vor allem, dass Fehler künftig verschwiegen werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Öffentliche Schuldzuweisung zerstört Vertrauen, und künftige Fehler werden versteckt.",
+        "Das bekämpft das Symptom, nicht die fehlende Prüfung.",
+        "Ohne Nachbesprechung lernen weder der Junior noch das Team daraus."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Woran erkennt man einen guten Senior im Rust-Team?",
+      "optionen": [
+        "Andere werden durch ihn oder sie besser",
+        "Teilt Wissen aktiv, über Reviews, Pairing und Dokumentation",
+        "Ist die einzige Person, die die `unsafe`-Teile des Systems versteht",
+        "Übernimmt Verantwortung für das Ergebnis des ganzen Teams, nicht nur für eigene Aufgaben"
+      ],
+      "korrekt": [0, 1, 3],
+      "erklaerung": "Seniorität zeigt sich weniger an der eigenen Produktivität als an der Wirkung auf andere. Wer als Einziger den `unsafe`-Code versteht, ist ein Risiko für das Team: Fällt er aus, kann niemand die Invarianten prüfen. Ein guter Senior sorgt dafür, dass mindestens zwei Personen jede kritische Stelle reviewen können.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig.",
+        "Das ist ein Risiko. Ein guter Senior verteilt dieses Wissen.",
+        "Richtig."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Begriff.",
+      "text": "Eine Nachbesprechung eines Vorfalls, die nach Ursachen im System statt nach Schuldigen sucht, heisst {{?}} Postmortem.",
+      "luecken": [
+        { "loesungen": ["blameless"] }
+      ],
+      "auswahl": ["blameless", "formales", "technisches", "geheimes"],
+      "erklaerung": "Das Ergebnis eines guten Postmortems sind konkrete Verbesserungen: ein neuer Test, ein zusätzlicher Lint, eine Prüfung in der Pipeline. Dann hat der Vorfall das System stärker gemacht."
+    }
+  ],
+  "praxis": "Damit schliesst sich der Kreis dieser App: vom Weg des Codes durch rustc und Linker über Ownership, Tests, Nebenläufigkeit, Mikrocontroller und Architektur bis zu Entscheidungen und Kommunikation. Der letzte Schritt passiert nicht hier, sondern im Team. Begleite andere durch ihre ersten Kämpfe mit dem Borrow-Checker, erkläre in Reviews das Warum, lass dich selbst reviewen und sorge dafür, dass sich niemand für eine Frage schämen muss. Wiederhole hier regelmässig, damit das Wissen bleibt.",
+  "labor": {
+    "titel": "Fehlermeldungen als Lehrmittel",
+    "anleitung": "Sammle drei Borrow-Checker-Fehler, über die Neulinge in eurem Team typischerweise stolpern, z. B. E0382, E0502 und E0106. Baue für jeden ein Minimalbeispiel und bereite eine kurze Pairing-Session von 30 Minuten vor, in der die andere Person tippt.",
+    "befehle": [
+      "cargo new borrow-kata && cd borrow-kata",
+      "cargo build 2>&1 | head -30",
+      "rustc --explain E0502",
+      "rustc --explain E0382"
+    ],
+    "beobachtung": "Die Erklärungen von `rustc --explain` enthalten jeweils ein fehlerhaftes und ein korrigiertes Beispiel. Beim Vorbereiten merkst du schnell, wo dein eigenes Verständnis noch Lücken hat. Erklären ist eine der wirksamsten Arten zu lernen, und das Team profitiert gleich mit."
+  },
+  "begriffe": [
+    {
+      "begriff": "Mentoring",
+      "englisch": "mentoring",
+      "erklaerung": "Gezielte Unterstützung einer weniger erfahrenen Person beim Lernen und Wachsen."
+    },
+    {
+      "begriff": "Pair Programming",
+      "englisch": "pair programming",
+      "erklaerung": "Zwei Personen arbeiten an einem Rechner: eine tippt (Driver), die andere denkt mit und lenkt (Navigator)."
+    },
+    {
+      "begriff": "Psychologische Sicherheit",
+      "englisch": "psychological safety",
+      "erklaerung": "Das Gefühl im Team, Fragen, Fehler und Bedenken ohne negative Folgen äussern zu können."
+    },
+    {
+      "begriff": "Blameless Postmortem",
+      "englisch": "blameless postmortem",
+      "erklaerung": "Nachbesprechung eines Vorfalls, die Ursachen im System statt Schuldige sucht."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: References and Borrowing",
+      "url": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html"
+    },
+    {
+      "titel": "Google SRE Book: Postmortem Culture",
+      "url": "https://sre.google/sre-book/postmortem-culture/"
+    }
+  ]
+}

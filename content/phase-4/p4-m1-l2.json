@@ -1,0 +1,229 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m1-l2",
+  "phase": 4,
+  "modul": "4.1 Unit-Tests mit cargo test",
+  "titel": "Integrationstests und Doctests",
+  "lernziele": [
+    "Unit-Tests, Integrationstests in `tests/` und Doctests voneinander abgrenzen",
+    "Gemeinsamen Testcode in `tests/common/mod.rs` organisieren",
+    "Die Gliederung der `cargo test`-Ausgabe lesen und einzelne Testarten gezielt starten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "privat-im-integrationstest",
+      "frage": "Diese Datei liegt in `tests/privat.rs`. `intern` ist in `src/lib.rs` als `fn intern() -> u8` (ohne `pub`) definiert. Was meldet `cargo test`?",
+      "code": {
+        "sprache": "rust",
+        "datei": "tests/privat.rs",
+        "zeilen": [
+          "#[test]",
+          "fn test_intern() {",
+          "    assert_eq!(rechner::intern(), 1);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0603: function `intern` is private",
+        "Der Test läuft und besteht",
+        "Fehler E0425: cannot find function `intern`",
+        "Linkerfehler: undefined reference to `intern`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jede Datei in `tests/` wird als **eigenes Crate** kompiliert, das deine Bibliothek wie ein fremder Nutzer einbindet. Es sieht nur die öffentliche Schnittstelle (`pub`). Genau das ist der Zweck: **Integrationstests** prüfen das Zusammenspiel über die API, so wie Anwender sie nutzen. Private Details testest du im `#[cfg(test)]`-Modul neben dem Code.",
+      "begruendungen": [
+        "Richtig. rustc findet die Funktion, verweigert aber den Zugriff.",
+        "Integrationstests sehen nur `pub`-Items.",
+        "Den Fehler gäbe es, wenn die Funktion gar nicht existierte. Hier existiert sie, ist aber privat.",
+        "Die Sichtbarkeit prüft schon der Compiler, lange vor dem Linker."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Drei Arten von Tests",
+      "text": "Cargo kennt drei Orte für Tests. Alle laufen mit `cargo test`.\n\n- **Unit-Tests** in `#[cfg(test)] mod tests` direkt im Quellcode: schnell, sehen private Items.\n- **Integrationstests** in `tests/*.rs`: je Datei ein eigenes Test-Binary, nur öffentliche API. Gibt es nur für Bibliotheks-Crates sinnvoll, bei reinen Binaries fehlt eine importierbare API.\n- **Doctests** in `///`-Kommentaren: Codeblöcke in der Dokumentation werden kompiliert und ausgeführt. So kann ein Beispiel in der Doku nicht unbemerkt veralten.\n\nDazu kommen `examples/`, die `cargo test` mitbaut (aber nicht ausführt), und `benches/` für Benchmarks.",
+      "diagramm": {
+        "knoten": ["Unit-Tests (src/)", "Integrationstests (tests/)", "Doctests (///)"],
+        "beschriftung": "Reihenfolge, in der `cargo test` die Testarten ausführt"
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "doctest-fehler",
+      "frage": "Was ist hier fehlgeschlagen?",
+      "terminal": {
+        "befehl": "cargo test",
+        "ausgabe": [
+          "     Running unittests src/lib.rs (target/debug/deps/rechner-1e2cdc407df3fba9)",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "",
+          "     Running tests/api.rs (target/debug/deps/api-7555c16976a330b5)",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "",
+          "   Doc-tests rechner",
+          "",
+          "running 3 tests",
+          "test src/lib.rs - parse_port (line 19) ... FAILED",
+          "test src/lib.rs - teile (line 3) ... ok",
+          "test src/lib.rs - teile (line 7) - should panic ... ok",
+          "",
+          "---- src/lib.rs - parse_port (line 19) stdout ----",
+          "Test executable failed (exit status: 101).",
+          "",
+          "thread 'main' (1933) panicked at /tmp/rustdoctestJQaIXL/doctest_bundle_2024.rs:7:1:",
+          "assertion `left == right` failed",
+          "  left: 80",
+          " right: 8080"
+        ]
+      },
+      "optionen": [
+        "Das Codebeispiel in der Doku von `parse_port` (ab Zeile 19 von `src/lib.rs`) stimmt nicht",
+        "Der Integrationstest `tests/api.rs` ist fehlgeschlagen",
+        "`parse_port` hat einen Fehler, den der Unit-Test übersehen hat",
+        "Rustdoc konnte die temporäre Datei unter `/tmp` nicht anlegen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Ausgabe ist in Blöcke gegliedert: erst `unittests src/lib.rs`, dann je ein Block pro Datei in `tests/`, zuletzt `Doc-tests`. Der Name `src/lib.rs - parse_port (line 19)` zeigt, in welchem Kommentar der Codeblock steht. Rustdoc verpackt jeden Doctest in eine eigene `main`. Darum verweist die Panic-Zeile auf eine temporäre Datei, nicht auf deinen Quellcode. Hier ruft das Beispiel `parse_port(\"80\")` auf und erwartet 8080: Die Doku ist falsch, nicht der Code.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Block `tests/api.rs` meldet `ok`.",
+        "Die Funktion liefert für „80“ korrekt 80. Falsch ist die Erwartung im Beispiel.",
+        "Die temporäre Datei existiert, sonst gäbe es keinen Panic aus ihr."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "doctest-schreiben",
+      "frage": "Ergänze den Doc-Kommentar: Das erste Beispiel soll laufen und bestehen, das zweite soll einen Panic erwarten.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "{{?}} Teilt `a` durch `b` ganzzahlig.",
+          "///",
+          "/// ```",
+          "/// assert_eq!(rechner::teile(7, 2), 3);",
+          "/// ```",
+          "///",
+          "/// ```{{?}}",
+          "/// rechner::teile(1, 0);",
+          "/// ```",
+          "pub fn teile(a: i32, b: i32) -> i32 {"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["///"] },
+        { "loesungen": ["should_panic"] }
+      ],
+      "auswahl": ["///", "should_panic", "//", "ignore", "no_run", "//!"],
+      "erklaerung": "`///` dokumentiert das folgende Item, `//!` das umgebende Modul oder Crate. Nach den drei Backticks steuern Attribute den Doctest: `should_panic` erwartet einen Panic, `no_run` kompiliert nur (z. B. für Code, der auf Hardware zugreifen würde), `ignore` überspringt ihn ganz, `compile_fail` erwartet einen Compilerfehler. Im Doctest muss man die eigene Crate mit vollem Pfad (`rechner::teile`) ansprechen, weil er wie ein externer Nutzer kompiliert wird."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "common-mod",
+      "frage": "Hilfsfunktionen für mehrere Integrationstests sollen in einem eigenen Modul liegen. Leider erscheint `hilfen` in der Ausgabe als eigenes Test-Binary mit `running 0 tests`. Welche Zeile der Projektstruktur ist das Problem?",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "rechner/",
+          "├── Cargo.toml",
+          "├── src/",
+          "│   └── lib.rs",
+          "└── tests/",
+          "    ├── hilfen.rs",
+          "    ├── api.rs",
+          "    └── fehlerfaelle.rs"
+        ]
+      },
+      "fehlerZeile": 6,
+      "erklaerung": "Cargo behandelt **jede** `.rs`-Datei direkt in `tests/` als eigenes Test-Crate. Gemeinsamer Code gehört deshalb in ein Unterverzeichnis: `tests/common/mod.rs`. Dateien in Unterordnern kompiliert Cargo nicht separat. Jede Testdatei bindet das Modul mit `mod common;` ein und ruft z. B. `common::setup()` auf."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "befehle",
+      "frage": "Welcher Befehl führt welche Tests aus?",
+      "paare": [
+        { "links": "`cargo test --lib`", "rechts": "Nur die Unit-Tests der Bibliothek" },
+        { "links": "`cargo test --test api`", "rechts": "Nur die Integrationstests aus `tests/api.rs`" },
+        { "links": "`cargo test --doc`", "rechts": "Nur die Doctests" },
+        { "links": "`cargo test -p sensor`", "rechts": "Alle Tests des Pakets `sensor` im Workspace" },
+        { "links": "`cargo test --workspace`", "rechts": "Alle Tests aller Pakete im Workspace" }
+      ],
+      "erklaerung": "In einem **Workspace** (mehrere Pakete mit gemeinsamem `Cargo.lock` und `target/`) testet `cargo test` im Wurzelverzeichnis eines virtuellen Workspace alle Mitglieder. Bei Fehlschlägen schlägt Cargo selbst den passenden Befehl vor, etwa `error: test failed, to rerun pass --lib`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "cargo nextest",
+      "text": "**cargo-nextest** ist ein alternativer Test-Runner (`cargo install cargo-nextest`). Statt alle Tests eines Binaries in Threads eines Prozesses auszuführen, startet er **jeden Test in einem eigenen Prozess**. Das isoliert globale Zustände, erlaubt Timeouts pro Test, Wiederholungen bei wackeligen Tests (`--retries`) und JUnit-Berichte für die CI. In grossen Workspaces ist er oft spürbar schneller.\n\nEinschränkung: nextest führt **keine Doctests** aus. In der CI läuft deshalb typischerweise `cargo nextest run` und zusätzlich `cargo test --doc`."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "welche-testart",
+      "frage": "Welche Aussagen stimmen?",
+      "optionen": [
+        "Ein Doctest ist zugleich Dokumentation und Test, er veraltet nicht unbemerkt",
+        "Ein Crate mit nur `src/main.rs` lässt sich nicht sinnvoll mit Integrationstests in `tests/` prüfen, weil es nichts zu importieren gibt",
+        "Ein Beispiel in `examples/` mit einem Compilerfehler lässt `cargo test` scheitern",
+        "Integrationstests sind schneller als Unit-Tests, weil sie parallel in eigenen Prozessen laufen"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Bei Binaries ist das übliche Muster: die Logik in `src/lib.rs` auslagern, `main.rs` bleibt dünn. Dann kann `tests/` die Bibliothek prüfen. `cargo test` kompiliert die Beispiele mit, damit sie nicht verrotten, führt sie aber nicht aus. Jede Datei in `tests/` ist ein eigenes Binary mit eigener Link-Zeit. Viele kleine Testdateien machen den Build deshalb langsamer.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Darum lagert man Logik in eine `lib.rs` aus.",
+        "Richtig. `cargo test` baut auch `examples/`.",
+        "Integrationstests sind in der Regel langsamer, und jede Datei kostet einen eigenen Link-Schritt."
+      ]
+    }
+  ],
+  "praxis": "Im Alltag landen fast alle Tests als Unit-Tests neben dem Code. Integrationstests in `tests/` schreibst du für die Szenarien, die ein Nutzer deiner Bibliothek durchläuft. Viele Projekte sammeln sie in **einer** Datei `tests/integration/main.rs` mit Untermodulen, um Link-Zeit zu sparen. Für öffentliche Crates sind Doctests Pflicht: Jedes `pub`-Item bekommt ein kleines, lauffähiges Beispiel, das auf docs.rs erscheint.",
+  "labor": {
+    "titel": "Alle drei Testarten",
+    "anleitung": "Ergänze das `rechner`-Crate aus der letzten Lektion um einen Doctest, eine Datei `tests/api.rs` und ein Modul `tests/common/mod.rs`. Führe die Testarten einzeln aus.",
+    "befehle": [
+      "mkdir -p tests/common && $EDITOR tests/api.rs tests/common/mod.rs",
+      "cargo test",
+      "cargo test --doc",
+      "cargo test --test api",
+      "cargo install cargo-nextest --locked && cargo nextest run"
+    ],
+    "beobachtung": "In der `cargo test`-Ausgabe erscheinen getrennte Blöcke `Running unittests`, `Running tests/api.rs` und `Doc-tests`. `cargo nextest run` zeigt jeden Test mit eigener Laufzeit, die Doctests fehlen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Integrationstest",
+      "englisch": "integration test",
+      "erklaerung": "Test in `tests/`, der als eigenes Crate nur die öffentliche API der Bibliothek benutzt."
+    },
+    {
+      "begriff": "Doctest",
+      "englisch": "documentation test",
+      "erklaerung": "Codebeispiel in einem `///`-Kommentar, das `cargo test` kompiliert und ausführt."
+    },
+    {
+      "begriff": "Workspace",
+      "englisch": "workspace",
+      "erklaerung": "Mehrere Cargo-Pakete mit gemeinsamem `Cargo.lock` und `target/`-Verzeichnis."
+    },
+    {
+      "begriff": "cargo-nextest",
+      "englisch": "cargo-nextest",
+      "erklaerung": "Alternativer Test-Runner, der jeden Test in einem eigenen Prozess ausführt. Unterstützt keine Doctests."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Test Organization",
+      "url": "https://doc.rust-lang.org/book/ch11-03-test-organization.html"
+    },
+    {
+      "titel": "The rustdoc Book: Documentation tests",
+      "url": "https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html"
+    },
+    {
+      "titel": "cargo-nextest",
+      "url": "https://nexte.st/"
+    }
+  ]
+}

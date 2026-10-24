@@ -1,0 +1,182 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m3-l1",
+  "phase": 11,
+  "modul": "11.3 Komponenten, Plugins und Pipelines",
+  "titel": "Plugin-Architekturen in Rust",
+  "lernziele": [
+    "Statische und dynamische Plugins in Rust unterscheiden",
+    "Die ABI-Fallen beim dynamischen Laden mit libloading kennen",
+    "WebAssembly als sichere Plugin-Grenze einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Messgerät soll neue Sensortreiber bekommen, ohne dass der Kern geändert wird. Was ist in Rust der **einfachste** Weg?",
+      "optionen": [
+        "Ein Trait `Treiber` im Kern, jeder Treiber als eigenes Crate, ausgewählt über Cargo-Features und zur Übersetzungszeit eingebunden",
+        "Jeden Treiber als `.so` bauen und zur Laufzeit laden",
+        "Alle Treiber per `match` in einer grossen Funktion im Kern",
+        "Treiber als Python-Skripte nachladen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **statisches Plugin** ist ein Crate, das einen Trait des Kerns implementiert. Der Kern hängt nur vom Trait ab, nicht vom Treiber. Welche Treiber im Binary landen, entscheiden Features. Das ist typsicher, ohne `unsafe` und funktioniert auch in `no_std`-Firmware. Dynamisches Laden lohnt sich erst, wenn Dritte Plugins **ohne Neuübersetzung** liefern sollen.",
+      "begruendungen": [
+        "Richtig.",
+        "Möglich, aber deutlich komplizierter und unsicherer.",
+        "Dann muss der Kern für jeden Treiber geändert werden.",
+        "Das bringt einen Interpreter und eine weitere Sprache ins System."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wie findet `main` den Treiber, ohne ihn beim Namen zu kennen?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub struct Treiber {",
+          "    pub name: &'static str,",
+          "    pub init: fn() -> bool,",
+          "}",
+          "inventory::collect!(Treiber);",
+          "",
+          "// in einem anderen Modul oder Crate:",
+          "fn init_bme280() -> bool { true }",
+          "inventory::submit! {",
+          "    Treiber { name: \"bme280\", init: init_bme280 }",
+          "}",
+          "",
+          "fn main() {",
+          "    for t in inventory::iter::<Treiber> {",
+          "        println!(\"{}: {}\", t.name, (t.init)());",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`submit!` registriert den Eintrag beim Linken in einer globalen Liste, `inventory::iter` durchläuft alle registrierten Einträge. Ausgabe: `bme280: true`",
+        "`inventory` lädt zur Laufzeit alle `.so`-Dateien im Verzeichnis",
+        "Der Code kompiliert nicht, weil `main` `init_bme280` nicht importiert",
+        "Die Liste ist leer, weil `submit!` erst nach `main` ausgeführt wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist eine **Trait- oder Typ-Registry**: Jedes Crate trägt sich selbst ein, der Kern sammelt. `inventory` nutzt dafür plattformspezifische Startup-Mechanismen und funktioniert deshalb nicht auf jedem Target, insbesondere nicht auf jedem Mikrocontroller. Dort ist eine explizite Liste in `main` oft die ehrlichere Lösung.",
+      "begruendungen": [
+        "Richtig, das ist die echte Ausgabe.",
+        "`inventory` lädt nichts dynamisch, alles ist statisch gelinkt.",
+        "Der Aufruf läuft über den Funktionszeiger im Eintrag.",
+        "Die Registrierung ist vor `main` abgeschlossen."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Für ein dynamisch ladbares Plugin schreibst du `#[no_mangle] pub extern \"C\" fn plugin_erzeugen() -> Box<dyn Plugin>`. Was meldet Rust 1.97 mit Edition 2024?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: unsafe attribute used without unsafe",
+          "  --> src/lib.rs:10:3",
+          "   |",
+          "10 | #[no_mangle]",
+          "   |   ^^^^^^^^^ usage of unsafe attribute",
+          "   |",
+          "help: wrap the attribute in `unsafe(...)`"
+        ]
+      },
+      "optionen": [
+        "Seit Edition 2024 muss `no_mangle` als `#[unsafe(no_mangle)]` geschrieben werden, weil exportierte Symbolnamen mit anderen kollidieren können",
+        "`no_mangle` ist in Rust verboten",
+        "Plugins dürfen keine `extern \"C\"`-Funktionen haben",
+        "Es fehlt `crate-type = [\"cdylib\"]` in `Cargo.toml`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein unverzierter Symbolname ist global: Zwei Bibliotheken mit `plugin_erzeugen` können sich gegenseitig überschreiben, ohne dass der Compiler es prüfen kann. Darum zählt `no_mangle` jetzt zu den unsicheren Attributen. Mit `#[unsafe(no_mangle)]` kommt die nächste Meldung: `Box<dyn Plugin>` ist nicht FFI-sicher (`improper_ctypes_definitions`).",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist erlaubt, muss aber als unsicher gekennzeichnet werden.",
+        "`extern \"C\"` ist gerade der Weg zu einer stabilen Schnittstelle.",
+        "`cdylib` braucht man für die Bibliothek, aber die Meldung betrifft das Attribut."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Warum Rust keine stabile ABI hat",
+      "text": "Rust garantiert kein stabiles **ABI** (*Application Binary Interface*): Layout von Structs, Trait-Objekten (`dyn Trait` mit vtable), `String` und `Vec` kann sich zwischen Compilerversionen und sogar zwischen Builds ändern. Ein Plugin, das mit einer anderen `rustc`-Version gebaut wurde, kann deshalb abstürzen.\n\nWege aus der Falle:\n\n- Schnittstelle nur aus `extern \"C\"`-Funktionen und `#[repr(C)]`-Typen, wie in C\n- Crates wie `abi_stable` oder `stabby`, die stabile Gegenstücke zu `Box`, `Vec` und Trait-Objekten liefern\n- Plugins als **WebAssembly**: Das Plugin läuft in einer Sandbox (`wasmtime`), die Schnittstelle wird z. B. mit WIT beschrieben"
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese Funktion lädt eine Funktion aus einem Plugin. Der Aufruf von `f()` stürzt später ab. Welche Zeile verursacht das Problem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use libloading::{Library, Symbol};",
+          "",
+          "type VersionFn = extern \"C\" fn() -> u32;",
+          "",
+          "fn lade_version(pfad: &str) -> Result<VersionFn, libloading::Error> {",
+          "    unsafe {",
+          "        let lib = Library::new(pfad)?;",
+          "        let f: Symbol<VersionFn> = lib.get(b\"plugin_version\")?;",
+          "        Ok(*f)",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 9,
+      "erklaerung": "`Symbol` ist an die Lebenszeit von `lib` gebunden, deshalb schützt der Borrow-Checker normalerweise. Mit `*f` wird aber ein nackter Funktionszeiger kopiert, der keine Lebenszeit trägt. Am Ende des Blocks wird `lib` gedroppt, die Bibliothek entladen, und der Zeiger zeigt ins Leere. Der Code kompiliert trotzdem, das ist der Preis des `unsafe`. Richtig: `Library` zusammen mit den Symbolen in einem Struct halten, solange das Plugin benutzt wird.",
+      "hinweis": "Was passiert mit `lib` am Ende des Blocks?"
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Plugin-Technik passt?",
+      "paare": [
+        { "links": "Trait + Cargo-Features", "rechts": "Firmware, alle Varianten sind beim Bauen bekannt" },
+        { "links": "`inventory`-Registry", "rechts": "Crates registrieren sich selbst, der Kern sammelt beim Start" },
+        { "links": "`libloading` + C-ABI", "rechts": "Native Plugins von Dritten, gleiche Plattform, volles Vertrauen" },
+        { "links": "WebAssembly mit `wasmtime`", "rechts": "Fremde Plugins, die isoliert und plattformunabhängig laufen sollen" }
+      ],
+      "erklaerung": "Ein natives Plugin läuft im selben Prozess mit allen Rechten. Ein Fehler darin bringt den ganzen Prozess zu Fall. WebAssembly kostet etwas Leistung, isoliert aber Speicher und erlaubt nur die Funktionen, die der Host bereitstellt."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die `Cargo.toml` eines nativen Plugins.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"sensor-plugin\"",
+          "edition = \"2024\"",
+          "",
+          "[lib]",
+          "crate-type = [\"{{?}}\"]"
+        ]
+      },
+      "luecken": [{ "loesungen": ["cdylib"] }],
+      "auswahl": ["cdylib", "dylib", "rlib", "staticlib"],
+      "erklaerung": "`cdylib` erzeugt eine dynamische Bibliothek mit C-Schnittstelle (`.so`, `.dll`, `.dylib`), die jeder Host laden kann. `dylib` ist eine Rust-Dynamikbibliothek ohne stabiles ABI, `rlib` das normale Rust-Bibliotheksformat, `staticlib` eine statische Bibliothek zum Einbinden in C-Programme."
+    }
+  ],
+  "praxis": "Frage dich vor jeder Plugin-Architektur: Wer liefert die Plugins, und wann? Für eigene Varianten genügen Traits und Features. Für Erweiterungen von Kunden oder Dritten ist WebAssembly meist die sicherere Wahl als native Bibliotheken: Das Plugin kann den Host nicht zum Absturz bringen, und eine Rust-Versionsänderung bricht nichts.",
+  "labor": {
+    "titel": "Eine Registry mit inventory",
+    "anleitung": "Baue die Treiber-Registry aus der Lektion nach und lege einen zweiten Treiber in einem eigenen Modul an.",
+    "befehle": [
+      "cargo new registry && cd registry",
+      "cargo add inventory",
+      "cargo run"
+    ],
+    "beobachtung": "Beide Treiber erscheinen, obwohl `main` keinen davon nennt. Die Reihenfolge der Einträge ist nicht garantiert. Wenn sie zählt, sortiere nach einem Feld wie `name`."
+  },
+  "begriffe": [
+    { "begriff": "Plugin", "englisch": "plug-in", "erklaerung": "Erweiterung, die über eine definierte Schnittstelle an einen Kern angeschlossen wird." },
+    { "begriff": "ABI", "englisch": "application binary interface", "erklaerung": "Binäre Schnittstelle: Aufrufkonvention, Datenlayout, Symbolnamen. In Rust nicht stabil, `extern \"C\"` schon." },
+    { "begriff": "cdylib", "englisch": "C dynamic library", "erklaerung": "Crate-Typ für dynamische Bibliotheken mit C-Schnittstelle." }
+  ],
+  "weiterlesen": [
+    { "titel": "libloading", "url": "https://docs.rs/libloading/latest/libloading/" },
+    { "titel": "Rust Reference: Linkage", "url": "https://doc.rust-lang.org/reference/linkage.html" },
+    { "titel": "Wasmtime", "url": "https://docs.wasmtime.dev/" }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m2-l1",
+  "phase": 11,
+  "modul": "11.2 Ereignisgesteuerte Architekturen",
+  "titel": "Publish-Subscribe und Event-Busse",
+  "lernziele": [
+    "Ereignisgesteuerte Kommunikation von direkten Aufrufen unterscheiden",
+    "Einen Event-Bus mit tokio::sync::broadcast und Kanälen bauen",
+    "Backpressure und verlorene Ereignisse bewusst behandeln"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Bei tiefer Batteriespannung sollen Display, Logger, Motorsteuerung und Funkmodul reagieren. Der Batteriemonitor ruft heute alle vier direkt auf. Was ist das Problem?",
+      "optionen": [
+        "Der Monitor kennt alle Empfänger. Jeder neue Empfänger erfordert eine Änderung am Sender, und Tests brauchen alle Abhängigkeiten",
+        "Direkte Funktionsaufrufe sind in Rust zu langsam",
+        "Der Borrow-Checker verbietet, vier Funktionen nacheinander aufzurufen",
+        "Es gibt kein Problem, direkte Aufrufe sind immer die beste Lösung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit **Publish-Subscribe** veröffentlicht der Monitor nur ein Ereignis wie `BatterieKritisch`. Wer sich dafür interessiert, abonniert es (*subscribe*). Sender und Empfänger kennen nur den Ereignistyp, nicht einander.",
+      "begruendungen": [
+        "Richtig.",
+        "Direkte Aufrufe sind schnell. Das Problem ist die Kopplung.",
+        "Mehrere Aufrufe nacheinander sind problemlos möglich.",
+        "Die Kopplung wächst mit jedem neuen Empfänger."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert hier mit dem Ereignis?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "use tokio::sync::broadcast;",
+          "",
+          "#[derive(Clone, Debug)]",
+          "enum Ereignis { BatterieKritisch { millivolt: u16 } }",
+          "",
+          "let (tx, _) = broadcast::channel::<Ereignis>(16);",
+          "let mut display = tx.subscribe();",
+          "let mut logger = tx.subscribe();",
+          "",
+          "tx.send(Ereignis::BatterieKritisch { millivolt: 3150 })?;",
+          "let a = display.recv().await?;",
+          "let b = logger.recv().await?;"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "Ringpuffer mit 16 Plätzen, geteilt von allen Empfängern" },
+          { "zeile": 7, "text": "Jeder `subscribe()` erzeugt einen eigenen Empfänger" }
+        ]
+      },
+      "optionen": [
+        "Beide Empfänger erhalten je eine Kopie des Ereignisses, `a` und `b` sind gleich",
+        "Nur der erste Empfänger erhält das Ereignis, wie bei einer Warteschlange",
+        "Der Sender blockiert, bis beide Empfänger gelesen haben",
+        "Das Ereignis geht verloren, weil der erste Empfänger `_` heisst"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`broadcast` verteilt jedes Ereignis an **alle** aktiven Empfänger, deshalb muss der Typ `Clone` sein. Bei `mpsc` (*multi-producer, single-consumer*) dagegen bekommt genau ein Empfänger jede Nachricht. Der verworfene erste Empfänger stört nicht, weil weitere mit `subscribe()` entstehen.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre das Verhalten eines `mpsc`-Kanals.",
+        "`broadcast::Sender::send` blockiert nie, er überschreibt im Zweifel alte Werte.",
+        "Der verworfene Empfänger ist egal, `display` und `logger` existieren bereits beim Senden."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du willst rohe Sensorpuffer über `broadcast` verteilen. Was sagt dir der Compiler?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: the trait bound `Rohdaten: Clone` is not satisfied",
+          " --> src/main.rs:7:45",
+          "  |",
+          "7 |     let (tx, mut rx) = broadcast::channel::<Rohdaten>(16);",
+          "  |                                             ^^^^^^^^ the trait `Clone` is not implemented for `Rohdaten`",
+          "  |",
+          "note: required by a bound in `tokio::sync::broadcast::channel`"
+        ]
+      },
+      "optionen": [
+        "`broadcast` muss jedem Empfänger eine eigene Kopie geben, deshalb verlangt `channel` `T: Clone`",
+        "Tokio unterstützt keine eigenen Typen in Kanälen",
+        "Der Puffer ist mit 16 zu klein gewählt",
+        "Es fehlt `#[derive(Debug)]`, sonst nichts"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für grosse Daten ist `Clone` teuer. Übliche Lösungen: `Arc<[u8]>` oder `Arc<Rohdaten>` verschicken (Klonen kopiert dann nur einen Zeiger) oder nur eine kleine Ereignis-Meldung senden und die Daten anders bereitstellen.",
+      "begruendungen": [
+        "Richtig.",
+        "Jeder Typ ist erlaubt, wenn er die Trait-Grenzen erfüllt.",
+        "Die Kapazität hat mit dem Typfehler nichts zu tun.",
+        "Die Fehlermeldung nennt ausdrücklich `Clone`."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Kanal hat Kapazität 2. Der Sender schickt fünf Ereignisse, bevor der Empfänger liest. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "Fehler: Lagged(3)",
+          "empfangen: BatterieKritisch { millivolt: 3150 }",
+          "empfangen: BatterieKritisch { millivolt: 3100 }"
+        ]
+      },
+      "optionen": [
+        "Der Empfänger war zu langsam. Die drei ältesten Ereignisse wurden überschrieben, `recv` meldet das mit `RecvError::Lagged(3)` und liefert dann die zwei neuesten",
+        "Der Sender ist abgestürzt",
+        "Alle fünf Ereignisse kamen an, `Lagged` ist nur eine Warnung zur Latenz",
+        "Der Kanal ist geschlossen und liefert keine weiteren Ereignisse"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`broadcast` hat **keine Backpressure** (Gegendruck): Der Sender wird nie gebremst, ein langsamer Empfänger verliert alte Werte und erfährt es über `Lagged`. Das passt für Zustandsmeldungen, bei denen nur der neueste Wert zählt. Für Befehle, die nicht verloren gehen dürfen, nimmt man einen begrenzten `mpsc`-Kanal, bei dem `send().await` wartet, bis Platz frei ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Sender läuft normal weiter.",
+        "Drei Ereignisse sind tatsächlich verloren.",
+        "Geschlossen wäre `RecvError::Closed`."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Kanal passt zu welchem Zweck?",
+      "paare": [
+        { "links": "`tokio::sync::broadcast`", "rechts": "Jedes Ereignis an alle Abonnenten, langsame verlieren alte Werte" },
+        { "links": "`tokio::sync::mpsc` (begrenzt)", "rechts": "Viele Sender, ein Empfänger, Sender wartet bei vollem Puffer" },
+        { "links": "`tokio::sync::watch`", "rechts": "Nur der aktuelle Wert zählt, z. B. Konfiguration oder Betriebsmodus" },
+        { "links": "`embassy_sync::pubsub::PubSubChannel`", "rechts": "Publish-Subscribe ohne Heap auf dem Mikrocontroller" }
+      ],
+      "erklaerung": "Die Wahl des Kanals ist eine Architekturentscheidung: Darf etwas verloren gehen? Darf der Sender warten? Wer muss alles mitlesen? Auf Mikrocontrollern legt man Kapazität und Anzahl Abonnenten als Konstanten fest (Phase 7)."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Preis der Entkopplung",
+      "text": "Ereignisgesteuerte Systeme sind lose gekoppelt, haben aber eigene Schwierigkeiten:\n\n- **Nachvollziehbarkeit**: Wer reagiert auf `BatterieKritisch`? Der Sender verrät es nicht mehr. Eine Ereignistabelle und Tracing (`tracing`-Spans) helfen.\n- **Reihenfolge**: Empfänger laufen in eigenen Tasks, ihre Reihenfolge ist nicht festgelegt.\n- **Last**: Ein Sensor mit 10 000 Ereignissen pro Sekunde flutet alle Abonnenten.\n- **Fehler**: Scheitert ein Empfänger, erfährt der Sender nichts.\n\nFür Anfragen mit Antwort ist ein direkter Aufruf oder ein `oneshot`-Kanal für die Antwort oft klarer als zwei Ereignisse."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wann ist Publish-Subscribe die falsche Wahl?",
+      "optionen": [
+        "Wenn der Sender eine Antwort braucht und genau ein bestimmter Empfänger zuständig ist, etwa „lies Konfigurationswert X“",
+        "Wenn mehrere Komponenten auf dasselbe Ereignis reagieren sollen",
+        "Wenn neue Empfänger ohne Änderung am Sender hinzukommen sollen",
+        "Wenn Sender und Empfänger in verschiedenen Tasks laufen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Anfrage an einen bestimmten Dienst über einen Bus zu schicken, verschleiert die Abhängigkeit, ohne sie zu beseitigen. Dann ist ein Trait mit direktem Aufruf oder ein Actor mit Antwortkanal ehrlicher (nächste Lektion).",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist der Kernfall für Publish-Subscribe.",
+        "Auch das spricht für Publish-Subscribe.",
+        "Gerade zwischen Tasks sind Kanäle das natürliche Mittel."
+      ]
+    }
+  ],
+  "praxis": "Publish-Subscribe begegnet dir überall: `broadcast` und `watch` in Tokio-Diensten, `PubSubChannel` in Embassy-Firmware, Topics in ROS 2 und Zenoh (Modul 11.5), MQTT im IoT. Gute Systeme beschreiben jedes Ereignis wie eine Schnittstelle: Typ, Inhalt, Einheit, Rate, Sender, typische Empfänger und was bei Überlast passiert.",
+  "labor": {
+    "titel": "Lagged selbst auslösen",
+    "anleitung": "Lege ein Projekt an, erzeuge einen `broadcast::channel` mit Kapazität 2, sende fünf Ereignisse und lies sie dann mit einer Schleife über `rx.recv().await` aus. Gib jedes Ergebnis mit `{:?}` aus.",
+    "befehle": [
+      "cargo new pubsub && cd pubsub",
+      "cargo add tokio --features full",
+      "cargo run"
+    ],
+    "beobachtung": "Der erste Aufruf liefert `Err(Lagged(3))`, danach kommen die zwei neuesten Ereignisse. Ersetze `broadcast` durch `mpsc::channel(2)` und `send().await`: Jetzt wartet der Sender, und nichts geht verloren."
+  },
+  "begriffe": [
+    { "begriff": "Publish-Subscribe", "englisch": "publish-subscribe", "erklaerung": "Sender veröffentlichen Ereignisse, interessierte Empfänger abonnieren sie, ohne einander zu kennen." },
+    { "begriff": "Event-Bus", "englisch": "event bus", "erklaerung": "Vermittler, der veröffentlichte Ereignisse an die Abonnenten verteilt." },
+    { "begriff": "Backpressure", "englisch": "backpressure", "erklaerung": "Gegendruck: Ein überlasteter Empfänger bremst den Sender, statt Daten zu verlieren." },
+    { "begriff": "Topic", "englisch": "topic", "erklaerung": "Benannter Kanal, auf dem Ereignisse einer Art veröffentlicht werden." }
+  ],
+  "weiterlesen": [
+    { "titel": "tokio::sync::broadcast", "url": "https://docs.rs/tokio/latest/tokio/sync/broadcast/index.html" },
+    { "titel": "embassy-sync", "url": "https://docs.rs/embassy-sync/latest/embassy_sync/" }
+  ]
+}

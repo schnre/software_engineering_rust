@@ -1,0 +1,212 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m6-l1",
+  "phase": 1,
+  "modul": "1.6 Build-Systeme",
+  "titel": "Cargo: Projekt, Manifest und Lockfile",
+  "lernziele": [
+    "Die Rollen von `Cargo.toml`, `Cargo.lock` und `target/` erklären",
+    "`cargo check`, `build` und `run` gezielt einsetzen",
+    "Debug- und Release-Builds unterscheiden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du willst nach jeder kleinen Änderung möglichst schnell wissen, ob dein Code die Typprüfung und den Borrow-Checker besteht. Welcher Befehl?",
+      "optionen": [
+        "`cargo check`",
+        "`cargo build --release`",
+        "`cargo run`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo check` durchläuft alle Analysen von rustc (Parser, Typprüfung, Borrow-Checker), erzeugt aber keinen Maschinencode. Die Codegenerierung mit LLVM ist meist der teuerste Teil. rust-analyzer und viele Editoren rufen im Hintergrund genau diese Analyse auf.",
+      "begruendungen": [
+        "Richtig. Schnellster Feedback-Loop für Compilerfehler.",
+        "Release-Builds optimieren und sind deshalb am langsamsten.",
+        "`cargo run` baut vollständig und startet das Programm zusätzlich."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was `cargo new` anlegt",
+      "text": "**Cargo** ist Paketmanager und Build-System in einem. Ein **Paket** (package) wird durch das **Manifest** `Cargo.toml` beschrieben und enthält ein oder mehrere Crates. `cargo new sensor` legt an: `Cargo.toml`, `src/main.rs`, `.gitignore` und ein Git-Repository. Es gibt keine Liste von Quelldateien: Cargo findet `src/main.rs` bzw. `src/lib.rs` per Konvention, rustc folgt dann den `mod`-Deklarationen.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"sensor\"",
+          "version = \"0.1.0\"",
+          "edition = \"2024\"",
+          "",
+          "[dependencies]",
+          "serde = { version = \"1.0.229\", features = [\"derive\"] }"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Die Edition gilt nur für dieses Paket." },
+          { "zeile": 7, "text": "Von `cargo add serde --features derive` eingetragen. `1.0.229` heisst „mindestens 1.0.229, kleiner als 2.0.0“." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein zweites `cargo build` direkt nach dem ersten. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo build && cargo build",
+        "ausgabe": [
+          "   Compiling serde_core v1.0.229",
+          "   Compiling serde v1.0.229",
+          "   Compiling syn v3.0.9",
+          "   Compiling serde_derive v1.0.229",
+          "   Compiling sensor v0.1.0 (/home/user/sensor)",
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.05s",
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s"
+        ]
+      },
+      "optionen": [
+        "Nichts hat sich geändert, deshalb hat Cargo nichts neu übersetzt und nur geprüft, ob alles aktuell ist",
+        "Der zweite Build ist fehlgeschlagen, weil keine `Compiling`-Zeile erscheint",
+        "Der zweite Build hat nur `serde` übersprungen, `sensor` aber neu übersetzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo merkt sich in `target/` Fingerabdrücke jedes Crates (Quellen, Compiler-Version, Flags, Features). Ändert sich nichts, ist der Build in Millisekunden fertig. Ändert sich nur `src/main.rs`, wird nur `sensor` neu übersetzt. Abhängigkeiten werden einmal gebaut und wiederverwendet.",
+      "begruendungen": [
+        "Richtig. `Finished` ohne `Compiling` heisst: alles aktuell.",
+        "Ein Fehler würde mit `error` enden, nicht mit `Finished`.",
+        "Ohne Änderung wird auch `sensor` nicht neu übersetzt, sonst stünde eine `Compiling sensor`-Zeile da."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was gehört wohin?",
+      "paare": [
+        { "links": "`Cargo.toml`", "rechts": "Von Hand gepflegt: Name, Edition, gewünschte Versionsbereiche der Abhängigkeiten" },
+        { "links": "`Cargo.lock`", "rechts": "Von Cargo erzeugt: exakte Versionen und Prüfsummen aller Abhängigkeiten" },
+        { "links": "`target/debug/`", "rechts": "Ergebnisse des `dev`-Profils, inklusive Zwischenstände" },
+        { "links": "`target/release/`", "rechts": "Optimierte Ergebnisse von `cargo build --release`" }
+      ],
+      "erklaerung": "`target/` gehört nie ins Repository, `cargo new` trägt es in `.gitignore` ein. `Cargo.lock` dagegen gehört bei Programmen und Firmware immer ins Repo, damit alle mit denselben Versionen bauen. Seit 2023 empfiehlt das Cargo-Team, es auch bei Bibliotheken einzuchecken."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wie reagiert Cargo auf dieses Manifest, wenn `src/main.rs` `heapless::Vec` benutzt?",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"ff\"",
+          "version = \"0.1.0\"",
+          "edition = \"2024\"",
+          "heapless = \"0.8\"",
+          "",
+          "[dependencies]"
+        ]
+      },
+      "optionen": [
+        "Warnung `unused manifest key: package.heapless`, danach `error[E0433]` für `heapless`",
+        "Cargo lädt `heapless` 0.8 herunter, der Abschnitt spielt keine Rolle",
+        "Cargo bricht sofort ab: unbekannter Schlüssel in `[package]`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In TOML gehört jede Zeile zur letzten Tabellenüberschrift. Zeile 5 steht unter `[package]`, nicht unter `[dependencies]`. Cargo warnt bei unbekannten Schlüsseln nur, deshalb muss man diese Warnung ernst nehmen. Sicherer ist `cargo add heapless@0.8`, das an die richtige Stelle schreibt.",
+      "begruendungen": [
+        "Richtig. Echte Ausgabe von Cargo 1.97.",
+        "Die Abhängigkeit steht im falschen Abschnitt und wird ignoriert.",
+        "Unbekannte Schlüssel ergeben nur eine Warnung, keinen Abbruch."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Befehle für den typischen Arbeitsablauf.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "cargo {{?}} sensor          # neues Programm anlegen",
+          "cargo {{?}} serde --features derive",
+          "cargo {{?}}                 # schnell prüfen, ohne Codegen",
+          "cargo run {{?}}             # optimiert bauen und starten"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["new"] },
+        { "loesungen": ["add"] },
+        { "loesungen": ["check"] },
+        { "loesungen": ["--release"] }
+      ],
+      "auswahl": ["new", "add", "check", "--release", "init", "install"],
+      "erklaerung": "`cargo init` macht das Gleiche wie `new`, aber im bestehenden Verzeichnis. `cargo install` installiert dagegen ein Programm (z. B. `cargo-bloat`) nach `~/.cargo/bin`, es fügt keine Abhängigkeit hinzu."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Dasselbe Programm addiert `254 + 1 + 1` in einer `u8`-Variablen. Warum unterscheiden sich die beiden Läufe?",
+      "terminal": {
+        "befehl": "cargo run -q; cargo run -q --release",
+        "ausgabe": [
+          "thread 'main' (20892) panicked at src/main.rs:3:17:",
+          "attempt to add with overflow",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+          "0"
+        ]
+      },
+      "optionen": [
+        "Im `dev`-Profil sind Überlaufprüfungen aktiv und lösen einen Panic aus. Im `release`-Profil sind sie aus, die Addition rechnet modulo 256",
+        "Der Release-Build hat einen Fehler, der Debug-Build ist korrekt",
+        "Im Release-Build hat der Optimierer die Addition entfernt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`dev`: keine Optimierung, Debug-Infos, `overflow-checks = true`. `release`: `opt-level = 3`, keine Debug-Infos, `overflow-checks = false`. Ein Ganzzahlüberlauf ist in Rust **kein** Undefined Behavior, sondern entweder Panic oder Wraparound. Wer Wraparound will, schreibt `wrapping_add`. Wer ihn verhindern will, nimmt `checked_add`. Profile vertiefen wir in der nächsten Lektion.",
+      "begruendungen": [
+        "Richtig. Das Verhalten hängt vom Profil ab.",
+        "Beide Ergebnisse sind definiertes Verhalten, nur unterschiedlich konfiguriert.",
+        "Die Addition wurde ausgeführt, sie ist nur übergelaufen: 256 mod 256 = 0."
+      ]
+    }
+  ],
+  "praxis": "Im Alltag läuft `cargo check` (oder rust-analyzer) ständig, `cargo build` und `cargo test` bei jedem Zwischenstand und `--release` für Messungen und Auslieferung. Bei einem Code-Review prüfst du, ob `Cargo.lock` mitgeändert wurde, wenn sich `Cargo.toml` geändert hat, und ob neue Abhängigkeiten wirklich nötig sind. Laufzeitmessungen im Debug-Build sind wertlos, sie sagen nichts über das Release-Verhalten.",
+  "labor": {
+    "titel": "Ein Cargo-Projekt von Grund auf",
+    "anleitung": "Lege ein Projekt an, füge eine Abhängigkeit hinzu und beobachte, was Cargo erzeugt.",
+    "befehle": [
+      "cargo new sensor && cd sensor && cargo add serde --features derive",
+      "cargo build && cargo build",
+      "touch src/main.rs && cargo check",
+      "head -12 Cargo.lock && ls target/debug",
+      "cargo build --release && ls -l target/debug/sensor target/release/sensor"
+    ],
+    "beobachtung": "Der erste Build übersetzt alle Abhängigkeiten, der zweite nichts. Nach `touch` prüft `cargo check` nur das eigene Crate. `Cargo.lock` enthält für jede Abhängigkeit Version, Quelle und `checksum`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Manifest",
+      "englisch": "manifest",
+      "erklaerung": "Die Datei `Cargo.toml`, die ein Paket beschreibt: Metadaten, Abhängigkeiten, Features, Profile."
+    },
+    {
+      "begriff": "Lockfile",
+      "englisch": "lockfile",
+      "erklaerung": "`Cargo.lock`: hält die exakt aufgelösten Versionen und Prüfsummen aller Abhängigkeiten fest."
+    },
+    {
+      "begriff": "Paket",
+      "englisch": "package",
+      "erklaerung": "Einheit, die Cargo baut und veröffentlicht. Enthält höchstens eine Bibliothek und beliebig viele Programme."
+    },
+    {
+      "begriff": "Profil",
+      "englisch": "profile",
+      "erklaerung": "Satz von Compiler-Einstellungen, z. B. `dev` für `cargo build` und `release` für `cargo build --release`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book",
+      "url": "https://doc.rust-lang.org/cargo/"
+    },
+    {
+      "titel": "The Rust Programming Language: Hello, Cargo!",
+      "url": "https://doc.rust-lang.org/book/ch01-03-hello-cargo.html"
+    }
+  ]
+}

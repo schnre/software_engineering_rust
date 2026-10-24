@@ -1,0 +1,197 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m4-l2",
+  "phase": 6,
+  "modul": "6.4 Interrupts",
+  "titel": "Daten zwischen ISR und Hauptprogramm",
+  "lernziele": [
+    "Erklären, warum `static mut` gefährlich ist und was der Compiler dazu sagt",
+    "Atomics, `critical_section::Mutex<RefCell<Option<T>>>` und `heapless::spsc::Queue` passend einsetzen",
+    "Begründen, wie `Sync` und der Borrow-Checker Data Races mit ISRs verhindern"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "static-mut-ref",
+      "frage": "Eine ISR erhöht `static mut ZAEHLER: u32`, das Hauptprogramm liest ihn über eine Referenz. Was sagt der Compiler (Edition 2024)?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: creating a shared reference to mutable static",
+          " --> src/main.rs:5:22",
+          "  |",
+          "5 |     let r = unsafe { &ZAEHLER };",
+          "  |                      ^^^^^^^^ shared reference to mutable static",
+          "  |",
+          "  = note: shared references to mutable statics are dangerous; it's undefined behavior if the static is mutated or if a mutable reference is created for it while the shared reference lives",
+          "  = note: `#[deny(static_mut_refs)]` (part of `#[deny(rust_2024_compatibility)]`) on by default"
+        ]
+      },
+      "optionen": [
+        "Eine Referenz auf ein `static mut` ist verboten, weil die ISR den Wert ändern kann, während die Referenz lebt. Das wäre undefiniertes Verhalten",
+        "Man muss nur `unsafe` um den ganzen Block schreiben",
+        "Der Fehler tritt nur auf dem PC auf, auf dem Mikrocontroller ist es erlaubt",
+        "`static mut` ist in Rust 2024 ganz abgeschafft"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine `&T` verspricht dem Compiler, dass sich der Wert nicht ändert, solange sie lebt. Eine ISR bricht dieses Versprechen jederzeit. Seit Edition 2024 ist das Bilden solcher Referenzen standardmässig ein Fehler. `static mut` selbst gibt es noch, aber fast immer ist ein Typ mit innerer Veränderlichkeit die bessere Wahl.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Zugriff steht bereits in `unsafe`. Die Lint `static_mut_refs` greift trotzdem.",
+        "Die Regel gilt für alle Targets, sie ist eine Spracheigenschaft.",
+        "Deklarieren darf man es noch, gesperrt sind Referenzen darauf."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Werkzeuge",
+      "text": "Ein `static` muss `Sync` sein, also gefahrlos von mehreren Ausführungskontexten aus erreichbar (Phase 5). Interrupt und Hauptprogramm verhalten sich dabei wie zwei Threads. Typen, die das erfüllen:\n\n- **Atomics** (`AtomicBool`, `AtomicU32`) für einzelne Flags und Zähler\n- **`critical_section::Mutex<RefCell<T>>`** für zusammengehörige Daten oder Peripherie-Objekte. Zugriff nur mit einem Token aus `critical_section::with`, das Interrupts sperrt\n- **`heapless::spsc::Queue`** für Datenströme mit einem Schreiber und einem Leser, ohne Sperre\n\nAuf Single-Core-Cortex-M liefert `cortex-m` mit dem Feature `critical-section-single-core` die Implementierung."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "cell-nicht-sync",
+      "frage": "Ein Kollege versucht es mit `Cell`. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::cell::Cell;",
+          "",
+          "static NEUE_DATEN: Cell<bool> = Cell::new(false);"
+        ]
+      },
+      "optionen": [
+        "``error[E0277]: `Cell<bool>` cannot be shared between threads safely``, weil `Cell` nicht `Sync` ist",
+        "Es kompiliert, auf einem Single-Core-Chip ist `Cell` sicher",
+        "Es kompiliert, aber nur mit `#![no_std]`",
+        "Ein Linkerfehler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Compiler schlägt in seiner Meldung selbst `AtomicBool` vor. Für ein Flag ist das genau richtig: `NEUE_DATEN.store(true, Ordering::Release)` in der ISR, `NEUE_DATEN.swap(false, Ordering::Acquire)` im Hauptprogramm.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Regel kennt keine Ausnahme für Single-Core, und Interrupts verhalten sich wie Nebenläufigkeit.",
+        "`Sync` ist auch in `no_std` Pflicht für `static`s.",
+        "Der Fehler entsteht schon bei der Typprüfung."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Peripherie an die ISR übergeben",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::cell::RefCell;",
+          "use critical_section::Mutex;",
+          "",
+          "static LED: Mutex<RefCell<Option<LedPin>>> = Mutex::new(RefCell::new(None));",
+          "",
+          "// main, nach der Konfiguration:",
+          "critical_section::with(|cs| LED.borrow(cs).replace(Some(led)));",
+          "",
+          "#[interrupt]",
+          "fn TIM2() {",
+          "    critical_section::with(|cs| {",
+          "        if let Some(led) = LED.borrow_ref_mut(cs).as_mut() {",
+          "            led.toggle();",
+          "        }",
+          "    });",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "`Option`, weil der Pin zur Compilezeit noch nicht existiert; er wird erst in `main` erzeugt." },
+          { "zeile": 7, "text": "Der Pin wird in das `static` verschoben. `main` besitzt ihn danach nicht mehr." },
+          { "zeile": 12, "text": "`borrow_ref_mut(cs)` ist kurz für `borrow(cs).borrow_mut()`; das `RefCell` prüft zusätzlich zur Laufzeit." }
+        ]
+      },
+      "text": "Das Muster heisst nach seinen Schichten oft *Mutex-RefCell-Option*. Das Token `cs` beweist dem Typsystem, dass gerade ein kritischer Abschnitt aktiv ist."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "token-fehlt",
+      "frage": "Diese Funktion kompiliert nicht. In welcher Zeile liegt der Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static WERT: Mutex<RefCell<Option<u32>>> = Mutex::new(RefCell::new(None));",
+          "",
+          "fn letzter_wert() -> Option<u32> {",
+          "    let cs = critical_section::CriticalSection;",
+          "    *WERT.borrow(cs).borrow()",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Ein `CriticalSection`-Token kann man nicht selbst bauen, es entsteht nur innerhalb von `critical_section::with(|cs| …)` (oder mit `unsafe { CriticalSection::new() }`). Ohne dieses Token gibt es keinen Zugriff auf den Inhalt des Mutex. Richtig ist: `critical_section::with(|cs| *WERT.borrow(cs).borrow())`. Zeile 5 ist dann in Ordnung, `Option<u32>` ist `Copy`."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeug-waehlen",
+      "frage": "Welches Werkzeug passt zu welcher Aufgabe?",
+      "paare": [
+        { "links": "`AtomicBool`", "rechts": "Ein Flag, das die ISR setzt und das Hauptprogramm abholt" },
+        { "links": "`AtomicU32::fetch_add`", "rechts": "Ein Tick-Zähler auf Cortex-M3 und höher" },
+        { "links": "`Mutex<RefCell<Option<T>>>`", "rechts": "Ein Peripherie-Objekt, das main erzeugt und die ISR benutzt" },
+        { "links": "`heapless::spsc::Queue`", "rechts": "Ein Strom empfangener Bytes von der ISR ins Hauptprogramm" }
+      ],
+      "erklaerung": "Kritische Abschnitte so kurz wie möglich halten, sie verlängern die Latenz aller Interrupts. Auf Cortex-M0 fehlen atomare Lese-Ändere-Schreibe-Befehle: `fetch_add` gibt es dort nicht, Crates wie `portable-atomic` helfen (Modul 5.3)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "spsc-kapazitaet",
+      "frage": "`let mut q: heapless::spsc::Queue<u8, 4> = Queue::new();` Wie viele Elemente passen hinein, bevor `enqueue` einen Fehler liefert?",
+      "optionen": ["3", "4", "5", "Beliebig viele, die Queue wächst"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Implementierung lässt einen Platz frei, um „voll“ von „leer“ zu unterscheiden. `capacity()` ist darum `N - 1`. Ist die Queue voll, gibt `enqueue` das Element in `Err(wert)` zurück, statt es zu verschlucken. Die ISR muss entscheiden, was sie damit tut. Mit `q.split()` erhältst du einen `Producer` für die ISR und einen `Consumer` für das Hauptprogramm.",
+      "begruendungen": [
+        "Richtig. Beim Ausprobieren liefert der vierte Aufruf `Err(4)`.",
+        "Ein Platz bleibt als Markierung frei.",
+        "Mehr als `N` Speicherplätze gibt es nicht.",
+        "`heapless` hat feste Kapazität und benutzt keinen Heap."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "borrow-checker-hilft",
+      "frage": "Was ist der wesentliche Vorteil gegenüber C, wo man globale Variablen einfach `volatile` macht?",
+      "optionen": [
+        "Ohne `unsafe` lässt sich ein ungeschützter gemeinsamer Zugriff gar nicht erst schreiben, der Compiler verlangt `Sync`-Typen",
+        "Rust-ISRs sind schneller",
+        "Rust sperrt automatisch alle Interrupts, wenn `main` eine globale Variable liest",
+        "In Rust gibt es keine globalen Variablen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In C findet man vergessene Schutzmassnahmen im Review oder nach Wochen im Feld. In Rust ist der sichere Weg der einzige, der ohne `unsafe` kompiliert. Logische Fehler bleiben möglich, etwa zu lange kritische Abschnitte oder eine volle Queue. Data Races aber nicht.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Geschwindigkeit ist vergleichbar.",
+        "Rust tut nichts automatisch. Du musst `critical_section::with` ausdrücklich aufrufen.",
+        "`static` sind globale Variablen, sie brauchen nur `Sync`."
+      ]
+    }
+  ],
+  "praxis": "Im Review suchst du nach `static mut` und `unsafe` in der Nähe von Interrupt-Handlern. Fast immer lässt sich das durch ein Atomic, das Mutex-Muster oder eine Queue ersetzen. Wird das Muster unhandlich, ist das ein Signal für ein Framework: RTIC verwaltet geteilte Ressourcen ohne `RefCell` und `Option`, Embassy arbeitet mit Kanälen (Phase 7).",
+  "labor": {
+    "titel": "Die Muster auf dem PC",
+    "anleitung": "`critical-section` hat ein Feature `std`, das die Sperre mit einem echten Mutex umsetzt. So kannst du das ISR-Muster mit Threads ausprobieren. Teste ausserdem die spsc-Queue.",
+    "befehle": [
+      "cargo new isr-muster && cd isr-muster",
+      "cargo add critical-section --features std",
+      "cargo add heapless",
+      "cargo run"
+    ],
+    "beobachtung": "Ein `static` mit `Cell` scheitert an E0277, ein `&` auf ein `static mut` an `static_mut_refs`. Mit `Mutex<RefCell<…>>` und Atomics kompiliert alles ohne `unsafe`."
+  },
+  "begriffe": [
+    { "begriff": "Kritischer Abschnitt", "englisch": "critical section", "erklaerung": "Codestück, in dem Interrupts gesperrt sind, damit es nicht unterbrochen wird." },
+    { "begriff": "Innere Veränderlichkeit", "englisch": "interior mutability", "erklaerung": "Änderung über eine geteilte Referenz, kontrolliert durch Typen wie `RefCell` oder Atomics." },
+    { "begriff": "SPSC-Queue", "englisch": "single-producer single-consumer queue", "erklaerung": "Warteschlange mit genau einem Schreiber und einem Leser, sperrfrei umsetzbar." },
+    { "begriff": "Sync", "englisch": "Sync", "erklaerung": "Marker-Trait für Typen, auf die mehrere Kontexte gleichzeitig über `&` zugreifen dürfen." }
+  ],
+  "weiterlesen": [
+    { "titel": "critical-section (docs.rs)", "url": "https://docs.rs/critical-section" },
+    { "titel": "heapless (docs.rs)", "url": "https://docs.rs/heapless" },
+    { "titel": "Rust Edition Guide: static mut references", "url": "https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html" }
+  ]
+}

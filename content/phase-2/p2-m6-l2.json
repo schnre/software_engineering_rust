@@ -1,0 +1,249 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m6-l2",
+  "phase": 2,
+  "modul": "2.6 unsafe und Undefined Behavior",
+  "titel": "Typisches Undefined Behavior in unsafe Rust",
+  "lernziele": [
+    "Die häufigsten UB-Quellen in unsafe Rust erkennen: Aliasing, uninitialisierter Speicher, ungültige Werte, Datenrennen",
+    "`MaybeUninit` statt `mem::uninitialized` verwenden",
+    "Erklären, warum Ganzzahlüberlauf in Rust kein UB ist und wie Miri UB findet"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Das Programm kompiliert und gibt im Debug-Build `12` aus. Ist es korrekt?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let mut x = 10;",
+          "    let p = &mut x as *mut i32;",
+          "    let r1 = unsafe { &mut *p };",
+          "    let r2 = unsafe { &mut *p };",
+          "    *r1 += 1;",
+          "    *r2 += 1;",
+          "    println!(\"{x}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nein, es ist UB: Zwei gleichzeitig lebende `&mut` auf dasselbe Objekt verletzen die Aliasing-Regel, auch wenn die Ausgabe stimmt",
+        "Ja, weil beide Referenzen nacheinander benutzt werden",
+        "Ja, weil der Umweg über den Raw Pointer die Regeln aufhebt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `&mut T` verspricht dem Compiler: Solange ich lebe, greift niemand sonst auf dieses Objekt zu. Darauf baut LLVM Optimierungen (`noalias`). `r1` lebt bis Zeile 6, `r2` entsteht schon in Zeile 5. Dass heute `12` herauskommt, beweist nichts, genau wie bei UB in C++. Der Borrow-Checker hätte das verhindert, aber über Raw Pointer umgeht man ihn.",
+      "begruendungen": [
+        "Richtig.",
+        "Entscheidend ist, dass beide gleichzeitig existieren, nicht nur, wann sie benutzt werden.",
+        "Raw Pointer heben die Regeln nicht auf, sie verlagern nur die Prüfpflicht auf dich."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was in Rust UB ist",
+      "text": "Die Rust Reference führt eine Liste. Die wichtigsten Punkte für den Alltag:\n\n- **Aliasing verletzen:** ein `&mut T`, während eine andere Referenz auf dasselbe Objekt benutzt wird, oder Schreiben über `&T` (ausser in `UnsafeCell`)\n- **Ungültige Zeiger:** dangling, nicht ausgerichtet, ausserhalb der Allokation\n- **Ungültige Werte erzeugen:** `bool` ausser 0/1, `char` ausserhalb von Unicode, ungültige Enum-Diskriminante, Null-Referenz, uninitialisierte Ganzzahl\n- **Datenrennen** zwischen Threads\n- Verletzung der Vorbedingungen einer `unsafe fn`\n\nAll das ist nur über `unsafe` erreichbar."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "rustc kompiliert den Code, gibt aber diese Warnung aus. Was bedeutet sie?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let x: u32 = unsafe { std::mem::uninitialized() };"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: use of deprecated function `std::mem::uninitialized`: use `mem::MaybeUninit` instead",
+          "warning: the type `u32` does not permit being left uninitialized",
+          " --> src/main.rs:3:27",
+          "  |",
+          "3 |     let x: u32 = unsafe { std::mem::uninitialized() };",
+          "  |                           ^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  |                           |",
+          "  |                           this code causes undefined behavior when executed",
+          "  |                           help: use `MaybeUninit<T>` instead, and only call `assume_init` after initialization is done",
+          "  |",
+          "  = note: integers must be initialized"
+        ]
+      },
+      "optionen": [
+        "Eine Ganzzahl mit uninitialisiertem Inhalt ist schon beim Erzeugen UB, nicht erst beim Lesen. `MaybeUninit` ist der vorgesehene Weg",
+        "Nur eine Stilwarnung, `u32` hat für jedes Bitmuster einen gültigen Wert",
+        "Die Funktion ist nur langsam, weil sie den Speicher nullt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Anders als in C ist „zufälliger alter Inhalt“ in Rust kein gültiger Wert: Uninitialisierte Bytes sind ein eigener Zustand, den nur `MaybeUninit<T>` halten darf. `mem::uninitialized` ist deshalb veraltet. Der Lint `invalid_value` erkennt nur offensichtliche Fälle, die meisten bemerkt erst Miri.",
+      "begruendungen": [
+        "Richtig.",
+        "Jedes *initialisierte* Bitmuster ist gültig, uninitialisierte Bytes sind es nicht.",
+        "`uninitialized` nullt nichts, das wäre `mem::zeroed`."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die korrekte Variante mit `MaybeUninit`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::mem::MaybeUninit;",
+          "",
+          "let mut x = MaybeUninit::<[u8; 4]>::{{?}}();",
+          "x.{{?}}([1, 2, 3, 4]);",
+          "// SAFETY: Zeile 4 hat alle vier Bytes geschrieben.",
+          "let a = unsafe { x.{{?}}() };"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "uninit"
+          ]
+        },
+        {
+          "loesungen": [
+            "write"
+          ]
+        },
+        {
+          "loesungen": [
+            "assume_init"
+          ]
+        }
+      ],
+      "auswahl": [
+        "uninit",
+        "write",
+        "assume_init",
+        "zeroed",
+        "as_ptr"
+      ],
+      "erklaerung": "`MaybeUninit::uninit()` reserviert Platz ohne gültigen Inhalt. `write` initialisiert ihn, ohne einen alten Wert zu droppen. Erst `assume_init` macht daraus ein `[u8; 4]`, und nur das ist `unsafe`: Du versprichst, dass alles initialisiert ist. Typischer Einsatz in Embedded-Code: grosse Puffer in `static`s, die nicht beim Start genullt werden sollen."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was passiert im jeweiligen Fall?",
+      "paare": [
+        {
+          "links": "`let b: bool = unsafe { transmute(2u8) };`",
+          "rechts": "UB: ungültiger Wert für `bool`"
+        },
+        {
+          "links": "Zwei Threads schreiben ohne Synchronisation über Raw Pointer in dasselbe `u32`",
+          "rechts": "UB: Datenrennen"
+        },
+        {
+          "links": "`let m = n + 1;` mit `n: u8 = 255` im Debug-Build",
+          "rechts": "Panic: *attempt to add with overflow*"
+        },
+        {
+          "links": "`let m = n + 1;` mit `n: u8 = 255` im Release-Build",
+          "rechts": "Wohldefiniert: Ergebnis 0 (Zweierkomplement)"
+        },
+        {
+          "links": "`mem::forget(v)` für einen `Vec`",
+          "rechts": "Wohldefiniert: Speicherleck, aber safe"
+        }
+      ],
+      "erklaerung": "Ganzzahlüberlauf ist in Rust **nie** UB, anders als `signed int` in C/C++. Im Profil `dev` ist `overflow-checks` an (Panic), in `release` aus (Wrap-around). Wer bewusst überlaufen will, schreibt `wrapping_add`, wer es prüfen will, `checked_add`. Ein `bool` mit Wert 2 kann dagegen beliebigen Unsinn auslösen, weil der Compiler annimmt, dass nur 0 und 1 vorkommen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Dasselbe Programm (`let m = n + 1;` mit `n == 255u8`) in zwei Profilen. Welche Aussage stimmt?",
+      "terminal": {
+        "befehl": "cargo run -q; cargo run -q --release",
+        "ausgabe": [
+          "thread 'main' (7165) panicked at src/main.rs:4:13:",
+          "attempt to add with overflow",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+          "0"
+        ]
+      },
+      "optionen": [
+        "Debug prüft auf Überlauf und panickt, Release rechnet modulo 256. Beides ist definiertes Verhalten",
+        "Release hat UB ausgelöst und zufällig 0 ausgegeben",
+        "Der Release-Build hat die Addition wegoptimiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Verhalten ist pro Profil festgelegt und lässt sich mit `overflow-checks = true` in `[profile.release]` auch im Release einschalten. Viele sicherheitskritische Projekte tun das. Ein Überlauf ist trotzdem meist ein **Logikfehler**, nur eben kein UB, das den Optimierer zu seltsamen Schlüssen verleitet.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust definiert den Release-Fall ausdrücklich als Wrap-around.",
+        "Die Addition wird ausgeführt, 255 + 1 ergibt modulo 256 eben 0."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Miri findet UB",
+      "text": "**Miri** ist ein Interpreter für Rusts Zwischencode (MIR). Er führt Tests langsam, aber Schritt für Schritt aus und prüft dabei die Regeln: Aliasing (Modelle *Stacked Borrows* und *Tree Borrows*), uninitialisierte Bytes, ungültige Werte, Use-after-free, Out-of-bounds, Datenrennen und Speicherlecks. Das Beispiel mit `r1` und `r2` von oben bricht unter Miri mit einem Aliasing-Fehler ab.\n\nMiri braucht die Nightly-Toolchain (`rustup +nightly component add miri`, dann `cargo +nightly miri test`) und kann keine FFI-Aufrufe oder Hardware ausführen. Details in Phase 4."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Kollege sagt: „Unsere `unsafe`-Funktion läuft seit Monaten ohne Fehler in allen Tests, also ist sie korrekt.“ Was antwortest du?",
+      "optionen": [
+        "Tests ohne Miri sehen UB oft nicht. Wir sollten die Tests unter Miri laufen lassen und jede SAFETY-Begründung prüfen",
+        "Stimmt, Rust hätte UB zur Laufzeit gemeldet",
+        "Stimmt, solange der Release-Build nicht abstürzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "UB in Rust verhält sich wie in C++: Es kann jahrelang harmlos aussehen, bis ein neuer Compiler (z. B. ein LLVM-Update) anders optimiert. Rust hat zur Laufzeit keine Prüfung für die Aliasing-Regeln. Miri in der CI ist bei Crates mit `unsafe` heute Standard, etwa in der Standardbibliothek selbst.",
+      "begruendungen": [
+        "Richtig.",
+        "Normale Builds prüfen Aliasing oder Initialisierung nicht.",
+        "„Stürzt nicht ab“ ist bei UB kein Beweis."
+      ]
+    }
+  ],
+  "praxis": "Wenn ein Rust-Programm nur im Release-Build falsch rechnet oder nach einem Toolchain-Update komisch wird, und es enthält `unsafe`, dann ist UB der Hauptverdächtige. Zuerst: Tests unter Miri laufen lassen und jede unsafe-Stelle mit ihrer SAFETY-Begründung durchgehen. In Embedded-Projekten sind `static mut`-Puffer, die gleichzeitig von Interrupt und Hauptschleife benutzt werden, der Klassiker für Aliasing-UB und Datenrennen.",
+  "labor": {
+    "titel": "UB-Kandidaten erzeugen",
+    "anleitung": "Baue die Beispiele dieser Lektion nach und beobachte, was der Compiler meldet und was zur Laufzeit passiert. Wenn du Nightly installieren kannst, lass sie auch unter Miri laufen.",
+    "befehle": [
+      "cargo new ub && cd ub",
+      "cargo run && cargo run --release",
+      "rustup toolchain install nightly --component miri",
+      "cargo +nightly miri run"
+    ],
+    "beobachtung": "Der normale Build gibt bei den Aliasing- und `transmute`-Beispielen ein plausibles Ergebnis aus und meldet nichts. Miri bricht dagegen mit `Undefined Behavior` ab und zeigt die Zeile, an der die Regel verletzt wurde."
+  },
+  "begriffe": [
+    {
+      "begriff": "Aliasing",
+      "englisch": "aliasing",
+      "erklaerung": "Mehrere Zeiger oder Referenzen auf dasselbe Objekt. `&mut T` garantiert, dass es während seiner Lebenszeit kein anderes gibt."
+    },
+    {
+      "begriff": "MaybeUninit",
+      "englisch": "MaybeUninit",
+      "erklaerung": "Hülle für möglicherweise uninitialisierten Speicher. `assume_init` macht daraus einen gültigen Wert."
+    },
+    {
+      "begriff": "Ungültiger Wert",
+      "englisch": "invalid value",
+      "erklaerung": "Bitmuster, das für einen Typ nicht erlaubt ist, z. B. 2 als `bool`. Schon das Erzeugen ist UB."
+    },
+    {
+      "begriff": "Miri",
+      "englisch": "Miri",
+      "erklaerung": "Interpreter für MIR, der beim Ausführen von Tests Undefined Behavior erkennt. Läuft mit Nightly."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust Reference: Behavior considered undefined",
+      "url": "https://doc.rust-lang.org/reference/behavior-considered-undefined.html"
+    },
+    {
+      "titel": "std::mem::MaybeUninit",
+      "url": "https://doc.rust-lang.org/std/mem/union.MaybeUninit.html"
+    },
+    {
+      "titel": "The Rustonomicon",
+      "url": "https://doc.rust-lang.org/nomicon/"
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m4-l2",
+  "phase": 9,
+  "modul": "9.4 Code-Reviews",
+  "titel": "Reviews als Team",
+  "lernziele": [
+    "Pull Requests so schneiden, dass sie gut prüfbar sind",
+    "Review-Kommentare klar, freundlich und begründet formulieren",
+    "Reviewer mit rustfmt, Clippy und CI von Routineprüfungen entlasten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Kollegin will den Wechsel von `embedded-hal` 0.2 auf 1.0, ein neues Fehler-`enum` und das Umbenennen von zwanzig Modulen in einem einzigen Pull Request einreichen. Was rätst du?",
+      "optionen": [
+        "Drei getrennte PRs: zuerst das reine Umbenennen ohne Verhaltensänderung, dann das Fehler-`enum`, dann der Versionswechsel",
+        "Ein PR ist besser, dann muss nur einmal reviewt werden",
+        "Erst alles auf einem langen Branch fertigstellen und nach drei Wochen zusammen mergen",
+        "Das Umbenennen weglassen, weil Reviewer es ohnehin nicht prüfen können"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Kleine PRs mit **einem** Zweck werden schneller und gründlicher reviewt. Ein reines Umbenennen lässt sich fast mechanisch prüfen, wenn nichts anderes darin steckt. Mischt man es mit Verhaltensänderungen, verstecken sich die wichtigen Zeilen zwischen Hunderten trivialen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Gründlichkeit eines Reviews sinkt stark mit der Grösse. Ein grosser PR spart kaum Zeit.",
+        "Lange Branches erzeugen Merge-Konflikte, gerade in `Cargo.lock` (Modul 8.6).",
+        "Ein Umbenennen ist sehr wohl prüfbar, wenn es allein im PR steht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein guter Pull Request",
+      "text": "- **Ein Zweck** pro PR. Refactoring und Verhaltensänderung trennen.\n- **Klein**: Als Richtwert einige hundert Zeilen. Generierter Code und `Cargo.lock` zählen nicht.\n- **Beschreibung**: Warum die Änderung? Was wurde wie getestet? Worauf soll der Reviewer besonders achten?\n- **Selbst-Review** vor dem Anfordern: den eigenen Diff einmal wie ein Fremder lesen.\n- **Grün vor Review**: `cargo fmt --check`, `cargo clippy` und Tests laufen in der CI, bevor ein Mensch Zeit investiert.\n\nGrössere Designfragen gehören **vor** die Umsetzung, etwa in einen Entwurfs-PR, der nur Traits und Signaturen enthält."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Kommentare dem passenden Stil zu.",
+      "paare": [
+        { "links": "„Das ist falsch.“", "rechts": "Wertend, ohne Begründung" },
+        { "links": "„Hier kann `next()` `None` liefern, wenn das Paket leer ist. Dann panickt `unwrap`. Wäre `?` mit einem `Fehler::Leer` passend?“", "rechts": "Konkret, begründet, mit Vorschlag" },
+        { "links": "„nit: `daten_len` statt `dl` wäre leichter lesbar.“", "rechts": "Als Kleinigkeit markiert, nicht blockierend" },
+        { "links": "„Warum hast du dich hier für `Box<dyn Sensor>` statt Generics entschieden?“", "rechts": "Offene Frage zum Verständnis" }
+      ],
+      "erklaerung": "Gute Kommentare sprechen über den Code, nicht über die Person, begründen das Problem und schlagen etwas vor. Ein Präfix wie `nit:` (Kleinigkeit) zeigt, was nicht blockiert. Fragen sind oft besser als Anweisungen, vielleicht hatte die Autorin einen Grund, den du nicht kennst."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Diese Ausgabe erscheint im CI-Job. Was soll der Reviewer tun?",
+      "terminal": {
+        "befehl": "cargo fmt --check",
+        "ausgabe": [
+          "Diff in /home/user/projekt/src/lib.rs:1:",
+          "-pub fn summe(v:&[u32])->u32{v.iter().sum()}",
+          "+pub fn summe(v: &[u32]) -> u32 {",
+          "+    v.iter().sum()",
+          "+}"
+        ]
+      },
+      "optionen": [
+        "Nichts zur Formatierung kommentieren. Der Job ist rot, die Autorin führt `cargo fmt` aus, und das Thema ist erledigt",
+        "Jede Zeile einzeln im Review kommentieren",
+        "Die Regel für dieses Projekt ausschalten, damit der Job grün wird",
+        "Den PR trotzdem mergen, weil sich am Verhalten nichts ändert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo fmt --check` zeigt den Unterschied zur Formatierung von rustfmt und beendet sich mit Exit-Code 1. Damit muss kein Mensch je wieder über Leerzeichen diskutieren. Projektspezifische Wünsche kommen in `rustfmt.toml`, nicht in Review-Kommentare.",
+      "begruendungen": [
+        "Richtig. Werkzeuge erledigen das, Reviewer kümmern sich um Inhalte.",
+        "Das kostet beide Seiten Zeit, und ein Befehl löst es vollständig.",
+        "Die einheitliche Formatierung ist der Sinn der Prüfung.",
+        "Ein roter Pflicht-Job sollte den Merge blockieren, sonst verliert er jede Wirkung."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "In welcher Reihenfolge sollten die Prüfungen in einer CI-Pipeline für einen Rust-PR laufen, damit schnelle Fehler früh auffallen?",
+      "elemente": [
+        "`cargo fmt --check`",
+        "`cargo clippy --all-targets -- -D warnings`",
+        "`cargo test`",
+        "Build für das Embedded-Target, etwa `cargo build --release --target thumbv7em-none-eabihf`",
+        "Menschliches Review"
+      ],
+      "erklaerung": "rustfmt braucht Sekunden, Clippy prüft ohne Codegenerierung, Tests brauchen einen vollen Build. Der Cross-Build für das Ziel kann parallel zu den Tests laufen. Ein Mensch schaut erst hin, wenn alles Automatische grün ist. So wird seine Zeit nicht für Dinge verbraucht, die eine Maschine findet."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Im Team gibt es in jedem zweiten Review denselben Kommentar: „Bitte kein `unwrap()` im Treiber-Crate.“ Was ist die beste Reaktion?",
+      "optionen": [
+        "Die Regel automatisieren: `unwrap_used = \"deny\"` unter `[lints.clippy]` im Treiber-Crate. Dann meldet die CI jeden Fall",
+        "Den Kommentar als Textbaustein speichern, um schneller zu tippen",
+        "Den Kommentar weglassen, er nervt die Autoren",
+        "Eine Rundmail an alle schreiben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wiederkehrende Kommentare sind ein Zeichen dafür, dass eine Regel ins Werkzeug gehört. Die Lint-Tabelle in `Cargo.toml` gilt für jeden Build, auch lokal und im Editor, und sie entpersonalisiert die Regel: Nicht der Reviewer meckert, Clippy meldet. Gerechtfertigte Ausnahmen werden mit `#[expect(clippy::unwrap_used, reason = \"…\")]` sichtbar begründet.",
+      "begruendungen": [
+        "Richtig.",
+        "Spart Tipparbeit, aber nicht die Diskussion und nicht das Übersehen.",
+        "Dann wird die Regel nicht mehr eingehalten.",
+        "Rundmails geraten in Vergessenheit. Ein Werkzeug vergisst nichts."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein PR liegt seit drei Tagen ohne Review. Was ist im Team die gesündeste Regel?",
+      "optionen": [
+        "Reviews haben Vorrang vor eigener neuer Arbeit, eine erste Antwort kommt innerhalb eines Arbeitstags",
+        "Reviews macht man, wenn gerade nichts anderes zu tun ist",
+        "Nach drei Tagen darf die Autorin ohne Review mergen",
+        "Nur der Teamleiter darf reviewen, damit die Qualität einheitlich bleibt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein wartender PR blockiert die Autorin, erzeugt Konflikte und verleitet zu immer grösseren PRs. Schnelle Reviews sind deshalb wichtiger als perfekte. Werden Reviews auf mehrere Schultern verteilt, verbreitet sich ausserdem Wissen über den Code im Team. Eine `CODEOWNERS`-Datei kann Zuständigkeiten pro Crate festlegen.",
+      "begruendungen": [
+        "Richtig.",
+        "Dann wartet die Autorin oft tagelang.",
+        "Das macht das Review-Gate wertlos.",
+        "Ein einzelner Reviewer wird zum Engpass, und das Wissen bleibt bei einer Person."
+      ]
+    }
+  ],
+  "praxis": "Reviews sind Teamarbeit: Die Autorin macht den PR klein und gut beschrieben, die Reviewer antworten schnell und begründet, und alles Mechanische erledigen rustfmt, Clippy und die CI. Wenn du merkst, dass du denselben Kommentar zum dritten Mal schreibst, mach daraus eine Lint, eine Regel in `rustfmt.toml` oder einen CI-Schritt.",
+  "labor": {
+    "titel": "Die Review-Pipeline lokal nachstellen",
+    "anleitung": "Führe in einem eigenen Projekt die automatischen Prüfungen in derselben Reihenfolge aus, wie sie in der CI laufen würden. Baue absichtlich einen Formatierungsfehler und eine Clippy-Warnung ein.",
+    "befehle": [
+      "cargo fmt --check",
+      "cargo clippy --all-targets -- -D warnings",
+      "cargo test",
+      "git diff --stat main"
+    ],
+    "beobachtung": "`cargo fmt --check` endet mit Exit-Code 1 und zeigt den Diff. Mit `-D warnings` wird jede Clippy-Warnung zum Fehler, die CI wird rot. `git diff --stat` zeigt, wie gross der PR wäre: Liegt er weit über einigen hundert Zeilen, lohnt es sich, ihn zu teilen."
+  },
+  "begriffe": [
+    { "begriff": "Pull Request", "englisch": "pull request", "erklaerung": "Vorschlag, einen Branch in den Hauptzweig zu übernehmen, mit Diff, Beschreibung und Review." },
+    { "begriff": "Nit", "englisch": "nitpick", "erklaerung": "Als Kleinigkeit markierter, nicht blockierender Review-Kommentar." },
+    { "begriff": "CODEOWNERS", "englisch": "code owners", "erklaerung": "Datei, die pro Pfad festlegt, wer bei Änderungen als Reviewer angefragt wird." }
+  ],
+  "weiterlesen": [
+    { "titel": "rustfmt: Konfiguration", "url": "https://rust-lang.github.io/rustfmt/" },
+    { "titel": "Clippy Book: Usage", "url": "https://doc.rust-lang.org/clippy/usage.html" }
+  ]
+}

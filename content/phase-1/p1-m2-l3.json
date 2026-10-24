@@ -1,0 +1,247 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m2-l3",
+  "phase": 1,
+  "modul": "1.2 Der Linker",
+  "titel": "Sichtbarkeit, Inlining und Kohärenz",
+  "lernziele": [
+    "`pub`, `pub(crate)` und private Items unterscheiden und ihre Spuren in der Symboltabelle erkennen",
+    "Erklären, wo generische und `#[inline]`-Funktionen über Crate-Grenzen hinweg übersetzt werden",
+    "Die Orphan Rule als Rusts Gegenstück zur One Definition Rule von C++ einordnen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Was meldet `rustc` für dieses Programm?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "mod sensor {",
+          "    pub fn lesen() -> u16 { roh() * 2 }",
+          "    fn roh() -> u16 { 21 }",
+          "}",
+          "",
+          "fn main() {",
+          "    println!(\"{}\", sensor::lesen());",
+          "    println!(\"{}\", sensor::roh());",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Es kompiliert und gibt 42 und 21 aus",
+        "`error[E0603]: function `roh` is private`",
+        "Ein Linkerfehler, weil `roh` nicht exportiert wird"
+      ],
+      "korrekt": 1,
+      "fest": true,
+      "erklaerung": "Ohne `pub` ist ein Item **privat** für sein Modul (und dessen Untermodule). Diese Prüfung macht rustc bei der Namensauflösung, lange bevor ein Linker etwas sieht. In Rust ist Sichtbarkeit also zuerst eine Regel der Sprache, nicht des Linkers.",
+      "begruendungen": [
+        "`main` liegt ausserhalb von `sensor` und darf `roh` nicht sehen.",
+        "Richtig. rustc nennt auch die Definitionsstelle von `roh`.",
+        "Der Fehler entsteht bei der Namensauflösung in rustc. Bis zum Linker kommt es nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sichtbarkeit in Rust",
+      "text": "- **privat** (Standard): sichtbar im eigenen Modul und dessen Kindmodulen.\n- `pub(crate)`: überall im eigenen Crate, aber nicht für andere Crates.\n- `pub(super)` bzw. `pub(in pfad)`: im Elternmodul bzw. einem angegebenen Modul.\n- `pub`: für alle, sofern auch der Pfad dorthin öffentlich ist.\n\nIn C++ steuern `static`, anonyme Namespaces und Header die Linkage. In Rust gibt es keine Header: Was andere Crates benutzen dürfen, entscheidet `pub`, und rustc speichert diese Information in den Metadaten des Crates.",
+      "code": {
+        "sprache": "rust",
+        "datei": "lib.rs",
+        "zeilen": [
+          "pub fn oeffentlich() -> u32 { privat() + intern() }",
+          "pub(crate) fn intern() -> u32 { 2 }",
+          "fn privat() -> u32 { 1 }"
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Die Bibliothek aus dem vorigen Schritt, ergänzt um `#[unsafe(no_mangle)] pub extern \"C\" fn c_api()`, wurde **ohne** Optimierung zu einem Object-File übersetzt. Welche Aussage passt?",
+      "terminal": {
+        "befehl": "nm -C vis.o | grep -v ' U '",
+        "ausgabe": [
+          "0000000000000000 V DW.ref.rust_eh_personality",
+          "0000000000000000 r GCC_except_table3",
+          "0000000000000000 T vis::oeffentlich",
+          "0000000000000000 t vis::intern",
+          "0000000000000000 t vis::privat",
+          "0000000000000000 T c_api"
+        ]
+      },
+      "optionen": [
+        "Private und `pub(crate)`-Funktionen sind lokale Symbole (`t`), `pub`-Funktionen globale (`T`)",
+        "Alle Funktionen sind global, Sichtbarkeit existiert nur im Rust-Code",
+        "`pub(crate)` ist global, weil andere Codegen-Units des Crates es brauchen könnten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc übersetzt nicht exportierbare Items mit lokaler Sichtbarkeit, ähnlich wie `static` in C. Mit `-O` bleibt in diesem Beispiel übrigens nur `c_api` übrig: LLVM inlinet die privaten Funktionen, und sehr kleine `pub`-Funktionen wie `oeffentlich` behandelt rustc bei Optimierung automatisch wie `#[inline]`. Ihr Code entsteht dann erst im aufrufenden Crate.",
+      "begruendungen": [
+        "Richtig. Das kleine `t` bedeutet lokal.",
+        "Die Buchstaben `t` und `T` zeigen, dass rustc die Sichtbarkeit an den Linker weitergibt.",
+        "Hier ist `intern` lokal. Würde rustc es auf mehrere CGUs verteilen, kann es intern sichtbar gemacht werden, aber nie für andere Crates."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Crate `geom` enthält `pub fn groesster<T: PartialOrd + Copy>(xs: &[T]) -> T`. Die Anwendung ruft sie mit `&[u32]` und `&[f64]` auf. Wo entsteht der Maschinencode für `groesster::<f64>`?",
+      "optionen": [
+        "Beim Übersetzen der Anwendung, denn erst dort ist der Typ `f64` bekannt",
+        "Beim Übersetzen von `geom`, das vorsorglich Versionen für alle Zahlentypen erzeugt",
+        "Zur Laufzeit, generische Funktionen werden beim ersten Aufruf übersetzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das `.rlib` von `geom` enthält für generische Funktionen keinen Maschinencode, sondern eine Beschreibung (MIR) in den Metadaten. Erst der Nutzer **monomorphisiert**: Er erzeugt `groesster::<u32>` und `groesster::<f64>` in seinen eigenen CGUs. `nm -C` auf das fertige Programm zeigt beide Instanzen, im `.rlib` von `geom` fehlen sie.",
+      "begruendungen": [
+        "Richtig. Das ist das Rust-Gegenstück zu Templates im Header.",
+        "Welche Typen jemand benutzt, kann `geom` nicht wissen. Es erzeugt keine Instanzen auf Vorrat.",
+        "Rust hat keinen JIT. Alles wird vor der Ausführung übersetzt."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was kann ein anderes Crate mit dieser Funktion aus `geom` anfangen?",
+      "paare": [
+        {
+          "links": "`pub fn summe(xs: &[u32]) -> u32`",
+          "rechts": "Aufrufen, aber ohne LTO meist nicht inlinen: Der Code liegt fertig im `.rlib`"
+        },
+        {
+          "links": "`#[inline] pub fn klein() -> u32`",
+          "rechts": "Inlinen, weil das MIR in den Metadaten mitgeliefert wird"
+        },
+        {
+          "links": "`pub fn groesster<T>(…)`",
+          "rechts": "Für eigene Typen instanziieren und dabei inlinen"
+        },
+        {
+          "links": "`pub(crate) fn intern()`",
+          "rechts": "Gar nicht verwenden, nicht sichtbar"
+        }
+      ],
+      "erklaerung": "`#[inline]` ist in Rust weniger ein Optimierungsbefehl als eine Erlaubnis: Die Funktion wird im Nutzer-Crate neu übersetzt und kann dort eingesetzt werden. Ohne `#[inline]` inlinet LLVM nicht-generische Funktionen über Crate-Grenzen in der Regel nur mit LTO (nächste Lektion). Ausnahme: Winzige Funktionen behandelt rustc bei Optimierung von sich aus wie `#[inline]`. Mehr dazu in Phase 2.5."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du möchtest `Display` für `Vec<u8>` implementieren. Was sagt rustc?",
+      "terminal": {
+        "befehl": "rustc orphan.rs",
+        "ausgabe": [
+          "error[E0117]: only traits defined in the current crate can be implemented for types defined outside of the crate",
+          " --> orphan.rs:3:1",
+          "  |",
+          "3 | impl fmt::Display for Vec<u8> {",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^-------",
+          "  |                       |",
+          "  |                       `Vec` is not defined in the current crate",
+          "  |",
+          "  = note: impl doesn't have any local type before any uncovered type parameters",
+          "  = note: define and implement a trait or new type instead"
+        ]
+      },
+      "optionen": [
+        "Trait und Typ stammen beide aus `std`. Eine `impl` ist nur erlaubt, wenn mindestens einer davon im eigenen Crate definiert ist",
+        "`Vec<u8>` implementiert `Display` schon, deshalb gibt es eine doppelte Implementierung",
+        "`Display` darf grundsätzlich nur für eigene Structs implementiert werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist die **Orphan Rule** (Waisenregel). Zusammen mit weiteren Regeln sorgt sie für **Kohärenz**: Für jedes Paar aus Trait und Typ gibt es im ganzen Programm höchstens eine Implementierung. In C++ verlangt die One Definition Rule Ähnliches, aber Verstösse bleiben oft unentdeckt. Rust prüft schon beim Kompilieren jedes einzelnen Crates. Ausweg: ein **Newtype** wie `struct Bytes(Vec<u8>);`.",
+      "begruendungen": [
+        "Richtig. Weder `Display` noch `Vec` gehören deinem Crate.",
+        "`Vec<u8>` implementiert `Display` nicht, nur `Debug`. Die Meldung spricht auch von fremden Typen, nicht von Duplikaten.",
+        "Eigene Traits für fremde Typen oder fremde Traits für eigene Typen sind erlaubt. Auch Enums oder Newtypes zählen als eigene Typen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Newtype, der die Orphan Rule umgeht.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::fmt;",
+          "",
+          "struct Bytes({{?}});",
+          "",
+          "impl fmt::Display for {{?}} {",
+          "    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {",
+          "        write!(f, \"{} Bytes\", self.0.len())",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Vec<u8>"
+          ]
+        },
+        {
+          "loesungen": [
+            "Bytes"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Vec<u8>",
+        "Bytes",
+        "&[u8]",
+        "Vec<Bytes>"
+      ],
+      "erklaerung": "`Bytes` ist ein eigener Typ des Crates, also darf jeder Trait für ihn implementiert werden. Zur Laufzeit kostet der Newtype nichts: Er hat dasselbe Layout wie der innere `Vec<u8>`. Mehr zu Kohärenz und Newtypes in Phase 3."
+    }
+  ],
+  "praxis": "Im Code-Review gilt: so wenig `pub` wie möglich. `pub(crate)` für Hilfsfunktionen, die mehrere Module brauchen, macht klar, dass sie nicht zur öffentlichen API gehören. `cargo-semver-checks` kann sonst später Änderungen an versehentlich öffentlichen Items als Bruch melden. Bei Bibliotheken mit kleinen, heissen Funktionen (Getter, Konvertierungen) lohnt `#[inline]`, damit Nutzer-Crates sie ohne LTO inlinen können.",
+  "labor": {
+    "titel": "Wo die Generics landen",
+    "anleitung": "Lege eine Bibliothek `geom` mit einer generischen Funktion `groesster<T>` und einer normalen Funktion `summe` an, binde sie in ein Binary-Crate ein und rufe `groesster` mit zwei Typen auf.",
+    "befehle": [
+      "cargo new --lib geom && cargo new app && cd app && cargo add --path ../geom",
+      "cargo build",
+      "nm -C target/debug/deps/libgeom-*.rlib | grep geom::",
+      "nm -C target/debug/app | grep geom::"
+    ],
+    "beobachtung": "Im `.rlib` steht nur `T geom::summe`. Im fertigen Programm erscheinen zusätzlich `geom::groesster::<u32>` und `geom::groesster::<f64>`. Die Instanzen hat erst das Crate `app` erzeugt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Sichtbarkeit",
+      "englisch": "visibility",
+      "erklaerung": "Legt mit `pub`, `pub(crate)` usw. fest, von wo aus ein Item benutzt werden darf."
+    },
+    {
+      "begriff": "Monomorphisierung",
+      "englisch": "monomorphization",
+      "erklaerung": "Erzeugen einer eigenen Kopie einer generischen Funktion für jeden konkreten Typ."
+    },
+    {
+      "begriff": "Orphan Rule",
+      "englisch": "orphan rule",
+      "erklaerung": "Eine `impl` eines Traits ist nur erlaubt, wenn Trait oder Typ (vereinfacht) aus dem eigenen Crate stammt."
+    },
+    {
+      "begriff": "Kohärenz",
+      "englisch": "coherence",
+      "erklaerung": "Garantie, dass es für jede Kombination aus Trait und Typ höchstens eine Implementierung gibt."
+    },
+    {
+      "begriff": "Newtype",
+      "englisch": "newtype",
+      "erklaerung": "Tuple-Struct mit einem Feld, das einen fremden Typ in einen eigenen verpackt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Reference: Visibility and Privacy",
+      "url": "https://doc.rust-lang.org/reference/visibility-and-privacy.html"
+    },
+    {
+      "titel": "The Rust Reference: Implementations (Orphan rules)",
+      "url": "https://doc.rust-lang.org/reference/items/implementations.html"
+    },
+    {
+      "titel": "The Rust Reference: The inline attribute",
+      "url": "https://doc.rust-lang.org/reference/attributes/codegen.html"
+    }
+  ]
+}

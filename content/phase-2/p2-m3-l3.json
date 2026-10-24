@@ -1,0 +1,226 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m3-l3",
+  "phase": 2,
+  "modul": "2.3 Move, Copy und Lebenszeiten",
+  "titel": "Lebenszeiten",
+  "lernziele": [
+    "Lifetime-Annotationen wie `'a` lesen und in Signaturen und Structs schreiben",
+    "Die drei Elisionsregeln anwenden",
+    "E0597 und E0106 deuten und verstehen, dass Lifetimes beschreiben statt verlängern"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Kompiliert dieser Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let r;",
+          "    {",
+          "        let x = 5;",
+          "        r = &x;",
+          "    }",
+          "    println!(\"{r}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nein, E0597: `x` lebt nicht lange genug",
+        "Ja, `r` verlängert die Lebenszeit von `x`",
+        "Ja, weil `i32` `Copy` ist und `r` eine Kopie enthält"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`x` wird am Ende des inneren Blocks gedroppt, `r` wird danach noch benutzt. Das wäre eine **hängende Referenz** (dangling reference). rustc zeigt alle drei Stellen: wo `x` ausgeliehen wird, wo `x` stirbt („dropped here while still borrowed“) und wo die Referenz danach noch gebraucht wird.",
+      "begruendungen": [
+        "Richtig.",
+        "Referenzen verlängern in Rust nie etwas. Es gibt keine Sonderregel wie bei `const T&` in C++.",
+        "`r` ist eine Referenz `&i32`, keine Kopie des Werts. `Copy` betrifft nur `x` selbst."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was eine Lifetime ist",
+      "text": "Eine **Lifetime** (Lebenszeit) ist im Typsystem der Bereich, in dem eine Referenz gültig sein muss. Meist ermittelt der Compiler sie selbst. An Funktionsgrenzen muss er aber wissen, **von welchem Eingang** eine zurückgegebene Referenz stammt. Dafür gibt es generische Lifetime-Parameter wie `'a`:\n\n```rust\nfn laengeres<'a>(a: &'a str, b: &'a str) -> &'a str\n```\n\nGelesen: Das Ergebnis lebt höchstens so lange wie **beide** Eingaben. Wichtig: Annotationen **beschreiben** Beziehungen zwischen Referenzen. Sie ändern nie, wie lange ein Wert lebt."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was will rustc hier wissen?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0106]: missing lifetime specifier",
+          " --> src/main.rs:1:35",
+          "  |",
+          "1 | fn laengeres(a: &str, b: &str) -> &str {",
+          "  |                 ----     ----     ^ expected named lifetime parameter",
+          "  |",
+          "  = help: this function's return type contains a borrowed value, but the signature does not say whether it is borrowed from `a` or `b`",
+          "help: consider introducing a named lifetime parameter",
+          "  |",
+          "1 | fn laengeres<'a>(a: &'a str, b: &'a str) -> &'a str {",
+          "  |             ++++     ++          ++          ++"
+        ]
+      },
+      "optionen": [
+        "Ob die zurückgegebene Referenz von `a` oder von `b` geliehen ist",
+        "Wie viele Bytes der Rückgabewert hat",
+        "Ob die Funktion den Besitz von `a` und `b` übernimmt",
+        "Wie lange die Funktion laufen darf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Aufrufer muss allein aus der **Signatur** ableiten können, wie lange er das Ergebnis benutzen darf. Den Funktionsrumpf schaut sich der Borrow Checker dafür bewusst nicht an. Mit zwei Referenz-Eingaben ist das ohne Annotation mehrdeutig, deshalb E0106.",
+      "begruendungen": [
+        "Richtig: „does not say whether it is borrowed from `a` or `b`“.",
+        "Grössen sind Sache der Typen, nicht der Lifetimes.",
+        "`&str` ist geliehen, Besitz wechselt nicht.",
+        "Lifetimes haben nichts mit Laufzeit im Sinne von Zeitdauer zu tun."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Elisionsregeln",
+      "text": "In den meisten Signaturen muss man keine Lifetimes schreiben, weil der Compiler drei **Elisionsregeln** (lifetime elision) anwendet:\n\n1. Jede Referenz in den Parametern bekommt eine eigene Lifetime.\n2. Gibt es **genau eine** Eingabe-Lifetime, bekommen alle Ausgabe-Referenzen diese.\n3. Gibt es `&self` oder `&mut self`, bekommen die Ausgaben die Lifetime von `self`.\n\nGreift keine Regel, meldet rustc E0106. Deshalb kompiliert `fn erstes_wort(s: &str) -> &str` ohne Annotation, `laengeres` aber nicht."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was ergeben die Elisionsregeln?",
+      "paare": [
+        {
+          "links": "`fn kopf(s: &str) -> &str`",
+          "rechts": "Ergebnis ist an `s` gebunden (Regel 2)"
+        },
+        {
+          "links": "`fn name(&self, praefix: &str) -> &str`",
+          "rechts": "Ergebnis ist an `self` gebunden (Regel 3)"
+        },
+        {
+          "links": "`fn wahl(a: &str, b: &str) -> &str`",
+          "rechts": "Keine Regel greift: E0106"
+        },
+        {
+          "links": "`fn laenge(a: &str, b: &str) -> usize`",
+          "rechts": "Keine Ausgabe-Referenz, nichts zu annotieren"
+        }
+      ],
+      "erklaerung": "Vorsicht bei Regel 3: Gibt eine Methode in Wahrheit einen Teil von `praefix` zurück, passt die automatisch gewählte Lifetime nicht, und man muss explizit annotieren: `fn name<'p>(&self, praefix: &'p str) -> &'p str`."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ein Parser soll einen Text nur ausleihen, nicht kopieren. Ergänze das Struct so, wie rustc es bei E0106 vorschlägt.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Parser{{?}} {",
+          "    eingabe: &{{?}} str,",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "<'a>"
+          ]
+        },
+        {
+          "loesungen": [
+            "'a"
+          ]
+        }
+      ],
+      "auswahl": [
+        "<'a>",
+        "'a",
+        "'static",
+        "<T>"
+      ],
+      "erklaerung": "Ein Struct mit Referenz muss die Lifetime als Parameter tragen. `Parser<'a>` heisst: Ein Parser darf nicht länger leben als der Text, den er ausleiht. Versucht man es trotzdem, meldet rustc E0597 an der Stelle, wo der Text erzeugt wird. Mit `&'static str` dürfte man nur Literale übergeben."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was bedeutet `'static` in `&'static str` und in `T: 'static`?",
+      "optionen": [
+        "`&'static str`: Die Daten leben bis zum Programmende, z. B. String-Literale oder `Box::leak`",
+        "`T: 'static`: Der Typ enthält keine Referenzen mit kürzerer Lifetime, ein `String` erfüllt das",
+        "`'static` heisst, dass der Wert in einer `static`-Variablen liegen muss",
+        "Mit `'static` verlängert man die Lebenszeit eines lokalen Werts bis zum Programmende"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "`'static` ist die längste Lifetime. Als Bound `T: 'static` heisst sie nur: Der Wert **darf** beliebig lange leben, weil er nichts Kurzlebiges ausleiht. Besitzende Typen wie `String` oder `Vec<u8>` erfüllen das. `thread::spawn` verlangt das, weil der neue Thread länger laufen kann als die aufrufende Funktion.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Ein häufiges Missverständnis ist, dass `T: 'static` „lebt ewig“ bedeutet.",
+        "Literale und geleakte Boxen sind `'static`, ohne in einer `static`-Variable zu stehen.",
+        "Eine Annotation verlängert nie etwas. Rustc würde E0597 oder E0515 melden."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "rustc meldet „E0515: cannot return value referencing local variable `gross`“. Welche Zeile ist der Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn kuerzel<'a>(name: &'a str) -> &'a str {",
+          "    let gross = name.to_uppercase();",
+          "    &gross[..3]",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "`to_uppercase()` erzeugt einen neuen `String`, der am Funktionsende gedroppt wird. Ein Slice davon kann `'a` nicht erfüllen, egal welche Annotation man schreibt. Lösung: einen besitzenden Wert zurückgeben, `fn kuerzel(name: &str) -> String` mit `name[..3].to_uppercase()`. Eine Lifetime kann einen Wert nie retten, der zu früh stirbt."
+    }
+  ],
+  "praxis": "Lifetime-Fehler bekämpft man selten mit mehr Annotationen, sondern meist mit einem anderen Besitzmodell: Gibt eine Funktion etwas Neues zurück, ist das ein besitzender Typ (`String`, `Vec`). Structs, die lange leben, besitzen ihre Daten. Structs mit Lifetime-Parameter (`Parser<'a>`, Iteratoren, Views) sind kurzlebige Werkzeuge. In Embedded-Code siehst du oft `&'static mut [u8]` für DMA-Puffer: Die Hardware schreibt asynchron, also muss der Puffer garantiert bis zum Programmende existieren.",
+  "labor": {
+    "titel": "Lifetimes am Compiler ausprobieren",
+    "anleitung": "Schreibe `laengeres` ohne Annotation und lies den Vorschlag von rustc. Übernimm ihn. Rufe die Funktion dann mit einem langlebigen und einem kurzlebigen `String` auf, wobei das Ergebnis nach dem inneren Block benutzt wird. Ändere danach die Signatur zu `fn praefix<'a, 'b>(a: &'a str, b: &'b str) -> &'a str` und beobachte, dass derselbe Aufruf kompiliert.",
+    "befehle": [
+      "cargo new lebenszeit && cd lebenszeit",
+      "cargo check",
+      "rustc --explain E0106",
+      "rustc --explain E0597"
+    ],
+    "beobachtung": "Mit einer gemeinsamen Lifetime `'a` meldet rustc E0597 für den kurzlebigen String. Mit getrennten Lifetimes ist das Ergebnis nur an `a` gebunden, und der Aufruf ist gültig. Die Annotation bestimmt also, wofür der Aufrufer bürgen muss."
+  },
+  "begriffe": [
+    {
+      "begriff": "Lebenszeit",
+      "englisch": "lifetime",
+      "erklaerung": "Bereich im Programm, in dem eine Referenz gültig sein muss. Wird mit `'a` benannt."
+    },
+    {
+      "begriff": "Lifetime-Elision",
+      "englisch": "lifetime elision",
+      "erklaerung": "Regeln, nach denen der Compiler Lifetimes in Signaturen ergänzt, ohne dass man sie schreibt."
+    },
+    {
+      "begriff": "Hängende Referenz",
+      "englisch": "dangling reference",
+      "erklaerung": "Referenz auf einen Wert, der nicht mehr existiert. In Safe Rust vom Compiler ausgeschlossen."
+    },
+    {
+      "begriff": "'static",
+      "englisch": "static lifetime",
+      "erklaerung": "Längste Lifetime: Daten sind bis zum Programmende gültig, bzw. ein Typ enthält keine kurzlebigen Referenzen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Validating References with Lifetimes",
+      "url": "https://doc.rust-lang.org/book/ch10-03-lifetime-syntax.html"
+    },
+    {
+      "titel": "The Rust Reference: Lifetime elision",
+      "url": "https://doc.rust-lang.org/reference/lifetime-elision.html"
+    },
+    {
+      "titel": "The Rustonomicon: Lifetimes",
+      "url": "https://doc.rust-lang.org/nomicon/lifetimes.html"
+    }
+  ]
+}

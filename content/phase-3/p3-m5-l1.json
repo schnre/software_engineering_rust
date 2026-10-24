@@ -1,0 +1,181 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m5-l1",
+  "phase": 3,
+  "modul": "3.5 Speicher für Fortgeschrittene",
+  "titel": "Allokatoren und Allokationen zählen",
+  "lernziele": [
+    "Einen eigenen globalen Allokator mit `GlobalAlloc` und `#[global_allocator]` einbinden",
+    "Allokationen messen und mit `with_capacity` und Arenen reduzieren",
+    "Den Stand der Allocator-API und alternative Allokatoren einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein `Vec<i32>` wächst durch 1000 `push`-Aufrufe von leer auf 1000 Elemente. Wie viele Heap-Allokationen (inklusive Vergrösserungen) zählt ein Zähl-Allokator mit rustc 1.97 ungefähr?",
+      "optionen": ["Etwa 9", "1000", "1", "Etwa 500"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`Vec` verdoppelt die Kapazität bei Bedarf (amortisiert konstante Kosten). Für `i32` beginnt sie bei 4: 4, 8, 16 … 1024, also neun Anforderungen. Mit `Vec::with_capacity(1000)` ist es genau eine. Die genaue Wachstumsstrategie ist ein Implementierungsdetail der Standardbibliothek, garantiert ist nur das amortisierte Verhalten.",
+      "begruendungen": [
+        "Richtig, im Versuch genau 9.",
+        "Dann wäre `push` linear teuer, `Vec` wächst aber exponentiell.",
+        "Das gilt mit `with_capacity(1000)`.",
+        "Viel zu viele: Die Kapazität verdoppelt sich, sie wächst nicht um 2."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der globale Allokator",
+      "text": "Alle Heap-Typen der Standardbibliothek (`Box`, `Vec`, `String`, `Rc` …) holen Speicher über **den globalen Allokator**. Standardmässig ist das `System`, also `malloc`/`free` der Plattform. Mit `#[global_allocator]` ersetzt man ihn für das ganze Programm durch einen Typ, der den Trait **`GlobalAlloc`** implementiert.\n\nDer Trait ist `unsafe`: Wer ihn implementiert, verspricht, korrekt ausgerichteten, nicht überlappenden Speicher zu liefern. Jede Anforderung kommt mit einem **`Layout`** (Grösse und Ausrichtung), und `dealloc` erhält dasselbe Layout zurück – anders als `free` in C.\n\nIn `no_std`-Firmware gibt es ohne globalen Allokator gar keinen Heap. Crates wie `embedded-alloc` stellen dort einen bereit (Phase 6)."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Zähl-Allokator.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::alloc::{GlobalAlloc, Layout, System};",
+          "use std::sync::atomic::{AtomicUsize, Ordering};",
+          "",
+          "struct Zaehler;",
+          "static ANZAHL: AtomicUsize = AtomicUsize::new(0);",
+          "",
+          "{{?}} impl GlobalAlloc for Zaehler {",
+          "    unsafe fn alloc(&self, layout: {{?}}) -> *mut u8 {",
+          "        ANZAHL.fetch_add(1, Ordering::Relaxed);",
+          "        unsafe { System.alloc(layout) }",
+          "    }",
+          "    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {",
+          "        unsafe { System.dealloc(ptr, layout) }",
+          "    }",
+          "}",
+          "",
+          "#[{{?}}]",
+          "static GLOBAL: Zaehler = Zaehler;"
+        ]
+      },
+      "luecken": [{ "loesungen": ["unsafe"] }, { "loesungen": ["Layout"] }, { "loesungen": ["global_allocator"] }],
+      "auswahl": ["unsafe", "Layout", "global_allocator", "usize", "allocator", "no_mangle"],
+      "erklaerung": "Der Zähler muss atomar sein: Der Allokator wird aus allen Threads aufgerufen, und `alloc` bekommt nur `&self`. Die Default-Methode `realloc` ruft `alloc` und `dealloc` auf, darum zählt dieser Allokator auch Vergrösserungen mit. Ein solcher Zähler ist ein billiges Werkzeug, um in Tests sicherzustellen, dass ein heisser Pfad nicht alloziert."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Technik passt?",
+      "paare": [
+        { "links": "Endgrösse ist vorher bekannt", "rechts": "`Vec::with_capacity(n)`" },
+        { "links": "Viele kleine Objekte mit gleicher Lebensdauer, z. B. ein Syntaxbaum", "rechts": "Arena wie `bumpalo::Bump`" },
+        { "links": "Multithreaded Server mit Fragmentierung unter `malloc`", "rechts": "`mimalloc` oder `tikv-jemallocator` als `#[global_allocator]`" },
+        { "links": "Firmware, die nach dem Start nie mehr allozieren darf", "rechts": "`heapless`-Sammlungen mit fester Kapazität" }
+      ],
+      "erklaerung": "Eine **Arena** (*bump allocator*) schiebt bei jeder Anforderung nur einen Zeiger weiter und gibt alles auf einmal frei, wenn die Arena fällt. Im Versuch kosteten 100 `arena.alloc(u64)` zusammen zwei System-Allokationen. Alternative Allokatoren bindet man mit zwei Zeilen ein, sollte den Nutzen aber messen statt vermuten."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "allocator-api-nightly",
+      "frage": "Du willst einem `Vec` einen eigenen Allokator mitgeben. Was bedeutet die Meldung auf stable Rust?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::alloc::System;",
+          "let v: Vec<u8, System> = Vec::new_in(System);"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0658]: use of unstable library feature `allocator_api`",
+          " --> src/main.rs:2:28",
+          "  |",
+          "2 | let v: Vec<u8, System> = Vec::new_in(System);",
+          "  |                ^^^^^^",
+          "  |",
+          "  = note: see issue #32838 <https://github.com/rust-lang/rust/issues/32838> for more information"
+        ]
+      },
+      "optionen": [
+        "Die **Allocator-API** (Sammlungen mit eigenem Allokator pro Instanz) ist noch nicht stabil und nur auf nightly mit `#![feature(allocator_api)]` nutzbar",
+        "`System` ist kein gültiger Allokator",
+        "`Vec` kann nur `u32` mit eigenem Allokator speichern",
+        "Es fehlt `#[global_allocator]`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**E0658** kennzeichnet immer ein instabiles Feature. Auf stable gibt es nur den einen globalen Allokator. Wer pro Sammlung einen eigenen Allokator braucht, nutzt Crates wie `allocator-api2` (ein Nachbau der API für stable, den z. B. `hashbrown` unterstützt) oder die Sammlungen von `bumpalo` mit dem Feature `collections`.",
+      "begruendungen": [
+        "Richtig.",
+        "`System` implementiert den Trait, das Problem ist die Stabilität.",
+        "Der Elementtyp spielt keine Rolle.",
+        "`#[global_allocator]` ersetzt den globalen, nicht einen pro Sammlung."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "arena-lebensdauer",
+      "frage": "Was gilt für `wert` in diesem Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let arena = bumpalo::Bump::new();",
+          "let wert: &mut u64 = arena.alloc(42);",
+          "*wert += 1;",
+          "drop(arena);",
+          "println!(\"{wert}\");"
+        ]
+      },
+      "optionen": [
+        "Compilerfehler: `wert` leiht von `arena` aus, `arena` kann nicht verschoben werden, solange `wert` benutzt wird",
+        "Kompiliert und gibt `43` aus",
+        "Kompiliert, liest aber freigegebenen Speicher",
+        "Panic zur Laufzeit beim Zugriff"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Bump::alloc` liefert eine Referenz mit der Lebensdauer der Arena. Der Borrow-Checker verhindert, dass die Arena vor ihren Objekten verschwindet (E0505). In C mit einem selbst gebauten Pool wäre das ein klassischer Use-after-free. Achtung: `bumpalo` ruft standardmässig kein `Drop` für die Objekte auf. Für Typen mit Ressourcen wie Dateien ist eine Arena darum ungeeignet.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne das `drop(arena)` wäre das die Ausgabe.",
+        "Der Borrow-Checker lässt das gar nicht zu.",
+        "Der Fehler wird zur Übersetzungszeit erkannt."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Messdienst läuft mit `mimalloc` 8 % schneller als mit dem System-Allokator. Was ist der nächste sinnvolle Schritt?",
+      "optionen": [
+        "Mit einem Zähl-Allokator oder einem Profiler herausfinden, **wo** alloziert wird, und unnötige Allokationen im heissen Pfad entfernen",
+        "Sofort einen eigenen Allokator schreiben, um noch mehr herauszuholen",
+        "Alle `Vec` durch Arrays fester Grösse ersetzen",
+        "`mimalloc` übernehmen und nicht weiter messen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein schnellerer Allokator behandelt das Symptom. Die grössten Gewinne kommen meist vom Vermeiden: `with_capacity`, Puffer wiederverwenden (`clear()` statt neu anlegen), `&str` statt `String`, `Cow`. Werkzeuge dafür kommen in Modul 5.4 (Profiling, `dhat`, `heaptrack`). Der Allokatorwechsel kann danach zusätzlich sinnvoll sein.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein eigener Allokator ist aufwendig und selten nötig.",
+        "Das löst nur Fälle mit fester Grösse und kann den Stack sprengen.",
+        "Messen ist gut, aber die Ursache bleibt unverstanden."
+      ]
+    }
+  ],
+  "praxis": "In Servern und Werkzeugen lohnt es sich, die Zahl der Allokationen im Blick zu behalten: Ein Zähl-Allokator in einem Test (`assert_eq!(allokationen, 0)`) sichert einen heissen Pfad dauerhaft ab. In Firmware ist die Frage grundsätzlicher: Viele Projekte verbieten den Heap ganz oder erlauben ihn nur beim Start. Mehr dazu in Phase 6.",
+  "labor": {
+    "titel": "Allokationen zählen",
+    "anleitung": "Baue den Zähl-Allokator aus der Übung in ein Projekt ein. Miss die Anzahl Allokationen für 1000 `push` mit und ohne `with_capacity`, für `format!` in einer Schleife und für 100 Werte in einer `bumpalo`-Arena.",
+    "befehle": [
+      "cargo new alloc-zaehler && cd alloc-zaehler",
+      "cargo add bumpalo",
+      "cargo run --release"
+    ],
+    "beobachtung": "Mit rustc 1.97: 9 Allokationen für das wachsende `Vec<i32>`, 1 mit `with_capacity`, und nur 2 für 100 Arena-Objekte. Jeder `format!`-Aufruf kostet mindestens eine Allokation."
+  },
+  "begriffe": [
+    { "begriff": "Globaler Allokator", "englisch": "global allocator", "erklaerung": "Der Allokator, den alle Heap-Typen der Standardbibliothek verwenden, austauschbar mit `#[global_allocator]`." },
+    { "begriff": "Layout", "englisch": "Layout", "erklaerung": "Grösse und Ausrichtung einer Speicheranforderung." },
+    { "begriff": "Arena", "englisch": "arena / bump allocator", "erklaerung": "Allokator, der Speicher fortlaufend vergibt und alles auf einmal freigibt." },
+    { "begriff": "Allocator-API", "englisch": "allocator API", "erklaerung": "Noch instabile Schnittstelle, um Sammlungen einen eigenen Allokator pro Instanz zu geben." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::alloc (Dokumentation)", "url": "https://doc.rust-lang.org/std/alloc/index.html" },
+    { "titel": "bumpalo auf docs.rs", "url": "https://docs.rs/bumpalo" }
+  ]
+}

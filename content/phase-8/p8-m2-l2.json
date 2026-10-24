@@ -1,0 +1,205 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m2-l2",
+  "phase": 8,
+  "modul": "8.2 Pipeline-Stufen und Quality Gates",
+  "titel": "Quality Gates für Rust-Projekte",
+  "lernziele": [
+    "Erklären, was ein Quality Gate ist und wann es blockieren sollte",
+    "Abhängigkeiten mit `cargo audit` und `cargo deny` auf Schwachstellen und Lizenzen prüfen",
+    "Coverage-Schwellen und `cargo semver-checks` sinnvoll einsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was ist ein **Quality Gate**?",
+      "optionen": [
+        "Eine automatische Prüfung mit klarer Regel, die einen Pull Request oder ein Release blockiert, wenn sie nicht erfüllt ist",
+        "Ein Meeting, in dem das Team vor jedem Release über die Qualität abstimmt",
+        "Ein Bericht über Warnungen, den man bei Gelegenheit liest"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Gate hat eine **Regel** (z. B. „keine bekannte Schwachstelle in Abhängigkeiten“) und eine **Konsequenz** (Merge gesperrt). Ein Bericht ohne Konsequenz ist kein Gate; er wird erfahrungsgemäss bald nicht mehr gelesen. Auf GitHub macht man eine Prüfung zum Gate, indem man sie in der Branch Protection als *required status check* einträgt.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Meeting kann eine Freigabe sein, aber kein automatisches Gate.",
+        "Ohne Konsequenz ist es nur ein Bericht."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wovor schützt welches Gate?",
+      "paare": [
+        { "links": "`cargo audit`", "rechts": "Abhängigkeiten mit bekannten Sicherheitslücken aus der RustSec-Datenbank" },
+        { "links": "`cargo deny check licenses`", "rechts": "Abhängigkeiten mit Lizenzen, die das Produkt nicht verwenden darf" },
+        { "links": "`cargo deny check bans`", "rechts": "Verbotene Crates und doppelte Versionen derselben Crate im Baum" },
+        { "links": "`cargo semver-checks`", "rechts": "Versehentlich gebrochene öffentliche API ohne Major-Version" },
+        { "links": "`cargo llvm-cov --fail-under-lines 80`", "rechts": "Sinkender Anteil von Code, den die Tests ausführen" }
+      ],
+      "erklaerung": "`cargo deny` vereint mehrere Prüfungen: `advisories` (wie `cargo audit`), `licenses`, `bans` und `sources` (nur erlaubte Registries und Git-Quellen). Konfiguriert wird alles in `deny.toml`, die `cargo deny init` mit kommentierten Vorgaben anlegt."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Gate `cargo audit` ist rot. Was ist zu tun?",
+      "terminal": {
+        "befehl": "cargo audit",
+        "ausgabe": [
+          "    Scanning Cargo.lock for vulnerabilities (43 crate dependencies)",
+          "Crate:     time",
+          "Version:   0.2.22",
+          "Title:     Potential segfault in the time crate",
+          "Date:      2020-11-18",
+          "ID:        RUSTSEC-2020-0071",
+          "URL:       https://rustsec.org/advisories/RUSTSEC-2020-0071",
+          "Severity:  6.2 (medium)",
+          "Solution:  Upgrade to >=0.2.23",
+          "",
+          "Crate:     stdweb",
+          "Version:   0.4.20",
+          "Warning:   unmaintained",
+          "Title:     stdweb is unmaintained",
+          "ID:        RUSTSEC-2020-0056",
+          "",
+          "error: 1 vulnerability found!",
+          "warning: 1 allowed warning found"
+        ]
+      },
+      "optionen": [
+        "`time` auf mindestens 0.2.23 aktualisieren, z. B. mit `cargo update -p time`. Der Hinweis zu `stdweb` blockiert nicht, sollte aber als Aufgabe erfasst werden",
+        "Beide Meldungen blockieren; `stdweb` muss sofort ersetzt werden",
+        "Nichts, weil die Meldung von 2020 ist und damit veraltet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo audit` prüft `Cargo.lock` gegen die RustSec-Datenbank. Echte Schwachstellen sind Fehler, *unmaintained*-Hinweise standardmässig Warnungen. Wichtig: Neue Advisories erscheinen täglich. Ein Projekt ohne eine einzige Code-Änderung kann morgen rot werden. Deshalb lässt man `cargo audit` zusätzlich nächtlich laufen, nicht nur bei Pull Requests.",
+      "begruendungen": [
+        "Richtig.",
+        "Die letzte Zeile sagt ausdrücklich, dass `stdweb` nur eine Warnung ist.",
+        "Das Datum ist die Veröffentlichung des Advisories; die Lücke besteht in dieser Version weiterhin."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "In `deny.toml` steht unter `[licenses]` die Zeile `allow = [\"MIT\", \"Apache-2.0\"]`. Ein Kollege fügt ein internes Crate mit folgender `Cargo.toml` hinzu. Was meldet `cargo deny check licenses`?",
+      "code": {
+        "sprache": "toml",
+        "datei": "fremdlib/Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"fremdlib\"",
+          "version = \"0.1.0\"",
+          "edition = \"2024\"",
+          "license = \"GPL-3.0-only\""
+        ]
+      },
+      "optionen": [
+        "`error[rejected]`: Die Lizenz ist nicht ausdrücklich erlaubt, die Prüfung scheitert",
+        "Nichts, weil `cargo deny` nur Crates von crates.io prüft",
+        "Nur eine Warnung, weil GPL eine Open-Source-Lizenz ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo deny` arbeitet mit einer **Allowlist**: Was nicht ausdrücklich erlaubt ist, wird abgelehnt, auch Pfad-Abhängigkeiten. Die Ausgabe nennt den Pfad zur `Cargo.toml`, die Lizenz und den Weg im Abhängigkeitsbaum. Bei proprietärer Firmware ist eine Copyleft-Lizenz wie GPL oft ein echtes rechtliches Problem. Ob sie erlaubt wird, entscheidet nicht der Entwickler allein.",
+      "begruendungen": [
+        "Richtig.",
+        "Geprüft wird der ganze Abhängigkeitsbaum, auch lokale Crates.",
+        "Die Allowlist unterscheidet nicht nach „Open Source“, sondern nach den eingetragenen SPDX-Namen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Coverage und SemVer als Gate",
+      "text": "**Coverage** misst `cargo llvm-cov` mit der in rustc eingebauten Instrumentierung (`-C instrument-coverage`). Eine feste Schwelle wie 80 % ist in alten Projekten unerreichbar und verleitet zu Tests ohne Aussage. Besser: Die Abdeckung darf nicht **sinken** (*ratchet*), und neuer Code im Pull Request muss getestet sein.\n\n**`cargo semver-checks`** vergleicht die öffentliche API deines Crates mit der zuletzt veröffentlichten Version auf crates.io (oder einem Git-Stand). Fehlt eine `pub fn`, wurde ein Enum um eine Variante ohne `#[non_exhaustive]` erweitert oder ein Trait geändert, meldet es einen Bruch, sofern die Version nicht als Major erhöht wurde. Das Werkzeug findet nicht jeden Bruch, aber viele, die Menschen im Review übersehen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Bibliotheks-Crate wechselt von `1.4.2` auf `1.5.0`. Dabei wurde einem `pub enum Fehler` eine neue Variante hinzugefügt. Das Enum hat kein `#[non_exhaustive]`. Was meldet `cargo semver-checks`?",
+      "optionen": [
+        "Einen Bruch: Nutzer mit einem vollständigen `match` ohne `_`-Zweig kompilieren nicht mehr. Das erfordert `2.0.0`",
+        "Nichts: Eine neue Variante ist eine Erweiterung, also ein Minor-Release",
+        "Nichts: semver-checks prüft nur Funktionen, keine Typen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für Cargo ist das ein **Major-Bruch**: Ein `match` ohne Wildcard ist plötzlich nicht mehr erschöpfend (E0004). Wer Enums später erweitern will, markiert sie von Anfang an mit `#[non_exhaustive]`. Dann müssen Nutzer ausserhalb des Crates immer einen `_`-Zweig schreiben, und neue Varianten sind ein Minor-Release.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `#[non_exhaustive]` bricht die neue Variante bestehenden Code.",
+        "Enums, Structs, Traits und Funktionen werden alle geprüft."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Das Gate `cargo deny check advisories` ist seit Wochen wegen einer Lücke in einer tiefen, transitiven Abhängigkeit rot. Ein Update gibt es nicht. Admins mergen deshalb regelmässig an dem Gate vorbei. Was tust du?",
+      "optionen": [
+        "Prüfen, ob die Lücke das Produkt überhaupt betrifft, und sie dann gezielt mit Begründung und Ablaufdatum in `deny.toml` unter `ignore` eintragen. Das Gate bleibt für alle anderen Meldungen scharf",
+        "Das Gate entfernen, weil es ohnehin ignoriert wird",
+        "Weiter vorbei mergen; die Lücke ist ja bekannt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Gate, an dem regelmässig vorbeigemergt wird, schützt vor nichts mehr: Die nächste echte Meldung geht im Rauschen unter. Eine dokumentierte Ausnahme für **genau dieses** Advisory (z. B. `ignore = [{ id = \"RUSTSEC-…\", reason = \"…\" }]`) macht die Entscheidung sichtbar, reviewbar und lässt das Gate für alles andere wirksam.",
+      "begruendungen": [
+        "Richtig.",
+        "Damit verschwindet auch der Schutz gegen alle künftigen Lücken.",
+        "So gewöhnt sich das Team daran, rote Gates zu übergehen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Begriffe.",
+      "text": "`cargo audit` prüft die Datei {{?}} gegen die RustSec-Datenbank. Lizenzen werden in `cargo deny` über eine {{?}} geprüft: Was nicht erlaubt ist, wird abgelehnt. Ein Enum, das später neue Varianten bekommen soll, markiert man mit {{?}}.",
+      "luecken": [
+        { "loesungen": ["`Cargo.lock`"] },
+        { "loesungen": ["Allowlist"] },
+        { "loesungen": ["`#[non_exhaustive]`"] }
+      ],
+      "auswahl": ["`Cargo.lock`", "`Cargo.toml`", "Allowlist", "Denylist", "`#[non_exhaustive]`", "`#[derive(Debug)]`"],
+      "erklaerung": "`cargo audit` braucht die exakten Versionen und liest deshalb das Lockfile, nicht die Versionsbereiche aus `Cargo.toml`. Auch Bibliotheken sollten deshalb ein `Cargo.lock` für ihre CI haben."
+    }
+  ],
+  "praxis": "Ein gutes Gate ist schnell, zuverlässig und hat eine klare Regel. Für Rust-Projekte bewährt sich: `cargo deny check` bei jedem Pull Request (Lizenzen, Quellen, Advisories), dasselbe nächtlich gegen neue Advisories, `cargo semver-checks` vor jedem Release einer Bibliothek und eine Coverage-Regel, die nicht sinken darf. Jede Ausnahme gehört mit Begründung in `deny.toml`, nicht in die Köpfe einzelner Admins.",
+  "labor": {
+    "titel": "cargo deny und cargo audit ausprobieren",
+    "anleitung": "Lege ein Test-Crate an, füge eine alte Version mit bekanntem Advisory hinzu und prüfe den Baum. Erzeuge dann eine `deny.toml` und erlaube nur MIT und Apache-2.0.",
+    "befehle": [
+      "cargo install cargo-audit cargo-deny --locked",
+      "cargo add time@=0.2.22 && cargo audit",
+      "cargo deny init && cargo deny check licenses; echo \"Exit: $?\""
+    ],
+    "beobachtung": "`cargo audit` meldet RUSTSEC-2020-0071. Mit der leeren Allowlist aus `cargo deny init` lehnt `cargo deny` zunächst jede Lizenz ab, auch die des eigenen Crates. Erst die ausdrückliche Liste unter `[licenses] allow` macht das Gate grün."
+  },
+  "begriffe": [
+    {
+      "begriff": "Quality Gate",
+      "englisch": "quality gate",
+      "erklaerung": "Automatische Prüfung mit klarer Regel, die bei Nichterfüllung Merge oder Release blockiert."
+    },
+    {
+      "begriff": "Advisory",
+      "englisch": "security advisory",
+      "erklaerung": "Veröffentlichte Meldung über eine Schwachstelle in bestimmten Versionen eines Crates, für Rust gesammelt in der RustSec-Datenbank."
+    },
+    {
+      "begriff": "Allowlist",
+      "englisch": "allowlist",
+      "erklaerung": "Liste ausdrücklich erlaubter Einträge; alles andere wird abgelehnt."
+    },
+    {
+      "begriff": "Ratchet",
+      "englisch": "ratchet",
+      "erklaerung": "Regel, nach der eine Kennzahl wie die Testabdeckung nur gleich bleiben oder besser werden darf."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "cargo-deny: Dokumentation",
+      "url": "https://embarkstudios.github.io/cargo-deny/"
+    },
+    {
+      "titel": "RustSec Advisory Database",
+      "url": "https://rustsec.org/"
+    },
+    {
+      "titel": "The Cargo Book: SemVer Compatibility",
+      "url": "https://doc.rust-lang.org/cargo/reference/semver.html"
+    }
+  ]
+}

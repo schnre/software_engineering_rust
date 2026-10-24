@@ -1,0 +1,194 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m5-l1",
+  "phase": 1,
+  "modul": "1.5 Toolchains und Cross-Kompilierung",
+  "titel": "rustup, Kanäle und rust-toolchain.toml",
+  "lernziele": [
+    "Kanäle (stable, beta, nightly), Komponenten und Targets mit rustup verwalten",
+    "Die Toolchain eines Projekts mit `rust-toolchain.toml` festlegen",
+    "Editionen, Compiler-Versionen und MSRV (`rust-version`) auseinanderhalten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Dein Kollege hat rustc 1.97, du hast 1.85. Sein Code nutzt Edition 2024. Was gilt?",
+      "optionen": [
+        "Ihr könnt beide Edition 2024 nutzen: Editionen gibt es seit 1.85, und jeder neuere Compiler unterstützt alle bisherigen Editionen",
+        "Edition 2024 verlangt zwingend rustc 1.97",
+        "Ein Crate in Edition 2024 kann keine Abhängigkeiten in Edition 2021 verwenden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Version** und **Edition** sind verschiedene Achsen. Alle sechs Wochen erscheint eine neue Compiler-Version. Eine **Edition** (2015, 2018, 2021, 2024) bündelt selten nötige, nicht rückwärtskompatible Sprachänderungen. Jedes Crate wählt seine Edition selbst in `Cargo.toml`, und Crates verschiedener Editionen lassen sich frei mischen. Edition 2024 ist seit Rust 1.85 stabil.",
+      "begruendungen": [
+        "Richtig. Was trotzdem fehlen kann, sind Bibliotheksfunktionen, die erst nach 1.85 stabilisiert wurden.",
+        "Edition 2024 wurde mit 1.85 stabilisiert.",
+        "Editionen gelten pro Crate. Das Mischen ist ausdrücklich vorgesehen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "rustup: der Toolchain-Manager",
+      "text": "`rustup` installiert und verwaltet **Toolchains**: eine Kombination aus Kanal und Host, z. B. `stable-x86_64-unknown-linux-gnu`.\n\n- **Kanäle** (channels): `stable` alle 6 Wochen, `beta` als nächste stable, `nightly` täglich mit instabilen Features (`#![feature(…)]`)\n- **Komponenten** (components): `clippy`, `rustfmt`, `rust-src` (Quellcode von `std`, nötig für `-Zbuild-std` und rust-analyzer), `llvm-tools` (z. B. `llvm-objdump`, für `cargo-binutils`)\n- **Targets**: vorkompilierte `core`/`std` für andere Plattformen (Lektion 1.5.2)\n\nMit `cargo +nightly build` wählst du die Toolchain für einen einzelnen Aufruf."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was zeigt diese Ausgabe?",
+      "terminal": {
+        "befehl": "rustup show active-toolchain",
+        "ausgabe": [
+          "stable-x86_64-unknown-linux-gnu (overridden by '/home/user/hallo/rust-toolchain.toml')"
+        ]
+      },
+      "optionen": [
+        "Im Projekt `hallo` legt eine `rust-toolchain.toml` die Toolchain fest. Sie hat Vorrang vor der globalen Voreinstellung",
+        "rustup hat die Datei `rust-toolchain.toml` überschrieben",
+        "Die stable-Toolchain ist defekt und wurde ersetzt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustup wählt die Toolchain in dieser Reihenfolge: `+toolchain` auf der Kommandozeile, Umgebungsvariable `RUSTUP_TOOLCHAIN`, Verzeichnis-Override (`rustup override set`), `rust-toolchain.toml` im Projekt oder einem Elternordner, zuletzt die globale Voreinstellung (`rustup default`).",
+      "begruendungen": [
+        "Richtig. „overridden by“ nennt die Quelle der Auswahl.",
+        "„overridden“ heisst hier „übersteuert“. Die Datei bleibt unverändert.",
+        "Die Toolchain ist intakt. Nur die Quelle der Auswahl wird angezeigt."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze `rust-toolchain.toml` für ein Firmware-Projekt: feste Version 1.97, mit Clippy, rustfmt und dem Target für Cortex-M4F.",
+      "code": {
+        "sprache": "toml",
+        "datei": "rust-toolchain.toml",
+        "zeilen": [
+          "[toolchain]",
+          "{{?}} = \"1.97\"",
+          "components = [\"clippy\", \"rustfmt\", \"llvm-tools\"]",
+          "{{?}} = [\"thumbv7em-none-eabihf\"]"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["channel"] },
+        { "loesungen": ["targets"] }
+      ],
+      "auswahl": ["channel", "targets", "edition", "rust-version"],
+      "erklaerung": "Wer das Repo klont und `cargo build` aufruft, bekommt von rustup automatisch genau diese Toolchain samt Komponenten und Targets. So bauen CI, Kollegen und du mit demselben Compiler. `edition` und `rust-version` gehören dagegen in `Cargo.toml`.",
+      "hinweis": "Die Datei beschreibt die Toolchain, nicht das Paket."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Befehl erledigt was?",
+      "paare": [
+        { "links": "`rustup update`", "rechts": "Alle installierten Toolchains auf den neuesten Stand bringen" },
+        { "links": "`rustup component add rust-src`", "rechts": "Quellcode der Standardbibliothek installieren" },
+        { "links": "`rustup target add thumbv6m-none-eabi`", "rechts": "Vorkompiliertes `core` für Cortex-M0 installieren" },
+        { "links": "`cargo +beta test`", "rechts": "Tests einmalig mit der Beta-Toolchain laufen lassen" }
+      ],
+      "erklaerung": "`cargo +beta test` in der CI ist ein guter Frühwarnmechanismus: Regressionen der nächsten stable-Version fallen sechs Wochen früher auf."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "MSRV: die minimal unterstützte Version",
+      "text": "Die **MSRV** (Minimum Supported Rust Version) ist die älteste Compiler-Version, mit der ein Crate bauen soll. In `Cargo.toml` steht sie als `rust-version = \"1.85\"`. Cargo bricht mit einem älteren Compiler sofort mit einer klaren Meldung ab, statt mit rätselhaften Fehlern. Seit Resolver 3 (Standard in Edition 2024) bevorzugt Cargo zudem Abhängigkeiten, deren MSRV passt. Prüfen musst du die MSRV trotzdem selbst, z. B. mit einem CI-Job, der mit genau dieser Version baut (Phase 8).",
+      "terminal": {
+        "befehl": "cargo build   # Cargo.toml: rust-version = \"1.99\"",
+        "ausgabe": [
+          "error: rustc 1.97.0 is not supported by the following package:",
+          "  hallo@0.1.0 requires rustc 1.99"
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Treiber-Crate auf crates.io deklariert `rust-version = \"1.75\"`. Welche Änderungen erfordern es, die MSRV anzuheben?",
+      "optionen": [
+        "Eine Funktion aus `std` verwenden, die erst in Rust 1.80 stabilisiert wurde",
+        "Das Crate auf Edition 2024 umstellen",
+        "Ein `#[must_use]` zu einer Funktion hinzufügen",
+        "Eine Abhängigkeit aktualisieren, deren eigene MSRV 1.81 ist"
+      ],
+      "korrekt": [0, 1, 3],
+      "erklaerung": "Alles, was ein neuerer Compiler zwingend braucht, hebt die MSRV. Edition 2024 setzt mindestens 1.85 voraus. `#[must_use]` gibt es seit Rust 1.0. Viele Bibliotheken behandeln eine MSRV-Erhöhung als nennenswerte Änderung und dokumentieren sie im Changelog, gerade in Embedded-Projekten mit eingefrorenen Toolchains.",
+      "begruendungen": [
+        "Richtig. Ältere Compiler kennen die Funktion nicht.",
+        "Richtig. Edition 2024 gibt es erst ab 1.85.",
+        "Dieses Attribut gibt es seit Rust 1.0. Die MSRV bleibt.",
+        "Richtig. Die MSRV des Ganzen ist mindestens die höchste MSRV aller Abhängigkeiten."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Projekt hat diese `rust-toolchain.toml`. Was passiert bei `cargo build` auf einem Rechner, auf dem nur `stable` installiert ist und der Internetzugang hat?",
+      "code": {
+        "sprache": "toml",
+        "datei": "rust-toolchain.toml",
+        "zeilen": [
+          "[toolchain]",
+          "channel = \"nightly-2026-09-01\"",
+          "components = [\"rust-src\"]"
+        ]
+      },
+      "optionen": [
+        "rustup lädt die Nightly vom 1. September 2026 samt `rust-src` herunter und baut damit",
+        "Cargo baut mit `stable` und gibt eine Warnung aus",
+        "Der Build bricht ab, man muss die Toolchain zuerst von Hand installieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustup installiert eine in `rust-toolchain.toml` verlangte Toolchain automatisch beim ersten Aufruf. Eine datierte Nightly macht Builds mit instabilen Features wenigstens reproduzierbar: Alle bekommen denselben Stand, nicht die Nightly des jeweiligen Tages. Ganz ohne Netz scheitert der Download natürlich.",
+      "begruendungen": [
+        "Richtig. rustup installiert fehlende Toolchains automatisch nach (abschaltbar mit `RUSTUP_AUTO_INSTALL=0`).",
+        "rustup respektiert die Datei. Ein stilles Ausweichen auf stable gibt es nicht.",
+        "Von Hand installieren muss man nur, wenn die automatische Installation abgeschaltet ist oder das Netz fehlt."
+      ]
+    }
+  ],
+  "praxis": "In jedem Firmware-Repo gehört eine `rust-toolchain.toml` ins Wurzelverzeichnis: feste Version, Komponenten, Targets. Das Update auf eine neue Rust-Version ist dann ein eigener, reviewbarer Commit statt eines Zufalls auf dem Rechner eines Kollegen. Bibliotheken dokumentieren dagegen ihre MSRV mit `rust-version` und testen sie in der CI, damit Nutzer mit älteren Toolchains nicht überrascht werden.",
+  "labor": {
+    "titel": "Toolchains erkunden",
+    "anleitung": "Schau dir an, was rustup bei dir installiert hat, und lege in einem Testprojekt eine `rust-toolchain.toml` an.",
+    "befehle": [
+      "rustup show",
+      "rustup component list --installed",
+      "rustup target list --installed",
+      "printf '[toolchain]\\nchannel = \"stable\"\\ncomponents = [\"clippy\"]\\n' > rust-toolchain.toml && rustup show active-toolchain",
+      "rustc -vV"
+    ],
+    "beobachtung": "`rustup show active-toolchain` nennt die Datei als Grund für die Auswahl. `rustc -vV` zeigt Version, Commit-Hash, Host-Triple und die LLVM-Version, auf der der Compiler aufbaut."
+  },
+  "begriffe": [
+    {
+      "begriff": "Toolchain",
+      "englisch": "toolchain",
+      "erklaerung": "Zusammengehöriger Satz aus rustc, cargo, Standardbibliothek und Werkzeugen für einen Kanal und Host."
+    },
+    {
+      "begriff": "Kanal",
+      "englisch": "release channel",
+      "erklaerung": "`stable`, `beta` oder `nightly`. Nur nightly erlaubt instabile Features mit `#![feature]`."
+    },
+    {
+      "begriff": "Edition",
+      "englisch": "edition",
+      "erklaerung": "Pro Crate gewählter Sprachstand (2015, 2018, 2021, 2024), der nicht rückwärtskompatible Änderungen bündelt."
+    },
+    {
+      "begriff": "MSRV",
+      "englisch": "Minimum Supported Rust Version",
+      "erklaerung": "Älteste Compiler-Version, mit der ein Crate bauen soll. Angabe mit `rust-version` in `Cargo.toml`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustup book",
+      "url": "https://rust-lang.github.io/rustup/"
+    },
+    {
+      "titel": "The Rust Edition Guide",
+      "url": "https://doc.rust-lang.org/edition-guide/"
+    },
+    {
+      "titel": "The Cargo Book: The Manifest Format",
+      "url": "https://doc.rust-lang.org/cargo/reference/manifest.html"
+    }
+  ]
+}

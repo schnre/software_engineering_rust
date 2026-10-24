@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m2-l2",
+  "phase": 10,
+  "modul": "10.2 Schichten und Hardware Abstraction Layer",
+  "titel": "embedded-hal als Vertrag",
+  "lernziele": [
+    "Einen Treiber generisch über die Traits von `embedded-hal` schreiben",
+    "Erklären, warum derselbe Treiber auf jedem Chip und auf dem Host läuft",
+    "Einen Treiber mit `embedded-hal-mock` auf dem Host testen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "wiederverwendung",
+      "frage": "Ein Treiber für den Temperatursensor TMP117 soll auf STM32, nRF52 und ESP32 laufen. Wie erreicht man das in Rust, ohne drei Versionen zu pflegen?",
+      "optionen": [
+        "Der Treiber ist generisch über den Trait `embedded_hal::i2c::I2c`. Jeder Chip-HAL implementiert diesen Trait",
+        "Mit `#[cfg(target_arch = …)]` für jeden Chip einen eigenen Codeblock im Treiber",
+        "Der Treiber hängt von allen drei HAL-Crates ab und wählt zur Laufzeit",
+        "Der Treiber nutzt direkt die PACs, weil Register überall gleich heissen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`embedded-hal` ist ein Crate, das fast nur Traits enthält: `OutputPin`, `InputPin`, `I2c`, `SpiDevice`, `DelayNs` und einige mehr. Treiber hängen nur davon ab, HALs implementieren es. Damit gibt es auf crates.io Hunderte Treiber, die mit jedem Mikrocontroller funktionieren, für den ein HAL existiert, und sogar unter Linux über `linux-embedded-hal`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das skaliert nicht: Jeder neue Chip erfordert eine Änderung im Treiber.",
+        "Drei HALs gleichzeitig würden meist nicht einmal für ein Ziel kompilieren und blähen alles auf.",
+        "Register und Adressen unterscheiden sich zwischen Herstellern grundlegend."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein generischer Treiber",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "#![cfg_attr(not(test), no_std)]",
+          "use embedded_hal::i2c::I2c;",
+          "",
+          "pub struct Tmp117<I2C> {",
+          "    i2c: I2C,",
+          "    adresse: u8,",
+          "}",
+          "",
+          "impl<I2C: I2c> Tmp117<I2C> {",
+          "    pub fn new(i2c: I2C, adresse: u8) -> Self {",
+          "        Self { i2c, adresse }",
+          "    }",
+          "",
+          "    pub fn temperatur_mgrad(&mut self) -> Result<i32, I2C::Error> {",
+          "        let mut puffer = [0u8; 2];",
+          "        self.i2c.write_read(self.adresse, &[0x00], &mut puffer)?;",
+          "        Ok(i16::from_be_bytes(puffer) as i32 * 78125 / 10000)",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Auf dem Ziel ohne Standardbibliothek, in Tests auf dem Host mit `std`." },
+          { "zeile": 4, "text": "Der Bus ist ein Typparameter. Der Treiber besitzt ihn (Ownership), niemand sonst kann ihn gleichzeitig benutzen." },
+          { "zeile": 14, "text": "Der Fehlertyp kommt vom Bus. Der Treiber muss ihn nicht kennen." },
+          { "zeile": 17, "text": "Ein Rohwert entspricht 7,8125 m°C." }
+        ]
+      },
+      "text": "Der Treiber kennt keinen einzigen Chip. Der Typparameter `I2C` wird erst in der Anwendung festgelegt, etwa mit dem `Twim` des nRF-HAL. Dank Monomorphisierung kostet die Abstraktion zur Laufzeit nichts."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "trait-bound",
+      "frage": "Ergänze den Treiber für eine LED so, dass er mit jedem Ausgangspin funktioniert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::digital::{{?}};",
+          "",
+          "pub struct Statusled<P> {",
+          "    pin: P,",
+          "}",
+          "",
+          "impl<P: OutputPin> Statusled<P> {",
+          "    pub fn fehler(&mut self) -> Result<(), P::{{?}}> {",
+          "        self.pin.{{?}}()",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["OutputPin"] },
+        { "loesungen": ["Error"] },
+        { "loesungen": ["set_high"] }
+      ],
+      "auswahl": ["OutputPin", "InputPin", "Error", "Fehler", "set_high", "toggle"],
+      "erklaerung": "In `embedded-hal` 1.0 haben alle Traits einen zugehörigen Fehlertyp über einen Supertrait (`ErrorType`). Bei vielen Chips kann ein GPIO nicht scheitern, dann ist `Error` der leere Typ `Infallible`. `toggle` gibt es nur im separaten Trait `StatefulOutputPin`, nicht in `OutputPin`."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "traits",
+      "frage": "Welcher `embedded-hal`-Trait passt zu welcher Aufgabe?",
+      "paare": [
+        { "links": "`digital::OutputPin`", "rechts": "LED, Relais oder Chip-Select schalten" },
+        { "links": "`digital::InputPin`", "rechts": "Taster oder Endschalter lesen" },
+        { "links": "`i2c::I2c`", "rechts": "Sensor an einem Zweidraht-Bus mit Adresse ansprechen" },
+        { "links": "`spi::SpiDevice`", "rechts": "Baustein am SPI-Bus inklusive eigenem Chip-Select" },
+        { "links": "`delay::DelayNs`", "rechts": "Nach einem Reset des Sensors 2 ms warten" }
+      ],
+      "erklaerung": "Version 1.0 von `embedded-hal` (erschienen Anfang 2024) hat die Traits bewusst schlank gehalten und blockierend definiert. Für `async` gibt es `embedded-hal-async`, für nicht blockierende Varianten `embedded-hal-nb`, für serielle Datenströme `embedded-io`. Die Details der Busse behandelt Phase 6."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Testen ohne Hardware",
+      "text": "Weil der Treiber nur einen Trait verlangt, kann ein Test ihm eine Attrappe übergeben. Das Crate `embedded-hal-mock` liefert solche **Mocks**: Du beschreibst im Voraus die erwarteten Bus-**Transaktionen** (wer schreibt was an welche Adresse und welche Antwort kommt zurück). Weicht der Treiber davon ab, schlägt der Test fehl.\n\n```toml\n[dev-dependencies]\nembedded-hal-mock = { version = \"0.11\", default-features = false, features = [\"eh1\"] }\n```\n\nAls `dev-dependency` landet der Mock nie in der Firmware. Die Tests laufen mit `cargo test` auf dem Entwicklungsrechner."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "mock-test",
+      "frage": "Der Sensor antwortet mit den Bytes `0x0C 0x80` (Rohwert 3200). Was prüft dieser Test, und besteht er?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal_mock::eh1::i2c::{Mock, Transaction};",
+          "",
+          "#[test]",
+          "fn liest_25_grad() {",
+          "    let erwartet = [Transaction::write_read(0x48, vec![0x00], vec![0x0C, 0x80])];",
+          "    let i2c = Mock::new(&erwartet);",
+          "    let mut sensor = Tmp117::new(i2c, 0x48);",
+          "    assert_eq!(sensor.temperatur_mgrad().unwrap(), 25000);",
+          "    sensor.release().done();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Er prüft Adresse, gesendetes Register und Umrechnung, und er besteht: 3200 × 7,8125 m°C = 25 000 m°C",
+        "Er schlägt fehl, weil kein echter I²C-Bus vorhanden ist",
+        "Er prüft nur die Umrechnung, die Adresse wird vom Mock ignoriert",
+        "Er kompiliert nicht, weil der Treiber `no_std` ist und der Test `vec!` braucht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Mock vergleicht jeden Aufruf mit der Liste: Adresse 0x48, geschriebenes Byte 0x00, Länge des Lesepuffers. `done()` prüft am Ende, dass alle erwarteten Transaktionen auch wirklich stattgefunden haben. `release()` ist eine Methode des Treibers, die den Bus zurückgibt. Sie ist auch in Produktion nützlich, wenn man den Bus später anders verwenden will. `vec!` funktioniert, weil `cfg_attr(not(test), no_std)` in Tests `std` erlaubt.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau das ersetzt der Mock: Es braucht keine Hardware.",
+        "Der Mock prüft Adresse, gesendete Daten und Pufferlänge.",
+        "Mit `#![cfg_attr(not(test), no_std)]` ist im Test `std` verfügbar."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "mock-fehler",
+      "frage": "Jemand hat im Treiber die Register-Konstante geändert. Was sagt diese Ausgabe?",
+      "terminal": {
+        "befehl": "cargo test",
+        "ausgabe": [
+          "running 1 test",
+          "test tests::liest_25_grad ... FAILED",
+          "",
+          "failures:",
+          "",
+          "---- tests::liest_25_grad stdout ----",
+          "",
+          "thread 'tests::liest_25_grad' (13694) panicked at /home/user/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/embedded-hal-mock-0.11.1/src/eh1/i2c.rs:233:9:",
+          "assertion `left == right` failed: i2c::write_read write data does not match expectation",
+          "  left: [0]",
+          " right: [1]",
+          "",
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ]
+      },
+      "optionen": [
+        "Der Treiber schreibt Register 0x01, der Test erwartet 0x00. Der Treiber liest also das falsche Register",
+        "Die I²C-Adresse stimmt nicht",
+        "Der Sensor hat eine falsche Temperatur geliefert",
+        "Der Mock ist fehlerhaft, weil die Panic in seinem Quellcode auftritt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`left` ist der Wert aus der Erwartung, `right` das, was der Treiber tatsächlich geschrieben hat. Ohne Hardware, Oszilloskop oder Logikanalysator ist der Fehler in Millisekunden gefunden. Solche Tests fangen genau die Fehler, die auf dem echten Gerät nur als „Sensor liefert Unsinn“ auffallen würden.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei falscher Adresse lautet die Meldung „address mismatch“.",
+        "Die Antwortdaten stammen aus dem Mock und wurden gar nicht erreicht.",
+        "Der Mock meldet per Panic, dass die Erwartung verletzt ist. Das ist sein Zweck."
+      ]
+    }
+  ],
+  "praxis": "Bevor du einen Treiber für einen Baustein schreibst, lohnt sich eine Suche auf crates.io: Für viele gängige Sensoren und Displays gibt es bereits Treiber, die auf `embedded-hal` aufbauen. Wenn du selbst einen schreibst, mach ihn generisch, `no_std` und mit Mock-Tests. Im Review fallen Treiber auf, die ein konkretes HAL-Crate importieren oder `Twim`, `I2c1` o. Ä. im Typ fest verdrahten: Sie lassen sich weder wiederverwenden noch auf dem Host testen.",
+  "labor": {
+    "titel": "Einen Treiber mit Mock testen",
+    "anleitung": "Lege eine Bibliothek an, schreibe den `Tmp117`-Treiber aus dem Beispiel mit einer Methode `release(self) -> I2C` und den Test mit `embedded-hal-mock`. Ändere danach das Register auf `0x01` und lass den Test erneut laufen.",
+    "befehle": [
+      "cargo new --lib tmp117 && cd tmp117",
+      "cargo add embedded-hal@1",
+      "cargo add --dev embedded-hal-mock --no-default-features --features eh1",
+      "cargo test"
+    ],
+    "beobachtung": "Der Test läuft auf dem Host ohne Hardware in Bruchteilen einer Sekunde. Mit dem falschen Register zeigt der Mock genau, welches Byte abweicht."
+  },
+  "begriffe": [
+    { "begriff": "embedded-hal", "englisch": "embedded-hal", "erklaerung": "Crate mit Traits für GPIO, I²C, SPI, Delay usw. Vertrag zwischen chipspezifischen HALs und generischen Treibern." },
+    { "begriff": "Generischer Treiber", "englisch": "platform-agnostic driver", "erklaerung": "Treiber für einen externen Baustein, der nur Traits aus `embedded-hal` verlangt und so auf jedem Chip läuft." },
+    { "begriff": "Mock", "englisch": "mock", "erklaerung": "Testattrappe, die erwartete Aufrufe kennt und jede Abweichung als Fehler meldet." },
+    { "begriff": "Transaktion", "englisch": "transaction", "erklaerung": "Ein zusammenhängender Buszugriff, z. B. „Register 0x00 schreiben, dann zwei Bytes lesen“." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-hal auf docs.rs", "url": "https://docs.rs/embedded-hal" },
+    { "titel": "embedded-hal-mock auf docs.rs", "url": "https://docs.rs/embedded-hal-mock" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

@@ -1,0 +1,183 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m4-l1",
+  "phase": 7,
+  "modul": "7.4 Rust auf Mikrocontrollern",
+  "titel": "Was kostet ein Sprachmittel im Flash?",
+  "lernziele": [
+    "Erkennen, warum Panics und `core::fmt` die Codegrösse treiben",
+    "Ein Release-Profil für kleine Firmware einstellen (`opt-level`, `panic`, `lto`)",
+    "Mit `cargo bloat` die grössten Funktionen und Crates finden und defmt als Alternative zu `fmt` einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Firmware mit 20 KiB Anwendungscode wird 18 KiB grösser, nachdem jemand an einer Stelle `{:?}` für einen `f32` in eine Panic-Meldung geschrieben hat. Woran liegt das?",
+      "optionen": [
+        "Die Formatierungsmaschine von `core::fmt` inklusive Gleitkomma-Ausgabe wird gelinkt, mit dynamischem Dispatch, den der Linker kaum entfernen kann",
+        "Der `f32` wird in Software emuliert",
+        "Debug-Ausgaben sind in Release-Builds immer enthalten",
+        "Panics brauchen eine eigene Standardbibliothek"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`core::fmt` arbeitet mit `&dyn Write` und Funktionszeigern. Sobald irgendwo formatiert wird, landen die Formatierer im Binary, für Gleitkommazahlen sind das grosse Routinen (Grisu/Dragon). Selbst eine harmlos wirkende `unwrap()`-Meldung zieht Formatierungscode für Ort und Nachricht mit.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Cortex-M4F rechnet `f32` in Hardware, das Problem ist die Textausgabe.",
+        "Ungenutzter Code wird normalerweise entfernt, hier wird er aber benutzt.",
+        "`core` reicht, aber der Formatierungscode kommt mit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein Release-Profil für Firmware",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "opt-level = \"s\"       # oder \"z\" für noch kleiner",
+          "lto = \"fat\"",
+          "codegen-units = 1",
+          "panic = \"abort\"",
+          "debug = 2             # Debug-Infos landen nicht im Flash",
+          "",
+          "[profile.dev]",
+          "opt-level = 1         # Debug-Builds sonst oft zu gross und zu langsam"
+        ]
+      },
+      "text": "`opt-level = \"s\"` optimiert auf Grösse, `\"z\"` zusätzlich ohne Schleifen-Vektorisierung. `lto` und `codegen-units = 1` erlauben dem Optimierer, über Crate-Grenzen hinweg zu inlinen und toten Code zu entfernen. Debug-Infos (`debug = 2`) stehen nur im ELF auf dem PC, nicht im Flash, und sind für probe-rs und defmt nützlich. Auf `thumbv*-none-*` ist `panic = \"abort\"` ohnehin Standard, weil es kein Unwinding gibt."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`cargo bloat --release --crates` für ein kleines `std`-Programm, das Zahlen parst und den Mittelwert ausgibt. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo bloat --release --crates -n 5",
+        "ausgabe": [
+          "File  .text     Size Crate",
+          "6.2%  98.5% 264.6KiB std",
+          "0.0%   0.2%     522B bloat",
+          "0.0%   0.0%      58B [Unknown]",
+          "0.0%   0.0%      21B __rustc",
+          "6.2% 100.0% 268.5KiB .text section size, the file size is 4.2MiB"
+        ]
+      },
+      "optionen": [
+        "Der eigene Code macht 522 Byte aus, fast der gesamte `.text`-Abschnitt kommt aus `std` (Formatierung, Backtraces, Laufzeit)",
+        "Das Programm ist schlecht geschrieben und muss optimiert werden",
+        "Die 4,2 MiB landen so auch im Flash eines Mikrocontrollers",
+        "`cargo bloat` zählt auch die Debug-Infos zu `.text`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auf dem PC zahlt man für `std`, Backtrace-Unterstützung und `fmt`. Die Dateigrösse enthält Symbole und Debug-Infos, die nie ausgeführt werden. Auf dem Mikrocontroller zählt nur, was in `.text`, `.rodata` und `.data` landet. Mit `cargo bloat -n 10` (ohne `--crates`) siehst du die grössten einzelnen Funktionen und findest so z. B. `core::fmt::float`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der eigene Code ist winzig, die Grösse kommt aus der Bibliothek.",
+        "Ein Mikrocontroller-Binary enthält kein `std`, und Debug-Infos werden nicht geflasht.",
+        "`.text` enthält nur Maschinencode, die Debug-Infos stecken in der Dateigrösse."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Diese beiden Funktionen wurden mit `-C opt-level=s` übersetzt. `nm` zeigt für das Object-File `U core::panicking::panic_bounds_check`. Welche Funktion braucht diese Panik?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn summe_index(a: &[u32], n: usize) -> u32 {",
+          "    let mut s = 0;",
+          "    for i in 0..n {",
+          "        s += a[i];",
+          "    }",
+          "    s",
+          "}",
+          "",
+          "pub fn summe_iter(a: &[u32]) -> u32 {",
+          "    a.iter().sum()",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nur `summe_index`, weil der Compiler nicht beweisen kann, dass `n <= a.len()` ist",
+        "Nur `summe_iter`, weil Iteratoren intern immer prüfen",
+        "Beide gleichermassen",
+        "Keine, `opt-level=s` entfernt alle Bounds Checks"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`objdump -d` zeigt genau einen `call` auf `panic_bounds_check`, und zwar in `summe_index`. Der Iterator kennt die Länge des Slices und braucht keine Prüfung. Jeder verbleibende Bounds Check kostet Code und zieht die Panik-Infrastruktur mit. Iteratoren, `get()` mit Fehlerbehandlung oder eine einmalige Prüfung vor der Schleife (`let a = &a[..n];`) helfen dem Optimierer.",
+      "begruendungen": [
+        "Richtig.",
+        "Iteratoren über Slices brauchen keine Indexprüfung.",
+        "Im erzeugten Code ruft nur `summe_index` die Panik auf.",
+        "Bounds Checks werden nur entfernt, wenn der Compiler sie als unnötig beweisen kann."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug oder welche Einstellung hilft wobei?",
+      "paare": [
+        { "links": "`cargo bloat`", "rechts": "Zeigt die grössten Funktionen und Crates im Binary" },
+        { "links": "`cargo size` (cargo-binutils)", "rechts": "Zeigt die Grösse der Abschnitte `.text`, `.data`, `.bss`" },
+        { "links": "`panic-halt` statt `panic-probe` mit Ausgabe", "rechts": "Panic-Handler ohne Meldung, kein Formatierungscode" },
+        { "links": "`defmt`", "rechts": "Logging, bei dem die Formatstrings nicht im Flash landen" }
+      ],
+      "erklaerung": "Ein guter Ablauf: erst mit `cargo size` messen, dann mit `cargo bloat` die Verursacher finden, dann gezielt ändern. Den Unterschied pro Commit im CI zu verfolgen verhindert, dass die Firmware unbemerkt wächst."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "defmt: Formatieren auf dem PC",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use defmt::{info, warn};",
+          "",
+          "info!(\"Temperatur {=f32} °C, Sensor {}\", t, id);",
+          "warn!(\"Puffer zu {} % voll\", fuellstand);"
+        ]
+      },
+      "text": "**defmt** (*deferred formatting*) speichert die Formatstrings in einem eigenen ELF-Abschnitt, der nicht geflasht wird. Das Gerät sendet nur eine kleine Nummer (Index des Strings) und die rohen Werte, meist über RTT. Auf dem PC setzt `probe-rs` die Meldung mit Hilfe des ELF wieder zusammen. Das spart Flash, Bandbreite und Rechenzeit. Eigene Typen implementieren `defmt::Format` statt `Debug`, meist per `#[derive(defmt::Format)]`. Mit der Umgebungsvariablen `DEFMT_LOG` filtert man die Stufen schon beim Kompilieren."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Das Team will eine möglichst kleine Firmware. Welche Zeile in der `Cargo.toml` arbeitet dagegen?",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "opt-level = 3",
+          "lto = \"fat\"",
+          "codegen-units = 1",
+          "panic = \"abort\"",
+          "debug = 2"
+        ]
+      },
+      "fehlerZeile": 2,
+      "erklaerung": "`opt-level = 3` optimiert auf Geschwindigkeit: Schleifen werden ausgerollt, Funktionen grosszügig inlined. Für Grösse wählt man `\"s\"` oder `\"z\"`. `debug = 2` ist kein Problem, denn Debug-Infos landen nicht im Flash. Tipp: Man kann für einzelne Crates mit `[profile.release.package.<name>]` ein anderes `opt-level` setzen, etwa `3` für eine DSP-Bibliothek."
+    }
+  ],
+  "praxis": "In Produktprojekten ist der Flash meist knapp, und jedes Kilobyte zählt beim Chippreis. Bewährt hat sich: `cargo size` im CI mit einer Schwelle, `defmt` statt `fmt` für alle Logs, keine Gleitkomma-Formatierung auf dem Gerät, Panik-Meldungen nur in Debug-Builds. `cargo bloat` gehört in die Werkzeugkiste jedes Embedded-Rust-Entwicklers.",
+  "labor": {
+    "titel": "Codegrösse messen",
+    "anleitung": "Baue ein kleines Programm einmal mit `opt-level = 3` und einmal mit `opt-level = \"z\"` und `panic = \"abort\"`. Vergleiche mit `cargo bloat`. Erzeuge ausserdem für die Funktionen `summe_index` und `summe_iter` Object-Code und suche nach `panic_bounds_check`.",
+    "befehle": [
+      "cargo install cargo-bloat",
+      "cargo bloat --release -n 10",
+      "cargo bloat --release --crates",
+      "rustc --edition 2024 --crate-type=lib -C opt-level=s -C panic=abort --emit=obj lib.rs -o lib.o",
+      "nm -C lib.o | grep panic"
+    ],
+    "beobachtung": "Die grössten Funktionen gehören zu `std` (Backtraces, Gleitkomma-Formatierung). Im Object-File taucht `panic_bounds_check` als undefiniertes Symbol `U` auf und wird nur von `summe_index` aufgerufen."
+  },
+  "begriffe": [
+    { "begriff": "Bounds Check", "englisch": "bounds check", "erklaerung": "Prüfung, ob ein Index innerhalb eines Arrays oder Slices liegt; bei Fehlschlag Panik." },
+    { "begriff": "LTO", "englisch": "link-time optimization", "erklaerung": "Optimierung über Crate-Grenzen hinweg beim Linken." },
+    { "begriff": "defmt", "englisch": "deferred formatting", "erklaerung": "Logging-Framework, das Formatstrings auf dem PC statt auf dem Gerät auswertet." },
+    { "begriff": "cargo-bloat", "englisch": "cargo-bloat", "erklaerung": "Werkzeug, das zeigt, welche Funktionen und Crates wie viel Platz im Binary belegen." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Cargo Book: Profiles", "url": "https://doc.rust-lang.org/cargo/reference/profiles.html" },
+    { "titel": "defmt Book", "url": "https://defmt.ferrous-systems.com/" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

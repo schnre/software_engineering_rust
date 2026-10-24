@@ -1,0 +1,274 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m1-l2",
+  "phase": 12,
+  "modul": "12.1 Normen und Prozesse",
+  "titel": "Verifikation: Tests, MC/DC, Richtlinien und Beweise",
+  "lernziele": [
+    "Anforderungsbasierte Tests mit Rückverfolgbarkeit in Rust schreiben",
+    "Anweisungs-, Zweig- und MC/DC-Abdeckung unterscheiden und den Stand in Rust einordnen",
+    "Einordnen, was Codierrichtlinien und formale Werkzeuge wie Kani, Prusti und Creusot leisten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "anforderungsbasiert",
+      "frage": "Was unterscheidet einen **anforderungsbasierten Test** von einem Test, den man „nach Gefühl“ schreibt?",
+      "optionen": [
+        "Er leitet Eingaben und erwartetes Ergebnis aus einer konkreten Anforderung ab und verweist auf deren ID, inklusive Grenzwerten und Fehlerfällen",
+        "Er wird erst nach der Implementierung geschrieben und deckt jede Codezeile ab",
+        "Er prüft nur, dass der Code ohne Panic durchläuft",
+        "Er muss auf der Zielhardware laufen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Normen verlangen, dass Tests aus Anforderungen abgeleitet werden: Normalfälle, Grenzwerte (Äquivalenzklassen), Fehlerfälle. Erst danach misst man die **Strukturabdeckung**. Code, den kein anforderungsbasierter Test erreicht, ist ein Hinweis: Entweder fehlt eine Anforderung, oder der Code ist überflüssig.",
+      "begruendungen": [
+        "Richtig.",
+        "Zeilenabdeckung ist eine Folge, nicht das Ziel. Ein Test kann jede Zeile ausführen und trotzdem nichts prüfen.",
+        "Das ist ein Rauchtest (*smoke test*) ohne Aussage über die Funktion.",
+        "Viele Unit-Tests laufen auf dem Host. Wichtig ist, dass begründet ist, warum das gleichwertig ist."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "testnamen",
+      "frage": "Diese Ausgabe kommt aus dem CI eines Sensormoduls. Was ist daran für ein Safety-Audit besonders nützlich?",
+      "terminal": {
+        "befehl": "cargo test",
+        "ausgabe": [
+          "     Running unittests src/lib.rs (target/debug/deps/sensor-7ce0e27fce80abdd)",
+          "",
+          "running 3 tests",
+          "test tests::swr_sen_012_leere_liste_ergibt_none ... ok",
+          "test tests::swr_sen_013_mittelwert_von_drei_werten ... ok",
+          "test tests::swr_sen_014_grosse_werte_ohne_ueberlauf ... ok",
+          "",
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ]
+      },
+      "optionen": [
+        "Jeder Testname trägt die Anforderungs-ID. Ein Skript kann aus der Ausgabe (oder aus `cargo test -- --list`) die Traceability-Matrix erzeugen",
+        "Die Ausgabe beweist 100 % MC/DC-Abdeckung",
+        "Die Laufzeit von 0.00s zeigt, dass die Echtzeitanforderungen erfüllt sind",
+        "Der Hash im Dateinamen ist die Prüfsumme der Anforderung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Konventionen wie `swr_<modul>_<nummer>_...` sind einfach und robust. Alternativ verwendet man Attribute oder Doc-Kommentare, die ein Werkzeug ausliest. Testergebnisse und die Toolchain-Version werden als Nachweis archiviert. Über Abdeckung oder Timing sagt diese Ausgabe nichts.",
+      "begruendungen": [
+        "Richtig.",
+        "Bestandene Tests sagen nichts über Abdeckung. Die misst man separat.",
+        "Das ist die Laufzeit der Tests auf dem Host, kein WCET-Nachweis.",
+        "Der Hash unterscheidet nur verschiedene Builds desselben Crates."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "mcdc-zaehlen",
+      "frage": "Wie viele Testfälle braucht man mindestens für 100 % **MC/DC**-Abdeckung dieser Entscheidung?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "if freigabe && (temperatur_ok || notbetrieb) {",
+          "    starte_motor();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "4",
+        "2",
+        "8",
+        "3"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "**MC/DC** (*modified condition/decision coverage*) verlangt, dass jede Teilbedingung nachweislich allein das Ergebnis umschalten kann, während die anderen gleich bleiben. Für n unabhängige Teilbedingungen genügen meist n+1 Tests, hier 4, z. B. (f,w,f), (w,w,f), (w,f,f), (w,f,w). Zweigabdeckung schafft man schon mit 2 Tests, alle Kombinationen wären 8. ISO 26262 empfiehlt MC/DC für ASIL D dringend, DO-178C fordert es für DAL A.",
+      "begruendungen": [
+        "Richtig.",
+        "Zwei Tests reichen für Zweigabdeckung (einmal wahr, einmal falsch), aber nicht für MC/DC.",
+        "Das sind alle Kombinationen, mehr als nötig.",
+        "Mit drei Teilbedingungen braucht MC/DC mindestens n+1 = 4."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Abdeckung in Rust: Stand 2026",
+      "text": "Zeilen- und Regionsabdeckung sind stabil: `-C instrument-coverage` bzw. bequemer `cargo llvm-cov` nutzen die Instrumentierung von LLVM. **MC/DC** ist dagegen noch offen: Eine frühe, unstabile Umsetzung in rustc wurde 2025 wieder entfernt, weil sie schwer wartbar war. Für 2026 ist eine Neuimplementierung als Projektziel geplant, unterstützt von AdaCore.\n\nWas tun bis dahin? Teams setzen auf kommerzielle Werkzeuge, auf Abdeckungsmessung im Objektcode oder halten Entscheidungen bewusst einfach (wenige Teilbedingungen pro `if`), damit Zweigabdeckung plus Review überzeugt. Beachte auch: `match` mit Guards und `?` erzeugen Verzweigungen, die man bei der Abdeckungsplanung mitdenken muss."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeuge",
+      "frage": "Welches Werkzeug oder welche Initiative passt?",
+      "paare": [
+        {
+          "links": "Kani",
+          "rechts": "Bounded Model Checker: prüft eine Funktion für alle Eingaben bis zu einer Schleifengrenze"
+        },
+        {
+          "links": "Prusti",
+          "rechts": "Deduktive Verifikation mit Vor- und Nachbedingungen auf Basis des Viper-Frameworks"
+        },
+        {
+          "links": "Creusot",
+          "rechts": "Übersetzt annotierten Rust-Code für den Beweiser Why3"
+        },
+        {
+          "links": "Safety-Critical Rust Consortium",
+          "rechts": "Arbeitsgruppe der Rust Foundation, erarbeitet u. a. Codierrichtlinien für Rust"
+        },
+        {
+          "links": "Clippy",
+          "rechts": "Linter, der Richtlinien als Lints im Build durchsetzen kann"
+        }
+      ],
+      "erklaerung": "Das **Safety-Critical Rust Consortium** wurde 2024 bei der Rust Foundation gegründet (u. a. mit AdaCore, Arm, Ferrous Systems, HighTec, Woven by Toyota). Es veröffentlicht Codierrichtlinien, die die Rolle von MISRA für Rust übernehmen sollen. Ein Projektziel für 2026 ist, passende Lints dauerhaft in Clippy aufzunehmen. Die Richtlinien sind noch im Aufbau, prüfe vor dem Einsatz den aktuellen Stand."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "kani-harness",
+      "frage": "Was meldet `cargo kani` für diesen Beweis-Harness (*proof harness*)?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "fn mittel2(a: u16, b: u16) -> u16 {",
+          "    (a + b) / 2",
+          "}",
+          "",
+          "#[cfg(kani)]",
+          "#[kani::proof]",
+          "fn mittel2_liegt_dazwischen() {",
+          "    let a: u16 = kani::any();",
+          "    let b: u16 = kani::any();",
+          "    let m = mittel2(a, b);",
+          "    assert!(m >= a.min(b) && m <= a.max(b));",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 5,
+            "text": "Nur beim Lauf unter Kani kompiliert. Ein normales `cargo build` ignoriert den Harness."
+          },
+          {
+            "zeile": 8,
+            "text": "`kani::any()` steht für jeden möglichen Wert, nicht für einen zufälligen."
+          }
+        ]
+      },
+      "optionen": [
+        "Die Verifikation schlägt fehl: Für grosse Werte läuft `a + b` über, Kani zeigt ein Gegenbeispiel",
+        "Die Verifikation gelingt, weil die Zusicherung mathematisch stimmt",
+        "Kani testet 1000 zufällige Paare und meldet keinen Fehler",
+        "Kompilierfehler, weil `kani::any()` keinen Typ kennt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Kani prüft symbolisch **alle** 2^32 Kombinationen und prüft neben eigenen `assert!` automatisch auch Überläufe, Indexfehler und Panics. Bei `a = b = 40000` läuft die Addition über. Eine korrekte Version ist z. B. `a / 2 + b / 2 + (a & b & 1)` oder die Rechnung in `u32`. Genau solche Randfälle übersehen Beispieltests leicht.",
+      "begruendungen": [
+        "Richtig.",
+        "Mathematisch ja, aber `u16`-Arithmetik ist nicht die Mathematik der ganzen Zahlen.",
+        "Das wäre Fuzzing oder Property-Testing. Kani ist ein Model Checker und deckt den ganzen Eingaberaum ab.",
+        "Der Typ kommt aus der Annotation `let a: u16`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "formale-grenzen",
+      "frage": "Welche Aussage zu formalen Methoden in einem Safety-Projekt ist realistisch?",
+      "optionen": [
+        "Man setzt sie gezielt für kleine, kritische Kerne ein (Arithmetik, Zustandsautomaten, `unsafe`-Bausteine) und ergänzt damit Tests, ersetzt sie aber nicht",
+        "Ein Kani-Beweis macht Unit-Tests und Anforderungen überflüssig",
+        "Formale Methoden sind nur für Hardware relevant",
+        "Kani beweist auch die Korrektheit des Timings auf dem Mikrocontroller"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Beweis gilt nur für das, was im Harness steht, und nur bis zu den gesetzten Grenzen (z. B. Schleifendurchläufe mit `#[kani::unwind]`). Die Spezifikation selbst kann falsch sein. Normen wie IEC 61508 empfehlen formale Methoden für hohe Stufen ausdrücklich. Der Aufwand lohnt sich dort, wo ein Fehler teuer und die Logik überschaubar ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Beweis prüft gegen eine Spezifikation. Ob die Spezifikation die Anforderung trifft, braucht weiterhin Tests und Reviews.",
+        "Gerade in Software (seL4, Teile der Rust-Standardbibliothek) werden sie zunehmend eingesetzt.",
+        "Kani analysiert die Programmlogik, nicht Laufzeit oder Hardwareverhalten."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-verifikation",
+      "frage": "Ergänze.",
+      "text": "Für ASIL D wird {{?}}-Abdeckung dringend empfohlen. In Kani steht `kani::{{?}}()` für einen beliebigen Wert, und `#[kani::{{?}}]` markiert einen Beweis-Harness.",
+      "luecken": [
+        {
+          "loesungen": [
+            "MC/DC"
+          ]
+        },
+        {
+          "loesungen": [
+            "any"
+          ]
+        },
+        {
+          "loesungen": [
+            "proof"
+          ]
+        }
+      ],
+      "auswahl": [
+        "MC/DC",
+        "any",
+        "proof",
+        "Zeilen",
+        "random",
+        "test"
+      ],
+      "erklaerung": "`kani::any()` liefert keinen Zufallswert, sondern einen symbolischen Wert, der alle Möglichkeiten gleichzeitig vertritt."
+    }
+  ],
+  "praxis": "Plane Verifikation von Anfang an: Anforderungen mit IDs, Tests mit diesen IDs im Namen, eine Abdeckungsmessung im CI und eine Liste der Funktionen, die so kritisch sind, dass sie zusätzlich mit Kani bewiesen werden. Halte Entscheidungen einfach, solange MC/DC-Werkzeuge für Rust noch reifen. Und beobachte die Codierrichtlinien des Safety-Critical Rust Consortium: Sie werden in Audits künftig ähnlich gefragt sein wie heute MISRA für C.",
+  "labor": {
+    "titel": "Abdeckung messen und einen ersten Beweis führen",
+    "anleitung": "Schreibe drei anforderungsbasierte Tests für eine kleine Funktion und miss die Abdeckung. Installiere danach Kani und lasse den Harness `mittel2_liegt_dazwischen` laufen. Korrigiere `mittel2` und wiederhole den Beweis.",
+    "befehle": [
+      "cargo install cargo-llvm-cov",
+      "cargo llvm-cov --summary-only",
+      "cargo install --locked kani-verifier",
+      "cargo kani setup",
+      "cargo kani --harness mittel2_liegt_dazwischen"
+    ],
+    "beobachtung": "`cargo llvm-cov` zeigt Zeilen- und Regionsabdeckung pro Datei. Kani meldet für die erste Version einen fehlgeschlagenen Überlaufcheck mit Gegenbeispiel, nach der Korrektur ist die Verifikation erfolgreich. Ohne `[lints.rust] unexpected_cfgs = { level = \"warn\", check-cfg = ['cfg(kani)'] }` warnt ein normales `cargo build` über die unbekannte `cfg`-Bedingung `kani`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Anforderungsbasierter Test",
+      "englisch": "requirements-based test",
+      "erklaerung": "Test, dessen Eingaben und erwartete Ergebnisse aus einer konkreten Anforderung abgeleitet sind."
+    },
+    {
+      "begriff": "MC/DC",
+      "englisch": "modified condition/decision coverage",
+      "erklaerung": "Abdeckungskriterium, bei dem jede Teilbedingung nachweislich allein das Ergebnis einer Entscheidung beeinflusst."
+    },
+    {
+      "begriff": "Model Checking",
+      "englisch": "model checking",
+      "erklaerung": "Automatische Prüfung einer Eigenschaft über alle möglichen Zustände bzw. Eingaben eines Programms."
+    },
+    {
+      "begriff": "Beweis-Harness",
+      "englisch": "proof harness",
+      "erklaerung": "Funktion, die für Kani symbolische Eingaben erzeugt und die zu beweisenden Eigenschaften formuliert."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Kani Rust Verifier",
+      "url": "https://model-checking.github.io/kani/"
+    },
+    {
+      "titel": "Rust Project Goals 2026: Safety-Critical Rust",
+      "url": "https://goals.rust-lang.org/2026/roadmap-safety-critical-rust.html"
+    },
+    {
+      "titel": "rustc book: Instrumentation-based Code Coverage",
+      "url": "https://doc.rust-lang.org/rustc/instrument-coverage.html"
+    }
+  ]
+}

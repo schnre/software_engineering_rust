@@ -1,0 +1,235 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m2-l1",
+  "phase": 4,
+  "modul": "4.2 Teststrategie",
+  "titel": "Mocks, Fakes und Hardware im Test",
+  "lernziele": [
+    "Abhängigkeiten über Traits und Generics austauschbar machen",
+    "Zwischen Fake und Mock unterscheiden und `mockall` einsetzen",
+    "Treiber mit `embedded-hal-mock` ohne Hardware testen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "pyramide",
+      "frage": "Ein Team hat 20 End-to-End-Tests auf echter Hardware und kaum Unit-Tests. Was ist das typische Problem?",
+      "optionen": [
+        "Die Tests sind langsam und unzuverlässig, und bei einem Fehlschlag ist unklar, welche Komponente schuld ist",
+        "End-to-End-Tests finden grundsätzlich keine Fehler",
+        "Der Rust-Compiler optimiert Unit-Tests besser"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **Testpyramide** empfiehlt: viele schnelle Unit-Tests unten, weniger Integrationstests in der Mitte, wenige End-to-End-Tests oben. Unit-Tests laufen in Millisekunden, zeigen genau auf die kaputte Stelle und brauchen keine Hardware. Damit das geht, muss sich die Logik von Hardware, Netzwerk und Uhr trennen lassen. Genau dafür sind Traits da.",
+      "begruendungen": [
+        "Richtig.",
+        "Sie finden Fehler, aber spät, langsam und ungenau.",
+        "Mit Optimierung hat das nichts zu tun."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Abhängigkeiten über Traits einspeisen",
+      "text": "**Dependency Injection** heisst: Eine Funktion bekommt ihre Abhängigkeiten von aussen, statt sie selbst zu erzeugen. In Rust beschreibt man die Abhängigkeit als **Trait** und nimmt sie als Generic (`impl Sensor` oder `<S: Sensor>`) entgegen. Im Produktivcode steckt der echte Treiber dahinter, im Test eine Attrappe. Durch Monomorphisierung kostet das zur Laufzeit nichts.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub trait Sensor {",
+          "    fn lese(&mut self) -> u16;",
+          "}",
+          "",
+          "pub fn ueber_schwelle(s: &mut impl Sensor, schwelle: u16) -> bool {",
+          "    s.lese() > schwelle",
+          "}",
+          "",
+          "struct FesterSensor(u16);",
+          "impl Sensor for FesterSensor {",
+          "    fn lese(&mut self) -> u16 { self.0 }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Kennt nur den Trait, nicht den konkreten Treiber." },
+          { "zeile": 9, "text": "Ein handgeschriebener Fake: liefert immer denselben Wert." }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "attrappen",
+      "frage": "Ordne die Arten von Test-Attrappen (test doubles) zu.",
+      "paare": [
+        { "links": "Stub", "rechts": "Liefert feste Antworten, prüft nichts" },
+        { "links": "Fake", "rechts": "Vereinfachte, aber funktionierende Implementierung, z. B. Speicher statt Flash" },
+        { "links": "Mock", "rechts": "Prüft, ob und wie oft bestimmte Aufrufe mit welchen Argumenten kamen" },
+        { "links": "Spy", "rechts": "Zeichnet Aufrufe auf, damit der Test sie danach auswerten kann" }
+      ],
+      "erklaerung": "**Fakes** testen Verhalten (Was kommt heraus?), **Mocks** testen Interaktion (Was wurde aufgerufen?). Mock-lastige Tests brechen oft schon bei harmlosem Umbau, weil sie Implementierungsdetails festschreiben. Faustregel: Fakes bevorzugen. Mocks dort einsetzen, wo die Interaktion selbst die Anforderung ist, etwa die exakte Byte-Folge auf einem Bus."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "automock",
+      "frage": "Ergänze: `mockall` soll im Test-Build automatisch einen `MockSensor` erzeugen, der genau einmal gelesen werden darf und 500 liefert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[cfg_attr(test, mockall::{{?}})]",
+          "pub trait Sensor {",
+          "    fn lese(&mut self) -> u16;",
+          "}",
+          "",
+          "#[test]",
+          "fn schwelle_mit_mock() {",
+          "    let mut s = MockSensor::new();",
+          "    s.{{?}}().times(1).returning(|| 500);",
+          "    assert!(ueber_schwelle(&mut s, 400));",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["automock"] },
+        { "loesungen": ["expect_lese"] }
+      ],
+      "auswahl": ["automock", "expect_lese", "mock", "lese", "when_lese"],
+      "erklaerung": "`#[cfg_attr(test, …)]` wendet das Attribut nur im Test-Build an, der Mock landet also nicht in der Firmware. `#[automock]` erzeugt den Typ `Mock<Traitname>` mit einer Methode `expect_<methode>()` pro Trait-Methode. Darauf legt man fest, wie oft (`times`), mit welchen Argumenten (`withf`) und mit welchem Ergebnis (`returning`) gerechnet wird. `mockall` kommt mit `cargo add --dev mockall`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "mock-zu-oft",
+      "frage": "Der Test ruft `ueber_schwelle` zweimal auf. Was meldet mockall?",
+      "terminal": {
+        "befehl": "cargo test zu_oft_gelesen",
+        "ausgabe": [
+          "---- tests::zu_oft_gelesen stdout ----",
+          "",
+          "thread 'tests::zu_oft_gelesen' (19933) panicked at src/lib.rs:7:18:",
+          "MockSensor::lese: Expectation(<anything>) called 2 times which is more than the expected 1"
+        ]
+      },
+      "optionen": [
+        "`lese` wurde zweimal aufgerufen, erlaubt war mit `times(1)` nur ein Aufruf",
+        "Der Mock hat zweimal einen falschen Wert geliefert",
+        "In Zeile 7 von `src/lib.rs` fehlt ein Rückgabewert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Mock prüft die Erwartungen selbst und löst bei Verletzung einen Panic aus. Zu viele Aufrufe fallen sofort auf, zu wenige beim Drop des Mocks am Testende. `<anything>` heisst: Für die Argumente war keine Bedingung gesetzt. Die Zeilennummer zeigt auf das `#[automock]`-Attribut, das den Code erzeugt hat, nicht auf den Aufruf. Den findest du mit `RUST_BACKTRACE=1`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Wert ist fest auf 500 eingestellt. Gemeldet wird die Anzahl.",
+        "Die Zeile gehört zum Makro, das den Mock erzeugt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Treiber testen mit embedded-hal-mock",
+      "text": "Embedded-Treiber in Rust sind meist generisch über die Traits von **embedded-hal** (`I2c`, `SpiDevice`, `OutputPin`, `DelayNs` …). Darum lässt sich der Bus im Test ersetzen. Die Crate **embedded-hal-mock** liefert dafür fertige Mocks: Man beschreibt die erwarteten Bus-Transaktionen, und der Mock prüft Adresse, gesendete Bytes und liefert die Antwort. Am Ende stellt `done()` sicher, dass alle erwarteten Transaktionen auch stattfanden. So läuft ein Sensor-Treiber in `cargo test` auf dem Entwicklungsrechner, ganz ohne Board. Mehr zu embedded-hal in Phase 8.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTransaction};",
+          "",
+          "#[test]",
+          "fn liest_temperatur() {",
+          "    let erwartet = [I2cTransaction::write_read(0x48, vec![0x00], vec![0x12, 0x34])];",
+          "    let mut t = Tmp::new(I2cMock::new(&erwartet));",
+          "    assert_eq!(t.temperatur_roh().unwrap(), 0x1234);",
+          "    t.release().done();",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "An Adresse 0x48 Register 0x00 schreiben, zwei Bytes zurücklesen." },
+          { "zeile": 8, "text": "Treiber gibt den Bus zurück, `done()` prüft auf vergessene Transaktionen." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "i2c-adresse",
+      "frage": "Der Treiber spricht Adresse `0x48` an, im Test steht `write_read(0x49, …)`. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo test i2c",
+        "ausgabe": [
+          "thread 'tests::i2c_falsche_adresse' (19932) panicked at /home/user/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/embedded-hal-mock-0.11.1/src/eh1/i2c.rs:232:9:",
+          "assertion `left == right` failed: i2c::write_read address mismatch",
+          "  left: 73",
+          " right: 72"
+        ]
+      },
+      "optionen": [
+        "Der Mock erwartete Adresse 73 (0x49), der Treiber sendete 72 (0x48)",
+        "Der Treiber hat 73 Bytes statt 72 gelesen",
+        "Die Crate embedded-hal-mock hat einen Fehler in Zeile 232"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Meldung `address mismatch` nennt die Art der Abweichung, die Werte stehen dezimal da: 73 = 0x49, 72 = 0x48. Der Panic-Ort liegt in der Mock-Crate, weil dort der Vergleich steht. Für die Stelle im eigenen Code hilft der Backtrace. Hier ist der Test falsch, das Datenblatt sagt 0x48.",
+      "begruendungen": [
+        "Richtig.",
+        "Gemeldet wird die Adresse, nicht die Länge.",
+        "Der Panic ist die gewollte Meldung der Mock-Crate."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "was-mocken",
+      "frage": "Welche Abhängigkeiten sollte man in Unit-Tests typischerweise hinter einen Trait legen und ersetzen?",
+      "optionen": [
+        "Die Systemzeit bzw. einen Timer",
+        "Hardware-Busse wie I²C und SPI",
+        "Reine Berechnungsfunktionen wie eine CRC-Prüfsumme",
+        "Netzwerk- und Dateizugriffe"
+      ],
+      "korrekt": [0, 1, 3],
+      "erklaerung": "Ersetzen lohnt sich bei allem, was langsam, nicht deterministisch oder ohne spezielle Umgebung nicht verfügbar ist. Eine CRC-Funktion ist schnell und deterministisch, die testet man direkt mit. Wer sie mockt, testet am Ende nur den Mock.",
+      "begruendungen": [
+        "Richtig. Mit einer gefakten Uhr testet man Timeouts in Millisekunden statt Minuten.",
+        "Richtig. Ohne Board gibt es keinen echten Bus.",
+        "Reine Funktionen braucht man nicht zu ersetzen.",
+        "Richtig. Langsam, wackelig und abhängig von der Umgebung."
+      ]
+    }
+  ],
+  "praxis": "Gute Embedded-Rust-Architektur trennt Logik (Zustandsautomat, Protokoll, Regelung) von Hardware (HAL-Treiber). Die Logik nimmt Traits entgegen und läuft mit Fakes in `cargo test` auf dem PC, der Treiber wird mit embedded-hal-mock geprüft, und nur wenige Tests laufen auf dem Board. Im Review fragst du bei neuem Code, der direkt auf Register oder `std::time::Instant::now()` zugreift: Wie testen wir das ohne Hardware?",
+  "labor": {
+    "titel": "Ein Treiber ohne Board",
+    "anleitung": "Schreibe einen kleinen Treiber, der generisch über `embedded_hal::i2c::I2c` ist und zwei Bytes aus einem Register liest. Teste ihn mit embedded-hal-mock und baue absichtlich eine falsche Adresse ein. Ergänze einen Trait `Sensor` mit `#[automock]`.",
+    "befehle": [
+      "cargo new --lib tmp-treiber && cd tmp-treiber",
+      "cargo add embedded-hal@1",
+      "cargo add --dev embedded-hal-mock mockall",
+      "cargo test"
+    ],
+    "beobachtung": "Fehlt am Ende `done()`, bleiben vergessene Transaktionen unbemerkt. Probiere aus, was passiert, wenn du eine zweite Transaktion erwartest, die der Treiber nie ausführt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Testpyramide",
+      "englisch": "test pyramid",
+      "erklaerung": "Leitbild für die Verteilung: viele Unit-Tests, weniger Integrationstests, wenige End-to-End-Tests."
+    },
+    {
+      "begriff": "Dependency Injection",
+      "englisch": "dependency injection",
+      "erklaerung": "Abhängigkeiten werden von aussen übergeben, statt im Code erzeugt. In Rust über Traits und Generics."
+    },
+    {
+      "begriff": "Mock",
+      "englisch": "mock",
+      "erklaerung": "Attrappe, die erwartete Aufrufe und deren Argumente prüft."
+    },
+    {
+      "begriff": "Fake",
+      "englisch": "fake",
+      "erklaerung": "Vereinfachte, funktionierende Ersatzimplementierung, etwa ein Flash-Speicher im RAM."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "mockall auf docs.rs",
+      "url": "https://docs.rs/mockall"
+    },
+    {
+      "titel": "embedded-hal-mock auf docs.rs",
+      "url": "https://docs.rs/embedded-hal-mock"
+    }
+  ]
+}

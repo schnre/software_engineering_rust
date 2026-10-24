@@ -1,0 +1,279 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m1-l1",
+  "phase": 12,
+  "modul": "12.1 Normen und Prozesse",
+  "titel": "Normen, Sicherheitsstufen und ein qualifizierter Rust-Compiler",
+  "lernziele": [
+    "Funktionale Sicherheit von Security unterscheiden und die wichtigsten Normen mit ihren Stufen zuordnen",
+    "V-Modell und Rückverfolgbarkeit als Rahmen eines Safety-Projekts erklären",
+    "Begründen, warum Werkzeuge qualifiziert werden müssen und was Ferrocene für Rust leistet"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "id": "safety-security",
+      "frage": "Safety oder Security? Ordne zu.",
+      "paare": [
+        {
+          "links": "Funktionale Sicherheit (Safety)",
+          "rechts": "Schutz von Menschen vor Fehlfunktionen des Systems"
+        },
+        {
+          "links": "Informationssicherheit (Security)",
+          "rechts": "Schutz des Systems vor absichtlichen Angriffen"
+        },
+        {
+          "links": "Zufälliger Hardwarefehler",
+          "rechts": "Ein Bit im RAM kippt durch Strahlung"
+        },
+        {
+          "links": "Systematischer Fehler",
+          "rechts": "Ein Logikfehler im Code, der in jedem Gerät unter denselben Bedingungen auftritt"
+        }
+      ],
+      "erklaerung": "Software kennt nur **systematische** Fehler: Sie nutzt sich nicht ab, sie ist von Anfang an richtig oder falsch. Darum zielen die Normen bei Software auf einen disziplinierten Prozess statt auf Ausfallraten. Safety und Security hängen zusammen: Wer die Bremse über das Netz beeinflussen kann, ist auch ein Safety-Problem (im Fahrzeug ergänzt ISO/SAE 21434 die ISO 26262)."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "normen",
+      "frage": "Welche Norm gilt wo?",
+      "paare": [
+        {
+          "links": "IEC 61508",
+          "rechts": "Grundnorm für sicherheitsbezogene elektronische Systeme, z. B. Industrie"
+        },
+        {
+          "links": "ISO 26262",
+          "rechts": "Strassenfahrzeuge"
+        },
+        {
+          "links": "IEC 62304",
+          "rechts": "Software in Medizinprodukten"
+        },
+        {
+          "links": "DO-178C",
+          "rechts": "Software in der Luftfahrt"
+        },
+        {
+          "links": "EN 50716 (früher EN 50128)",
+          "rechts": "Software für Bahnanwendungen"
+        }
+      ],
+      "erklaerung": "Die Branchennormen teilen dieselben Grundideen: Gefährdungsanalyse, Sicherheitsstufen, ein definierter Lebenszyklus, Nachweise und unabhängige Prüfung. Die Sprache (C, C++ oder Rust) schreibt keine dieser Normen vor. Sie verlangen aber eine geeignete, möglichst streng typisierte Sprache, Codierrichtlinien und qualifizierte Werkzeuge."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Von der Gefährdung zur Sicherheitsstufe",
+      "text": "Am Anfang steht eine **Gefährdungs- und Risikoanalyse** (im Fahrzeug HARA, *hazard analysis and risk assessment*). Für jede Fehlfunktion bewertet man **Schwere** (*severity*), **Häufigkeit** der Situation (*exposure*) und **Beherrschbarkeit** (*controllability*). Daraus folgt die Sicherheitsstufe. Je höher die Stufe, desto mehr Methoden werden für Entwurf, Code und Test verlangt oder dringend empfohlen.",
+      "tabelle": {
+        "kopf": [
+          "Norm",
+          "Stufen",
+          "strengste"
+        ],
+        "zeilen": [
+          [
+            "ISO 26262",
+            "QM, ASIL A bis D",
+            "ASIL D"
+          ],
+          [
+            "IEC 61508",
+            "SIL 1 bis 4",
+            "SIL 4"
+          ],
+          [
+            "IEC 62304",
+            "Klasse A bis C",
+            "Klasse C"
+          ],
+          [
+            "DO-178C",
+            "DAL E bis A",
+            "DAL A"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "asil-lenkung",
+      "frage": "Eine Fehlfunktion der elektrischen Lenkung kann bei hoher Geschwindigkeit tödlich sein, die Situation ist häufig, und der Fahrer kann sie kaum beherrschen. Welche Stufe ist zu erwarten?",
+      "optionen": [
+        "ASIL D",
+        "ASIL A",
+        "QM",
+        "SIL 1"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Höchste Schwere, hohe Häufigkeit und geringe Beherrschbarkeit ergeben ASIL D, typisch für Lenkung, Bremse und Airbag. Für die Software heisst das unter anderem: strenge Codierrichtlinien, hohe Strukturabdeckung bis MC/DC, unabhängige Reviews und Werkzeuge, denen man nachweislich vertrauen kann.",
+      "begruendungen": [
+        "Richtig.",
+        "ASIL A gilt für deutlich geringere Risiken.",
+        "QM heisst: keine sicherheitsrelevante Gefährdung, normales Qualitätsmanagement genügt.",
+        "SIL ist die Einteilung der IEC 61508, nicht der ISO 26262, und SIL 1 wäre zudem die schwächste Stufe."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "V-Modell und Rückverfolgbarkeit",
+      "text": "Das **V-Modell** ordnet jeder Entwurfsebene links eine Prüfebene rechts zu: Systemanforderungen ↔ Systemtest, Software-Architektur ↔ Integrationstest, Feinentwurf ↔ Unit-Test. Es beschreibt Beziehungen, keinen Wasserfall; iterativ arbeiten ist erlaubt, solange die Nachweise entstehen.\n\n**Rückverfolgbarkeit** (*traceability*) verknüpft jede Anforderung mit Entwurf, Code und Test, in beide Richtungen. In Rust-Projekten tragen Tests oft die Anforderungs-ID im Namen (`fn swr_sen_013_mittelwert()`), und Werkzeuge wie Sphinx-Needs, StrictDoc oder kommerzielle ALM-Systeme erzeugen daraus die Matrix.",
+      "diagramm": {
+        "knoten": [
+          "Anforderungen",
+          "Architektur",
+          "Feinentwurf",
+          "Rust-Code",
+          "Unit-Tests",
+          "Integrationstest",
+          "Systemtest"
+        ],
+        "beschriftung": "Links absteigend entwerfen, rechts aufsteigend prüfen"
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "v-links",
+      "frage": "Bringe die linke Seite des V-Modells von oben nach unten in die richtige Reihenfolge.",
+      "elemente": [
+        "Systemanforderungen",
+        "Systemarchitektur",
+        "Software-Anforderungen",
+        "Software-Architektur (z. B. Crates und Module)",
+        "Software-Feinentwurf (Typen, Traits, Zustandsautomaten)",
+        "Implementierung in Rust"
+      ],
+      "erklaerung": "Rechts steht jeder Ebene ein Test gegenüber. In Rust bilden Crates und Module die Architektur ab: Crate-Grenzen und Sichtbarkeit (`pub(crate)`) machen Abhängigkeiten sichtbar, die ein Gutachter sonst mühsam aus Header-Dateien rekonstruieren müsste."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "werkzeugqualifizierung",
+      "frage": "Warum verlangen die Normen für ASIL D, dass der **Compiler** qualifiziert ist, obwohl der Quellcode doch getestet wird?",
+      "optionen": [
+        "Ein Compilerfehler kann falschen Maschinencode erzeugen, den die Tests nicht zuverlässig aufdecken. Man muss begründet darauf vertrauen können, dass das Werkzeug keine Fehler einschleust",
+        "Weil ein qualifizierter Compiler schnelleren Code erzeugt",
+        "Weil nur qualifizierte Compiler `unsafe` verbieten können",
+        "Weil die Norm Open-Source-Werkzeuge grundsätzlich verbietet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "ISO 26262 bewertet jedes Werkzeug nach **Auswirkung** (*tool impact*: kann es einen Fehler einschleusen?) und **Erkennbarkeit** (*tool error detection*: würde der Fehler gefunden?). Daraus folgt das Vertrauensniveau TCL 1 bis 3. Ein Compiler landet fast immer bei der höchsten Stufe und braucht dann eine **Werkzeugqualifizierung**: Validierung gegen eine Spezifikation, bekannte Fehler, eingeschränkte Optionen. IEC 61508 kennt Ähnliches mit den Werkzeugklassen T1 bis T3.",
+      "begruendungen": [
+        "Richtig.",
+        "Qualifizierung sagt nichts über Optimierung aus.",
+        "Die Qualifizierung betrifft die Korrektheit der Übersetzung, nicht den Sprachumfang.",
+        "Open Source ist erlaubt, wenn die Qualifizierung nachgewiesen wird. Ferrocene ist selbst Open Source."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ferrocene: ein qualifizierter rustc",
+      "text": "**Ferrocene** von Ferrous Systems ist eine Rust-Toolchain auf Basis des normalen `rustc`, ergänzt um Qualifizierungsdokumente, Tests gegen eine Sprachspezifikation (die *Ferrocene Language Specification*, FLS) und Langzeitpflege. Laut Hersteller ist sie (Stand 2026) von TÜV SÜD für **ISO 26262 bis ASIL D**, **IEC 61508 bis SIL 3** und **IEC 62304 Klasse C** qualifiziert, für ausgewählte Targets wie Armv7E-M und Armv8-A. Zusätzlich gibt es eine zertifizierte Teilmenge von `core` (zunächst SIL 2, inzwischen auch ASIL B). Weitere Anbieter wie AdaCore und HighTec arbeiten ebenfalls an qualifizierten Rust-Compilern.\n\nWichtig: Qualifiziert ist immer eine **bestimmte Version, Target- und Optionskombination**. Das Sicherheitshandbuch nennt Einschränkungen, die das Projekt einhalten muss."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "ferrocene-grenzen",
+      "frage": "Dein Team setzt Ferrocene für ein ASIL-D-Steuergerät ein. Welche Aussage stimmt?",
+      "optionen": [
+        "Der Compiler ist als Werkzeug qualifiziert. Die eigene Software, verwendete Crates und Teile der Standardbibliothek brauchen trotzdem eigene Nachweise",
+        "Mit Ferrocene ist die gesamte Software automatisch nach ASIL D zertifiziert",
+        "Ferrocene ersetzt Unit-Tests und Reviews, weil der Borrow-Checker qualifiziert ist",
+        "Man darf beliebige Crates von crates.io verwenden, weil Ferrocene sie mitqualifiziert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Werkzeugqualifizierung beantwortet nur die Frage: Übersetzt der Compiler korrekt? Für den eigenen Code gelten weiterhin Anforderungen, Tests, Abdeckung und Reviews. Bibliotheken wie `core` oder ein Crate wie `heapless` sind Software-Komponenten, für die man eine Zertifizierung braucht oder selbst Nachweise erbringt. Ein Senior plant deshalb früh, welche Abhängigkeiten überhaupt in den sicherheitsrelevanten Teil dürfen.",
+      "begruendungen": [
+        "Richtig.",
+        "Zertifiziert wird ein Produkt, nicht ein Compiler. Das Werkzeug ist nur ein Baustein des Nachweises.",
+        "Der Borrow-Checker verhindert eine Fehlerklasse, ersetzt aber keine Verifikation der Funktion.",
+        "Crates sind fremde Software-Einheiten und brauchen eigene Nachweise oder eine Begründung."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-stufen",
+      "frage": "Ergänze.",
+      "text": "In ISO 26262 ist ASIL {{?}} die strengste Stufe. Wie sehr man einem Werkzeug vertrauen muss, beschreibt ISO 26262 mit dem {{?}}. Ein Compiler mit möglicher Auswirkung auf den Code braucht dann eine {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "D"
+          ]
+        },
+        {
+          "loesungen": [
+            "TCL"
+          ]
+        },
+        {
+          "loesungen": [
+            "Werkzeugqualifizierung"
+          ]
+        }
+      ],
+      "auswahl": [
+        "D",
+        "TCL",
+        "Werkzeugqualifizierung",
+        "A",
+        "SIL",
+        "Typprüfung"
+      ],
+      "erklaerung": "TCL steht für *tool confidence level*. SIL ist die Stufe der IEC 61508, nicht das Vertrauensniveau eines Werkzeugs."
+    }
+  ],
+  "praxis": "In einem Safety-Projekt merkst du die Norm vor allem an Prozessen: Anforderungen mit IDs, Reviews mit Protokoll, Code nach Richtlinien, Abdeckungsnachweise, eingefrorene und qualifizierte Toolchain (oft eine feste Ferrocene-Version in `rust-toolchain.toml`), Änderungen nur über Change Requests. Wenn du Rust in ein solches Projekt einführst, ist die erste Frage des Safety-Managers nicht „Ist Rust sicher?“, sondern „Welche Toolchain ist für welche Stufe qualifiziert, und welche Bibliotheken sind abgedeckt?“.",
+  "labor": {
+    "titel": "Toolchain festnageln und dokumentieren",
+    "anleitung": "Lege in einem Projekt eine `rust-toolchain.toml` mit fester Version an und halte die genaue Compilerversion für das Konfigurationsmanagement fest. Genau diese Angaben gehören in ein Safety-Dokument, das beschreibt, mit welcher Toolchain gebaut wurde.",
+    "befehle": [
+      "cargo new safety-demo && cd safety-demo",
+      "printf '[toolchain]\\nchannel = \"1.97.0\"\\n' > rust-toolchain.toml",
+      "rustc -vV",
+      "cargo build --locked"
+    ],
+    "beobachtung": "`rustc -vV` zeigt Version, Commit-Hash, Host und LLVM-Version. Mit `--locked` stellt Cargo sicher, dass `Cargo.lock` nicht verändert wird. Bei Ferrocene tritt an die Stelle der Rust-Version eine Ferrocene-Version mit zugehörigem Sicherheitshandbuch."
+  },
+  "begriffe": [
+    {
+      "begriff": "Funktionale Sicherheit",
+      "englisch": "functional safety",
+      "erklaerung": "Freiheit von unvertretbaren Risiken durch Fehlfunktionen elektrischer und elektronischer Systeme."
+    },
+    {
+      "begriff": "ASIL",
+      "englisch": "automotive safety integrity level",
+      "erklaerung": "Sicherheitsstufe A bis D nach ISO 26262, D ist die strengste."
+    },
+    {
+      "begriff": "SIL",
+      "englisch": "safety integrity level",
+      "erklaerung": "Sicherheitsstufe 1 bis 4 nach IEC 61508."
+    },
+    {
+      "begriff": "Rückverfolgbarkeit",
+      "englisch": "traceability",
+      "erklaerung": "Durchgängige Verknüpfung von Anforderungen mit Entwurf, Code und Tests."
+    },
+    {
+      "begriff": "Werkzeugqualifizierung",
+      "englisch": "tool qualification",
+      "erklaerung": "Nachweis, dass einem Entwicklungswerkzeug wie dem Compiler für den Einsatzzweck vertraut werden kann."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Ferrous Systems: Ferrocene",
+      "url": "https://ferrocene.dev/"
+    },
+    {
+      "titel": "Ferrocene Language Specification",
+      "url": "https://spec.ferrocene.dev/"
+    },
+    {
+      "titel": "IEC: Functional safety and IEC 61508",
+      "url": "https://www.iec.ch/functional-safety"
+    }
+  ]
+}

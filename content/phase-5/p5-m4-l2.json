@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m4-l2",
+  "phase": 5,
+  "modul": "5.4 Performance verstehen",
+  "titel": "Profiling und Bounds Checks",
+  "lernziele": [
+    "Ein Rust-Programm mit perf, cargo flamegraph oder samply profilen",
+    "Einen Flamegraph lesen und Hotspots finden",
+    "Bounds Checks erkennen und mit Iteratoren oder Slices vermeiden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "wo-optimieren",
+      "frage": "Ein Kommandozeilen-Tool ist zu langsam. Du vermutest, dass das Parsen schuld ist. Was tust du zuerst?",
+      "optionen": [
+        "Das Programm im Release-Profil mit einem Profiler laufen lassen und nachsehen, wo die Zeit wirklich bleibt",
+        "Den Parser mit `unsafe` und `get_unchecked` beschleunigen",
+        "Alles mit Rayon parallelisieren",
+        "Einen Criterion-Benchmark für den Parser schreiben und optimieren, bis er doppelt so schnell ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Vermutungen über Hotspots liegen erstaunlich oft daneben. Ein **Profiler** misst, in welchen Funktionen das Programm seine Zeit verbringt. Erst wenn feststeht, dass der Parser 60 % der Zeit braucht, lohnt sich ein Benchmark für ihn. Braucht er nur 5 %, bringt selbst eine Verdopplung kaum etwas.",
+      "begruendungen": [
+        "Richtig.",
+        "Riskant und vielleicht an der falschen Stelle. Erst messen.",
+        "Parallelisieren hilft nur, wenn der Engpass überhaupt Rechenarbeit ist.",
+        "Ein Benchmark ist der zweite Schritt, nachdem der Profiler den Hotspot bestätigt hat."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sampling-Profiler",
+      "text": "Ein **Sampling-Profiler** unterbricht das Programm einige tausend Mal pro Sekunde und notiert den aktuellen Aufrufstapel. Funktionen, die oft auf dem Stapel stehen, verbrauchen viel Zeit. Das kostet kaum Laufzeit und funktioniert mit dem optimierten Release-Build.\n\nDamit Funktionsnamen und Zeilen sichtbar werden, braucht der Release-Build Debuginfo. Die Optimierung bleibt davon unberührt:",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "debug = true",
+          "",
+          "# oder ein eigenes Profil nur fürs Profiling:",
+          "[profile.profiling]",
+          "inherits = \"release\"",
+          "debug = true"
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "profiler-werkzeuge",
+      "frage": "Welches Werkzeug macht was?",
+      "paare": [
+        { "links": "`perf record -g ./prog`", "rechts": "Linux-Profiler, zeichnet Stichproben samt Aufrufstapel auf" },
+        { "links": "`cargo flamegraph`", "rechts": "Baut, profilt und erzeugt direkt eine `flamegraph.svg`" },
+        { "links": "`samply record ./prog`", "rechts": "Profiler, der das Ergebnis im Firefox Profiler im Browser zeigt" },
+        { "links": "`perf stat ./prog`", "rechts": "Zählt Hardware-Ereignisse wie Zyklen, Instruktionen und Cache-Misses" },
+        { "links": "`valgrind --tool=callgrind ./prog`", "rechts": "Zählt jede Instruktion exakt, dafür 20- bis 50-mal langsamer" }
+      ],
+      "erklaerung": "`cargo flamegraph` (Crate `flamegraph`) nutzt unter Linux `perf`. `samply` läuft unter Linux und macOS und braucht keine zusätzlichen Skripte. Auf Mikrocontrollern gibt es diese Werkzeuge nicht. Dort misst man mit Zykluszählern (DWT auf Cortex-M) oder per GPIO-Pin und Oszilloskop (Phase 6)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "flamegraph-lesen",
+      "frage": "Im Flamegraph ist `main` unten über die ganze Breite. Darüber liegt `verarbeite` mit 80 % Breite, darauf `parse_zeile` mit 70 % und ganz oben `alloc::raw_vec::RawVec::grow_one` mit 40 %. Was ist die wichtigste Erkenntnis?",
+      "optionen": [
+        "Fast die Hälfte der Zeit geht in das Wachsen von Vektoren beim Parsen. Vorher reservieren oder Puffer wiederverwenden",
+        "`main` ist der Hotspot, weil es am breitesten ist",
+        "Die Funktionen ganz oben wurden zuletzt aufgerufen",
+        "`parse_zeile` wird 70-mal aufgerufen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im Flamegraph ist die **Breite** der Anteil an der Gesamtzeit, die **Höhe** die Aufruftiefe. Die x-Achse ist alphabetisch sortiert, nicht zeitlich. Interessant sind breite Balken weit oben: Dort wird die Zeit tatsächlich verbraucht (*self time*). `main` ist nur breit, weil alles darüber von ihm aus aufgerufen wird.",
+      "begruendungen": [
+        "Richtig.",
+        "`main` enthält alles. Entscheidend ist, wo die Zeit selbst verbraucht wird.",
+        "Ein Flamegraph zeigt keine zeitliche Abfolge.",
+        "Breite ist Zeitanteil, keine Aufrufanzahl."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Bounds Checks",
+      "text": "Jeder Indexzugriff `v[i]` prüft, ob `i < v.len()` ist, und panict sonst. Das macht Rust speichersicher. Meist kostet es kaum etwas, weil die Sprungvorhersage richtig liegt. In engen Schleifen kann die Prüfung aber verhindern, dass LLVM vektorisiert (SIMD).\n\nOft kann der Optimierer die Prüfung weglassen, wenn er beweisen kann, dass der Index gültig ist. Iteratoren und Slices helfen ihm dabei. `get_unchecked` (mit `unsafe`) ist der letzte Ausweg und braucht einen gemessenen Grund sowie eine `// SAFETY:`-Begründung."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "bounds-check-varianten",
+      "frage": "In welcher Variante kann der Compiler **nicht** beweisen, dass alle Zugriffe gültig sind, und muss pro Durchlauf prüfen?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "// A",
+          "fn a(x: &[f32], y: &[f32]) -> f32 {",
+          "    x.iter().zip(y).map(|(a, b)| a * b).sum()",
+          "}",
+          "// B",
+          "fn b(x: &[f32], y: &[f32]) -> f32 {",
+          "    let mut s = 0.0;",
+          "    for i in 0..x.len() { s += x[i] * y[i]; }",
+          "    s",
+          "}",
+          "// C",
+          "fn c(x: &[f32], y: &[f32]) -> f32 {",
+          "    let y = &y[..x.len()];",
+          "    let mut s = 0.0;",
+          "    for i in 0..x.len() { s += x[i] * y[i]; }",
+          "    s",
+          "}"
+        ]
+      },
+      "optionen": [
+        "B",
+        "A",
+        "C",
+        "Alle drei"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In B ist `x[i]` durch die Schleifengrenze gesichert, `y[i]` aber nicht: `y` könnte kürzer sein. Also prüft der Compiler bei jedem Durchlauf. A enthält gar keinen Index. In C prüft `&y[..x.len()]` die Länge **einmal** vor der Schleife. Danach weiss LLVM, dass beide Slices gleich lang sind. Das ist ein gängiger Trick: eine Prüfung vorziehen, damit viele wegfallen.",
+      "begruendungen": [
+        "Richtig.",
+        "`zip` endet am kürzeren Slice, es gibt keinen Index zu prüfen.",
+        "Die vorgezogene Prüfung macht die Zugriffe in der Schleife beweisbar gültig.",
+        "A und C kommen ohne Prüfung pro Durchlauf aus."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-chunks",
+      "frage": "Ergänze: Ein Puffer mit Stereo-Samples (links, rechts, links, rechts …) soll ohne Indexrechnung gemischt werden.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn mono(stereo: &[i16]) -> Vec<i16> {",
+          "    stereo",
+          "        .{{?}}(2)",
+          "        .map(|p| ((p[0] as i32 + p[1] as i32) / 2) as i16)",
+          "        .{{?}}()",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["chunks_exact"] },
+        { "loesungen": ["collect"] }
+      ],
+      "auswahl": ["chunks_exact", "collect", "windows", "step_by", "sum"],
+      "erklaerung": "`chunks_exact(2)` liefert Teil-Slices mit garantiert genau zwei Elementen. Ein unvollständiger Rest bleibt über `remainder()` erreichbar. Der Optimierer kennt die Länge und kann die Prüfungen für `p[0]` und `p[1]` streichen. `windows(2)` würde überlappende Paare liefern (0–1, 1–2, …), das wäre hier falsch."
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "optimierungsablauf",
+      "frage": "Bringe einen sauberen Optimierungsablauf in die richtige Reihenfolge.",
+      "elemente": [
+        "Release-Build mit Debuginfo erstellen",
+        "Mit einem Profiler den Hotspot finden",
+        "Einen Benchmark für den Hotspot schreiben und Baseline speichern",
+        "Die Änderung umsetzen",
+        "Erneut messen und mit der Baseline vergleichen"
+      ],
+      "erklaerung": "Profiler und Benchmark ergänzen sich: Der Profiler sagt, **wo** es sich lohnt, der Benchmark sagt, **ob** die Änderung etwas gebracht hat. Am Schluss bestätigt ein neuer Profiler-Lauf, dass sich der Gewinn auch im ganzen Programm zeigt."
+    }
+  ],
+  "praxis": "Performance-Diskussionen im Team werden mit einem Flamegraph viel kürzer: Alle sehen, wo die Zeit hingeht. Typische Funde in Rust-Code sind nicht Bounds Checks, sondern unnötige Allokationen (`clone`, `to_string`, `format!` in Schleifen), Hashing mit dem sicheren, aber langsameren Standard-Hasher und zu viele kleine Systemaufrufe ohne `BufWriter`.",
+  "labor": {
+    "titel": "Den ersten Flamegraph erzeugen",
+    "anleitung": "Installiere `flamegraph` oder `samply`, aktiviere `debug = true` im Release-Profil und profile ein eigenes Programm, das etwas Rechenarbeit macht. Unter Linux muss perf eventuell erst erlaubt werden.",
+    "befehle": [
+      "cargo install flamegraph",
+      "cargo flamegraph --release",
+      "cargo install samply",
+      "samply record ./target/release/meinprogramm",
+      "perf stat ./target/release/meinprogramm"
+    ],
+    "beobachtung": "Ohne Debuginfo stehen im Flamegraph Adressen oder verstümmelte Namen. Mit `debug = true` siehst du Rust-Funktionsnamen inklusive generischer Instanzen. Meldet `perf` fehlende Rechte, hilft `sudo sysctl kernel.perf_event_paranoid=1`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Profiler",
+      "englisch": "profiler",
+      "erklaerung": "Werkzeug, das misst, wo ein Programm seine Laufzeit verbringt."
+    },
+    {
+      "begriff": "Flamegraph",
+      "englisch": "flame graph",
+      "erklaerung": "Darstellung gesammelter Aufrufstapel: Breite entspricht dem Zeitanteil, Höhe der Aufruftiefe."
+    },
+    {
+      "begriff": "Hotspot",
+      "englisch": "hotspot",
+      "erklaerung": "Codestelle, in der ein grosser Teil der Laufzeit verbraucht wird."
+    },
+    {
+      "begriff": "Bounds Check",
+      "englisch": "bounds check",
+      "erklaerung": "Laufzeitprüfung, ob ein Index innerhalb der Grenzen eines Arrays oder Slices liegt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Performance Book: Profiling",
+      "url": "https://nnethercote.github.io/perf-book/profiling.html"
+    },
+    {
+      "titel": "flamegraph-rs auf GitHub",
+      "url": "https://github.com/flamegraph-rs/flamegraph"
+    }
+  ]
+}

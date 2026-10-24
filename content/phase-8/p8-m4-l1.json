@@ -1,0 +1,177 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m4-l1",
+  "phase": 8,
+  "modul": "8.4 Jenkins Shared Libraries",
+  "titel": "Eine Shared Library für Rust-Pipelines",
+  "lernziele": [
+    "Den Zweck einer Jenkins Shared Library erklären",
+    "Die Ordner `vars`, `src` und `resources` unterscheiden",
+    "Einen gemeinsamen Schritt `rustPipeline()` versioniert einbinden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "30 Rust-Repositories haben fast identische Jenkinsfiles mit je 100 Zeilen. Jetzt soll überall `cargo deny check` dazukommen. Das sind 30 Pull Requests. Was ist die Lösung?",
+      "optionen": [
+        "Die gemeinsamen Schritte in eine **Shared Library** auslagern, die alle Jenkinsfiles laden. Die Änderung passiert dann an einer Stelle",
+        "Ein Skript, das alle 30 Jenkinsfiles per Suchen und Ersetzen ändert",
+        "Ein einziges Repository für alle 30 Projekte"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Shared Library ist ein eigenes Git-Repository mit Groovy-Code, den Jenkins in Pipelines laden kann. Was überall gleich ist (Toolchain, `fmt`, `clippy`, `nextest`, `deny`, JUnit, Timeouts), steht einmal dort. Die Jenkinsfiles schrumpfen auf wenige Zeilen.",
+      "begruendungen": [
+        "Richtig.",
+        "Funktioniert einmal, aber die Dateien laufen danach wieder auseinander.",
+        "Ein Monorepo kann sinnvoll sein, ist aber eine viel grössere Entscheidung als dieses Problem."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau",
+      "text": "- `vars/`: **globale Schritte**. Die Datei `vars/rustPipeline.groovy` mit einer Methode `call()` wird im Jenkinsfile als `rustPipeline()` aufrufbar.\n- `src/`: Groovy-Klassen in Paketen wie in Java, z. B. `src/ch/firma/Toolchain.groovy`, für grössere Logik.\n- `resources/`: Dateien wie Skripte oder Vorlagen, die ein Schritt mit `libraryResource('…')` als Text lädt, z. B. eine Standard-`deny.toml`.\n\nIn *Manage Jenkins → System → Global Trusted Pipeline Libraries* trägt ein Admin die Library mit Namen und Repository ein.",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "jenkins-rust-lib/",
+          "├── vars/",
+          "│   ├── rustPipeline.groovy",
+          "│   └── cargo.groovy",
+          "├── src/ch/firma/",
+          "│   └── Toolchain.groovy",
+          "└── resources/ch/firma/",
+          "    └── deny.toml"
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was gehört wohin?",
+      "paare": [
+        { "links": "`vars/cargo.groovy`", "rechts": "Schritt `cargo('clippy -- -D warnings')`, direkt im Jenkinsfile aufrufbar" },
+        { "links": "`src/ch/firma/Toolchain.groovy`", "rechts": "Klasse, die aus `rust-toolchain.toml` Version und Targets ausliest" },
+        { "links": "`resources/ch/firma/deny.toml`", "rechts": "Firmenweite Lizenz-Allowlist, die ein Schritt ins Projekt kopiert" },
+        { "links": "`@Library('rust-lib@v1.4.0') _`", "rechts": "Lädt die Library in einer festen Version ins Jenkinsfile" }
+      ],
+      "erklaerung": "`vars` ist die öffentliche Schnittstelle, `src` die Implementierung dahinter. Die meisten Teams kommen lange nur mit `vars` aus. `resources` ist praktisch für Dateien, die in allen Projekten gleich sein sollen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Jenkinsfile ruft `rustPipeline(targets: ['thumbv7em-none-eabihf'])` auf. Welcher Befehl läuft in der Stage `Clippy`?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "vars/rustPipeline.groovy",
+        "zeilen": [
+          "def call(Map cfg = [:]) {",
+          "    def features = cfg.get('features', '--all-features')",
+          "    def targets  = cfg.get('targets', [])",
+          "    pipeline {",
+          "        agent { label 'linux && rust' }",
+          "        options { timeout(time: 30, unit: 'MINUTES') }",
+          "        stages {",
+          "            stage('Format') { steps { sh 'cargo fmt --all --check' } }",
+          "            stage('Clippy') {",
+          "                steps { sh \"cargo clippy --all-targets ${features} --locked -- -D warnings\" }",
+          "            }",
+          "            stage('Test') { steps { sh 'cargo nextest run --profile ci --locked' } }",
+          "            stage('Cross') {",
+          "                when { expression { targets } }",
+          "                steps { script { targets.each { t -> sh \"cargo build --locked --target ${t}\" } } }",
+          "            }",
+          "        }",
+          "        post { always { junit allowEmptyResults: true, testResults: 'target/nextest/ci/junit.xml' } }",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`cargo clippy --all-targets --all-features --locked -- -D warnings`",
+        "`cargo clippy --all-targets ${features} --locked -- -D warnings` (wörtlich)",
+        "`cargo clippy --all-targets --locked -- -D warnings`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`features` wurde nicht übergeben, also gilt der Standardwert `--all-features`. In doppelten Anführungszeichen ersetzt Groovy `${features}`, bevor die Shell den Befehl sieht. Dieses Muster – eine Map mit Standardwerten – macht Schritte flexibel, ohne dass jedes Projekt alles angeben muss.",
+      "begruendungen": [
+        "Richtig.",
+        "In doppelten Anführungszeichen interpoliert Groovy. Nur in einfachen bliebe es wörtlich stehen.",
+        "Der Standardwert `--all-features` wird eingesetzt."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze das Jenkinsfile, das die Library `rust-lib` in Version `v1.4.0` lädt und die gemeinsame Pipeline verwendet.",
+      "code": {
+        "sprache": "groovy",
+        "datei": "Jenkinsfile",
+        "zeilen": [
+          "{{?}}('rust-lib{{?}}v1.4.0') _",
+          "",
+          "{{?}}(targets: ['thumbv7em-none-eabihf', 'thumbv6m-none-eabi'])"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["@Library"] },
+        { "loesungen": ["@"] },
+        { "loesungen": ["rustPipeline"] }
+      ],
+      "auswahl": ["@Library", "import", "@", ":", "rustPipeline", "call"],
+      "erklaerung": "Das `_` nach der Annotation ist Absicht: Groovy braucht ein Element, an dem die Annotation hängt, und `_` ist der übliche Platzhalter. Das ganze Jenkinsfile besteht jetzt aus zwei Zeilen; die Pipeline selbst lebt in der Library."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum lädt man `rust-lib@v1.4.0` statt einfach den aktuellen Stand des Hauptbranches der Library?",
+      "optionen": [
+        "Damit eine Änderung an der Library nicht unangekündigt alle Builds verändert und ein alter Stand reproduzierbar bleibt",
+        "Weil Jenkins ohne Version die Library nicht findet",
+        "Weil Tags schneller geladen werden als Branches"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne Version zieht jeder Build den aktuellen Stand der Library. Ein Fehler darin legt dann sofort alle 30 Projekte lahm, und ein Build von letzter Woche läuft heute mit einer anderen Pipeline. Das ist dieselbe Idee wie `Cargo.lock` und `rust-toolchain.toml`: Was in den Build eingeht, ist festgelegt. Wie man neue Versionen ausrollt, zeigt die nächste Lektion.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne Version nimmt Jenkins die konfigurierte Standardversion.",
+        "Die Ladezeit ist kein relevanter Unterschied."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Bausteine oder ganze Pipeline?",
+      "text": "Zwei Stile, oft kombiniert:\n\n- **Bausteine**: einzelne Schritte wie `cargo('test')` oder `rustToolchain()`. Jedes Projekt baut seine Pipeline selbst zusammen. Flexibel, aber die Jenkinsfiles werden wieder länger.\n- **Ganze Pipeline**: `rustPipeline()` liefert alles. Sehr einheitlich, aber jede Abweichung braucht einen neuen Parameter.\n\nBewährt hat sich: eine Standard-Pipeline für 80 % der Projekte, gebaut aus denselben Bausteinen, die Sonderfälle wie Firmware mit Hardware-Tests direkt verwenden. Wichtig bleibt: Die eigentliche Arbeit machen `cargo`-Befehle, die man auch lokal ausführen kann."
+    }
+  ],
+  "praxis": "Sobald mehr als eine Handvoll Rust-Repositories ähnliche Jenkinsfiles haben, lohnt sich eine Shared Library. Typische Inhalte: Toolchain aus `rust-toolchain.toml` installieren, fmt/clippy/nextest/deny mit firmenweiten Optionen, JUnit-Auswertung, Timeouts, Benachrichtigungen. Behandle die Library wie ein Produkt mit Versionen, Changelog und Tests, denn alle Teams hängen davon ab.",
+  "labor": {
+    "titel": "Eine Library anlegen",
+    "anleitung": "Lege ein Git-Repository mit `vars/cargo.groovy` an, das einen Schritt `cargo(String args)` mit `sh \"cargo ${args} --locked\"` definiert. Trage es in Jenkins als Global Trusted Pipeline Library ein und verwende es in einem Jenkinsfile.",
+    "befehle": [
+      "mkdir -p jenkins-rust-lib/vars && cd jenkins-rust-lib && git init",
+      "printf 'def call(String args) {\\n    sh \"cargo ${args} --locked\"\\n}\\n' > vars/cargo.groovy",
+      "git add . && git commit -m 'Schritt cargo' && git tag v1.0.0"
+    ],
+    "beobachtung": "Im Jenkinsfile genügen danach `@Library('rust-lib@v1.0.0') _` und `cargo('test')`. Im Build-Log zeigt Jenkins, welche Library in welcher Revision geladen wurde."
+  },
+  "begriffe": [
+    {
+      "begriff": "Shared Library",
+      "englisch": "shared library",
+      "erklaerung": "Versioniertes Git-Repository mit Pipeline-Code, den viele Jenkinsfiles gemeinsam verwenden."
+    },
+    {
+      "begriff": "Globaler Schritt",
+      "englisch": "global variable / custom step",
+      "erklaerung": "Datei in `vars/`, deren `call()`-Methode im Jenkinsfile wie ein eingebauter Schritt aufgerufen wird."
+    },
+    {
+      "begriff": "String-Interpolation",
+      "englisch": "string interpolation",
+      "erklaerung": "Groovy ersetzt `${…}` in doppelten Anführungszeichen durch den Wert des Ausdrucks."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Jenkins: Extending with Shared Libraries",
+      "url": "https://www.jenkins.io/doc/book/pipeline/shared-libraries/"
+    }
+  ]
+}

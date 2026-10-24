@@ -1,0 +1,173 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m4-l1",
+  "phase": 11,
+  "modul": "11.4 Kommunikation zwischen Prozessen",
+  "titel": "IPC-Mechanismen mit Rust",
+  "lernziele": [
+    "Die wichtigsten Mechanismen der Interprozesskommunikation unterscheiden",
+    "Für eine Aufgabe den passenden Mechanismus und das passende Crate wählen",
+    "Verstehen, wo Ownership an der Prozessgrenze endet"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Embedded-Linux-Gerät hat einen Sensordienst und eine Web-Oberfläche als getrennte Prozesse. Warum trennt man sie überhaupt, statt alles in einen Prozess zu packen?",
+      "optionen": [
+        "Isolation: Stürzt die Web-Oberfläche ab oder wird sie angegriffen, läuft der Sensordienst weiter und behält seine Rechte für sich",
+        "Weil Rust nur einen Thread pro Prozess erlaubt",
+        "Weil Prozesse schneller kommunizieren als Threads",
+        "Weil man sonst kein `async` verwenden kann"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jeder Prozess hat seinen eigenen Adressraum. Ein Panic, ein Speicherfehler in einer C-Bibliothek oder ein kompromittierter Webserver bleiben eingeschlossen. Der Preis: Daten müssen über **IPC** (*inter-process communication*) ausgetauscht und meist serialisiert werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust erlaubt beliebig viele Threads.",
+        "Threads teilen den Speicher und sind meist schneller.",
+        "`async` funktioniert in jedem Prozess."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne Mechanismus und typisches Rust-Werkzeug zu.",
+      "paare": [
+        { "links": "Unix Domain Socket", "rechts": "`std::os::unix::net::UnixStream`, lokaler Bytestrom mit Dateirechten" },
+        { "links": "Pipe", "rechts": "`std::process::Command` mit `Stdio::piped()` zu einem Kindprozess" },
+        { "links": "Shared Memory", "rechts": "`memmap2` oder `shared_memory`, gemeinsamer Speicherbereich ohne Kopie" },
+        { "links": "gRPC", "rechts": "`tonic`, Remote-Aufrufe mit Protobuf-Schnittstelle über HTTP/2" },
+        { "links": "D-Bus", "rechts": "`zbus`, Systembus unter Linux, z. B. für systemd und NetworkManager" }
+      ],
+      "erklaerung": "Sockets und Pipes sind einfach und robust, kopieren aber jede Nachricht durch den Kernel. Shared Memory ist am schnellsten, braucht aber eigene Synchronisation. gRPC und D-Bus bringen Schnittstellenbeschreibung, Typen und Werkzeuge mit."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was macht dieser Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::io::{BufRead, BufReader};",
+          "use std::os::unix::net::UnixListener;",
+          "",
+          "let listener = UnixListener::bind(\"/run/sensor.sock\")?;",
+          "let (strom, _) = listener.accept()?;",
+          "for zeile in BufReader::new(strom).lines() {",
+          "    println!(\"{}\", zeile?);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Ein lokaler Server: Er wartet auf einen Client am Socket und gibt jede empfangene Textzeile aus",
+        "Er öffnet eine TCP-Verbindung ins Internet",
+        "Er liest eine normale Textdatei `/run/sensor.sock`",
+        "Er sendet Daten an alle Prozesse im System"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Unix Domain Socket** sieht im Dateisystem wie eine Datei aus. Zugriffsrechte steuert man über die Dateirechte. Wichtig: Ein Bytestrom kennt keine Nachrichtengrenzen. Hier trennt der Zeilenumbruch die Nachrichten, bei Binärdaten braucht man ein **Framing**, z. B. ein Längenpräfix (nächste Lektion).",
+      "begruendungen": [
+        "Richtig.",
+        "`UnixListener` ist nur lokal erreichbar.",
+        "`bind` legt einen Socket an, keine normale Datei.",
+        "Nur Clients, die sich verbinden, sind beteiligt."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du schickst einen Puffer an einen Sende-Thread, der ihn in den Socket schreibt, und willst danach seine Länge ausgeben. Was sagt der Compiler?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0382]: borrow of moved value: `puffer`",
+          "  --> src/main.rs:22:20",
+          "   |",
+          "20 |     let puffer = vec![1u8, 2, 3];",
+          "   |         ------ move occurs because `puffer` has type `Vec<u8>`, which does not implement the `Copy` trait",
+          "21 |     tx.send(puffer).unwrap();",
+          "   |             ------ value moved here",
+          "22 |     println!(\"{}\", puffer.len());",
+          "   |                    ^^^^^^ value borrowed here after move"
+        ]
+      },
+      "optionen": [
+        "Mit `send` ist der Puffer an den Empfänger übergegangen. Der Sender kann ihn nicht mehr benutzen, also auch nicht versehentlich verändern, während er übertragen wird",
+        "Kanäle dürfen keine `Vec` übertragen",
+        "Der Fehler entsteht, weil `println!` keine Längen ausgeben kann",
+        "Rust kopiert den Puffer beim Senden, die Meldung ist nur eine Warnung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Innerhalb eines Prozesses ist das **Zero-Copy** mit Garantie: Nur der Zeiger wandert, und der Compiler stellt sicher, dass es danach genau einen Besitzer gibt. An der **Prozessgrenze** endet diese Garantie: Bei Shared Memory sieht der andere Prozess den Speicher, ohne dass rustc etwas davon weiss. Dort braucht es `unsafe`, klare Protokolle und Synchronisation.",
+      "begruendungen": [
+        "Richtig.",
+        "`Vec<u8>` ist `Send` und kann übertragen werden.",
+        "Das Problem ist der Zugriff nach dem Move.",
+        "Es ist ein Fehler, und es wird nichts kopiert."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Zwei Prozesse teilen einen Ringpuffer über Shared Memory. Welche Zeile ist der Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[repr(C)]",
+          "struct Kopf {",
+          "    schreib_index: AtomicU32,",
+          "    lese_index: AtomicU32,",
+          "}",
+          "",
+          "#[repr(C)]",
+          "struct Eintrag {",
+          "    zeit_ns: u64,",
+          "    name: String,",
+          "    wert: f32,",
+          "}"
+        ]
+      },
+      "fehlerZeile": 10,
+      "erklaerung": "`String` enthält einen Zeiger auf den Heap des schreibenden Prozesses. Im anderen Prozess zeigt diese Adresse ins Leere oder auf fremde Daten. In Shared Memory gehören nur Typen ohne Zeiger, z. B. `[u8; 32]` statt `String`. Crates wie `zerocopy` oder `bytemuck` prüfen mit Traits, dass ein Typ sicher als Bytes gelesen werden kann.",
+      "hinweis": "Welches Feld zeigt auf Speicher ausserhalb der Struktur?"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Kameradienst liefert 30 Bilder pro Sekunde mit je 6 MB an einen Bildverarbeitungsprozess auf demselben Rechner. Was passt am besten?",
+      "optionen": [
+        "Shared Memory für die Bilddaten, ein Socket oder Kanal nur für kleine Meldungen „Bild 42 liegt in Puffer 3“",
+        "JSON über gRPC für jedes Bild",
+        "D-Bus-Signale mit dem ganzen Bild",
+        "Jedes Bild als Datei schreiben und wieder einlesen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "180 MB/s durch Sockets zu kopieren kostet spürbar CPU. Mit Shared Memory gehen nur die Metadaten über den Socket. Diese Kombination nutzen auch Middlewares wie Zenoh und viele DDS-Implementierungen für lokale Teilnehmer (Modul 11.5).",
+      "begruendungen": [
+        "Richtig.",
+        "Bilder als JSON zu kodieren wäre extrem teuer.",
+        "D-Bus ist für Steuermeldungen gedacht, nicht für grosse Datenmengen.",
+        "Das Dateisystem ist ein unnötiger Umweg."
+      ]
+    }
+  ],
+  "praxis": "Auf Embedded Linux sind Unix Domain Sockets das Arbeitspferd für lokale Dienste. `zbus` brauchst du, sobald du mit systemd, BlueZ oder NetworkManager sprichst. `tonic` lohnt sich, wenn Dienste auch über das Netz und in anderen Sprachen erreichbar sein sollen. Dokumentiere jede Prozessschnittstelle wie eine API: Nachrichtenformat, Framing, Versionierung, Fehlerfälle.",
+  "labor": {
+    "titel": "Einen Unix Domain Socket ausprobieren",
+    "anleitung": "Baue den Server aus der Lektion mit einem Pfad in deinem Home-Verzeichnis und sende ihm mit `socat` Textzeilen.",
+    "befehle": [
+      "cargo new uds && cd uds",
+      "cargo run &",
+      "echo \"temp 21.5\" | socat - UNIX-CONNECT:$HOME/sensor.sock",
+      "ls -l $HOME/sensor.sock"
+    ],
+    "beobachtung": "`ls -l` zeigt den Typ `s` für Socket. Ein zweiter `bind` auf denselben Pfad scheitert mit „Address already in use“, solange die Datei existiert. Darum löschen Dienste den Socket beim Start oder nutzen systemd-Socket-Aktivierung."
+  },
+  "begriffe": [
+    { "begriff": "IPC", "englisch": "inter-process communication", "erklaerung": "Datenaustausch zwischen getrennten Prozessen." },
+    { "begriff": "Unix Domain Socket", "englisch": "Unix domain socket", "erklaerung": "Lokaler Socket mit Pfad im Dateisystem, schneller als TCP über localhost." },
+    { "begriff": "Shared Memory", "englisch": "shared memory", "erklaerung": "Speicherbereich, der in mehrere Prozesse eingeblendet ist. Schnell, aber ohne Schutz durch den Borrow-Checker." },
+    { "begriff": "Framing", "englisch": "framing", "erklaerung": "Kennzeichnung von Nachrichtengrenzen in einem Bytestrom, z. B. durch Längenpräfix." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::os::unix::net", "url": "https://doc.rust-lang.org/std/os/unix/net/index.html" },
+    { "titel": "zbus", "url": "https://docs.rs/zbus/latest/zbus/" },
+    { "titel": "tonic", "url": "https://docs.rs/tonic/latest/tonic/" }
+  ]
+}

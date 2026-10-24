@@ -1,0 +1,163 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m4-l1",
+  "phase": 13,
+  "modul": "13.4 Kommunikation und Mentoring",
+  "titel": "Rust überzeugend begründen",
+  "lernziele": [
+    "Den Einsatz von Rust gegenüber Management und Team mit Kosten, Nutzen und Belegen begründen",
+    "Die Botschaft auf das jeweilige Publikum zuschneiden",
+    "Entscheidungen in kurzen Dokumenten statt in endlosen Meetings vorbereiten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du willst die Geschäftsleitung überzeugen, die nächste Firmware-Komponente in Rust zu schreiben. Welches Argument wirkt am stärksten?",
+      "optionen": [
+        "„In den letzten zwei Jahren gingen 60 % unserer Sicherheitsupdates auf Speicherfehler zurück. Rust verhindert diese Fehlerklasse im sicheren Code. Ein Pilot mit dem Protokoll-Parser kostet etwa drei Monate, inklusive Einarbeitung.“",
+        "„Rust ist die beliebteste Sprache in den Stack-Overflow-Umfragen.“",
+        "„Rust hat ein modernes Typsystem mit Traits und Pattern Matching.“",
+        "„Google und Microsoft setzen auch auf Rust.“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Entscheider wägen Kosten, Nutzen und Risiko ab. Das stärkste Argument verbindet ein **eigenes**, messbares Problem mit dem konkreten Nutzen und nennt die Kosten ehrlich mit. Berichte anderer Firmen sind gute Belege, aber nur als Ergänzung zu den eigenen Zahlen. Sprachmerkmale überzeugen Entwickler, nicht die Geschäftsleitung.",
+      "begruendungen": [
+        "Richtig.",
+        "Beliebtheit sagt nichts über Nutzen für dieses Produkt.",
+        "Für Nicht-Techniker ist das nicht greifbar.",
+        "Ein Beleg, aber ohne Bezug zum eigenen Problem und ohne Kosten."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Für wen schreibe ich?",
+      "text": "Dieselbe Entscheidung braucht für jedes Publikum eine andere Begründung:",
+      "tabelle": {
+        "kopf": ["Publikum", "Will wissen", "Belege"],
+        "zeilen": [
+          ["Geschäftsleitung", "Kosten, Risiko, Nutzen für Kunden", "Fehlerstatistik, Pilotergebnis, Aufwand"],
+          ["Projektleitung", "Termine, Abhängigkeiten, Lernkurve", "Bandbreiten, Meilensteine, Risikoliste"],
+          ["Entwicklungsteam", "Wie arbeite ich damit?", "Codebeispiele, Werkzeuge, Schulungsplan"],
+          ["Sicherheit/Qualität", "Zertifizierbarkeit, Nachweise", "Qualifizierte Toolchain, `unsafe`-Richtlinie"]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Antwort passt zu welcher Sorge?",
+      "paare": [
+        { "links": "Geschäftsleitung: „Was bringt uns das?“", "rechts": "Weniger Feldausfälle und Sicherheitsupdates durch Speicherfehler, belegt mit eigenen Zahlen" },
+        { "links": "Projektleitung: „Verzögert das unser Release?“", "rechts": "Pilot an einer nicht kritischen Komponente, Lernkurve in der Schätzung eingeplant" },
+        { "links": "Erfahrener C-Entwickler: „Ich verliere meine Expertise.“", "rechts": "Sein Wissen über Hardware und Speicher bleibt zentral, Rust macht es nur prüfbar" },
+        { "links": "Qualitätssicherung: „Ist das zertifizierbar?“", "rechts": "Qualifizierte Rust-Compiler gibt es, plus Regeln für `unsafe` und Reviews" }
+      ],
+      "erklaerung": "Widerstand hat fast immer einen berechtigten Kern. Wer die Sorge ernst nimmt und gezielt beantwortet, gewinnt Verbündete. Wer sie als Rückständigkeit abtut, gewinnt eine Debatte und verliert das Projekt. Für qualifizierte Toolchains gibt es heute kommerzielle Angebote wie Ferrocene."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Kollege sagt in der Teamrunde: „Rust ist nur ein Hype, C funktioniert seit 40 Jahren.“ Wie reagierst du am besten?",
+      "optionen": [
+        "„Was wäre für dich ein überzeugender Beleg? Lass uns den Parser-Pilot so aufsetzen, dass wir genau das messen.“",
+        "„Wer heute noch C verteidigt, hat die Entwicklung verschlafen.“",
+        "Das Thema meiden, bis die Entscheidung von oben kommt",
+        "Eine Liste aller CVEs durch Speicherfehler in C-Projekten weltweit verschicken"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Frage nach dem Beleg macht aus einem Glaubensstreit eine überprüfbare Frage und bezieht den Skeptiker ein. Oft wird gerade er zum wertvollsten Prüfer des Pilots. Abwertung schafft Lager, Schweigen schafft Gerüchte, und eine Flut fremder Zahlen wirkt belehrend.",
+      "begruendungen": [
+        "Richtig.",
+        "Abwertung macht aus einer fachlichen Frage einen Konflikt.",
+        "Unausgesprochene Bedenken wirken weiter, nur unsichtbar.",
+        "Fremde Statistik ohne Bezug zum eigenen Code überzeugt selten."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Dokumente statt Meetings",
+      "text": "Für Entscheidungen mit Tragweite ist ein kurzes **Design-Dokument** (design doc) oft besser als eine Reihe von Meetings. Alle lesen in ihrem Tempo, kommentieren schriftlich, und die Gründe bleiben erhalten. Bewährt hat sich:\n\n- **Kontext**: Welches Problem lösen wir, mit welchen Zahlen?\n- **Ziele und Nicht-Ziele**: Was soll erreicht werden, was ausdrücklich nicht?\n- **Vorschlag**: z. B. Pilot in Rust, Umfang, Dauer, Kosten\n- **Alternativen**: auch „weiter in C mit mehr statischer Analyse“\n- **Risiken und offene Fragen**\n\nDas Meeting danach dient nur noch der Entscheidung. Rust selbst arbeitet übrigens so: Grössere Änderungen laufen als öffentliches RFC-Dokument."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe den Aufbau einer kurzen Entscheidungsvorlage für die Geschäftsleitung in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Empfehlung in einem Satz",
+        "Das Problem mit eigenen Zahlen",
+        "Vorschlag mit Aufwand und Zeitrahmen",
+        "Betrachtete Alternativen",
+        "Risiken und wie wir sie begrenzen"
+      ],
+      "erklaerung": "Für Entscheider gehört das Ergebnis an den Anfang (*Bottom Line Up Front*). Wer nur den ersten Absatz liest, weiss trotzdem, worum es geht und was empfohlen wird. Der Rest liefert die Begründung für alle, die nachprüfen wollen."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Begriffe.",
+      "text": "Die Empfehlung gehört an den Anfang, das Prinzip heisst {{?}}. Im Design-Dokument legt der Abschnitt {{?}} fest, was ausdrücklich nicht erreicht werden soll.",
+      "luecken": [
+        { "loesungen": ["Bottom Line Up Front"] },
+        { "loesungen": ["Nicht-Ziele"] }
+      ],
+      "auswahl": ["Bottom Line Up Front", "Nicht-Ziele", "Strangler Fig", "Alternativen", "Last Responsible Moment"],
+      "erklaerung": "Nicht-Ziele verhindern, dass ein Vorschlag mit Erwartungen überfrachtet wird. Für einen Rust-Pilot etwa: „Nicht-Ziel: bestehenden C-Code umschreiben“ oder „Nicht-Ziel: Zertifizierung in dieser Phase“. Das beruhigt Skeptiker und hält den Pilot klein genug, um ihn zu schaffen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Der Rust-Pilot ist abgeschlossen. Was gehört in den Abschlussbericht?",
+      "optionen": [
+        "Gemessene Ergebnisse, auch die unbequemen: Aufwand gegenüber Schätzung, gefundene Fehler, Lernkurve, offene Probleme",
+        "Nur die Erfolge, damit das Projekt fortgesetzt wird",
+        "Ein Vergleich der Sprachmerkmale von Rust und C"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein ehrlicher Bericht ist die Grundlage für die nächste Entscheidung und für deine Glaubwürdigkeit. Wenn der Pilot länger gedauert hat als gedacht, ist genau das eine wertvolle Zahl für die nächste Schätzung. Wer nur Erfolge meldet, verliert beim ersten Rückschlag das Vertrauen.",
+      "begruendungen": [
+        "Richtig.",
+        "Geschönte Berichte fliegen spätestens im nächsten Projekt auf.",
+        "Das war nicht die Frage des Pilots. Gefragt ist, was er im eigenen Kontext gebracht hat."
+      ]
+    }
+  ],
+  "praxis": "Ob Rust in einer Firma Fuss fasst, entscheidet sich selten an der Technik, sondern an der Kommunikation. Als Senior übersetzt du Sprachvorteile in die Begriffe deines Publikums, belegst sie mit eigenen Zahlen, nennst die Kosten offen und nimmst Bedenken ernst. Grössere Schritte bereitest du schriftlich vor, und nach einem Pilot berichtest du ehrlich, auch über das, was nicht geklappt hat.",
+  "labor": {
+    "titel": "Eigene Zahlen sammeln",
+    "anleitung": "Suche in eurem Git-Verlauf nach Fehlerbehebungen, die mit Speicherfehlern zu tun haben, und setze sie ins Verhältnis zu allen Fehlerbehebungen. Das ist die erste Zahl für eine Entscheidungsvorlage.",
+    "befehle": [
+      "git log --since=2.years -i --grep='fix\\|bug\\|fehler' --oneline | wc -l",
+      "git log --since=2.years -i --grep='overflow\\|null\\|use.after\\|double.free\\|out.of.bounds\\|ueberlauf' --oneline | wc -l",
+      "git log --since=2.years -i --grep='overflow\\|null\\|use.after' --oneline | head -20"
+    ],
+    "beobachtung": "Die Suche nach Stichworten ist grob. Lies die Treffer stichprobenartig durch und korrigiere die Zahl. Auch eine vorsichtige Schätzung wie „mindestens ein Drittel“ ist überzeugender als jede Statistik aus fremden Projekten."
+  },
+  "begriffe": [
+    {
+      "begriff": "Design-Dokument",
+      "englisch": "design doc",
+      "erklaerung": "Kurzes Dokument, das Problem, Vorschlag, Alternativen und Risiken vor einer Entscheidung festhält."
+    },
+    {
+      "begriff": "Nicht-Ziele",
+      "englisch": "non-goals",
+      "erklaerung": "Ausdrücklich ausgeschlossene Ziele, die den Umfang eines Vorhabens begrenzen."
+    },
+    {
+      "begriff": "Bottom Line Up Front",
+      "englisch": "BLUF",
+      "erklaerung": "Das Ergebnis oder die Empfehlung an den Anfang einer Nachricht stellen."
+    },
+    {
+      "begriff": "RFC",
+      "englisch": "request for comments",
+      "erklaerung": "Öffentliches Dokument, mit dem grössere Änderungen an Rust vorgeschlagen und diskutiert werden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust RFC Book",
+      "url": "https://rust-lang.github.io/rfcs/"
+    },
+    {
+      "titel": "Industrial Empathy: Design Docs at Google",
+      "url": "https://www.industrialempathy.com/posts/design-docs-at-google/"
+    }
+  ]
+}

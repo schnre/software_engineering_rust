@@ -1,0 +1,160 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m3-l1",
+  "phase": 8,
+  "modul": "8.3 Jenkins",
+  "titel": "Controller, Agents und das Jenkinsfile",
+  "lernziele": [
+    "Die Rollen von Controller, Agent und Executor unterscheiden",
+    "Builds über Labels auf Agents mit passender Rust-Toolchain lenken",
+    "Erklären, warum die Pipeline als Jenkinsfile im Repository liegt"
+  ],
+  "dauerMinuten": 5,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Firma baut einen Rust-Server für Linux, ein Windows-Werkzeug und Firmware für einen STM32, die auf einem Prüfstand mit echter Hardware getestet wird. Wo laufen in Jenkins die Builds?",
+      "optionen": [
+        "Auf Agents: Linux-Maschinen, ein Windows-Rechner und ein Rechner mit angeschlossenem Prüfstand. Der Controller verteilt nur die Arbeit",
+        "Alle auf dem Jenkins-Controller, der dafür alle Toolchains installiert hat",
+        "Auf den Rechnern der Entwickler, Jenkins sammelt nur die Ergebnisse ein"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jenkins trennt **Koordination** und **Ausführung**. Der Controller plant Builds, speichert Ergebnisse und zeigt die Oberfläche. Gebaut wird auf **Agents**, die genau die Umgebung mitbringen, die ein Build braucht: das Windows-MSVC-Target, die ARM-Targets von rustup oder einen USB-Debugger am Prüfstand.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Rechner kann weder Windows-nativ bauen noch an jedem Prüfstand hängen. Ausserdem gefährdet das den Controller.",
+        "Builds auf Entwicklerrechnern sind nicht reproduzierbar."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Architektur von Jenkins",
+      "text": "- **Controller** (früher *Master*): Weboberfläche, Konfiguration, Plugins, Zeitplanung, Build-Historie\n- **Agent** (früher *Slave* oder *Node*): Maschine oder Container, der Builds ausführt\n- **Executor**: ein Ausführungsplatz auf einem Agent. Ein Agent mit 4 Executors kann 4 Builds parallel ausführen\n- **Label**: Eigenschaft eines Agents, z. B. `linux`, `rust`, `hil-stm32`\n\nEine Pipeline fordert per Label einen passenden Agent an, Jenkins sucht einen freien Executor.",
+      "diagramm": {
+        "knoten": ["Controller", "Warteschlange", "Agent mit passendem Label", "Executor", "Ergebnis zurück an Controller"],
+        "beschriftung": "Ablauf eines Builds"
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Begriffe zu.",
+      "paare": [
+        { "links": "Controller", "rechts": "Plant Builds, speichert Ergebnisse, zeigt die Oberfläche" },
+        { "links": "Agent", "rechts": "Maschine oder Container, auf dem `cargo build` tatsächlich läuft" },
+        { "links": "Executor", "rechts": "Ein Platz für einen gleichzeitig laufenden Build" },
+        { "links": "Label", "rechts": "Eigenschaft wie `rust-arm`, nach der Agents ausgewählt werden" }
+      ],
+      "erklaerung": "Labels sind die Schnittstelle zwischen Pipeline und Infrastruktur. Die Pipeline sagt, *was* sie braucht, nicht *welcher* Rechner es ist. Fällt ein Agent aus, übernimmt ein anderer mit demselben Label."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum setzt man auf dem Controller die Anzahl Executors auf 0?",
+      "optionen": [
+        "Builds führen beliebigen Code aus, etwa `build.rs` und Proc-Macros aller Abhängigkeiten. Auf dem Controller hätte dieser Code Zugriff auf alle Zugangsdaten und Konfigurationen",
+        "Der Controller kann technisch keine Builds ausführen",
+        "Damit spart man Lizenzkosten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jedes `build.rs` und jedes Proc-Macro einer Abhängigkeit ist Code, der beim Kompilieren läuft. Auf dem Controller könnte dieser Code die gespeicherten Credentials lesen oder Jenkins selbst manipulieren. Ausserdem blockiert ein speicherhungriger Rust-Build sonst die Oberfläche für alle. Jenkins rät deshalb ausdrücklich davon ab.",
+      "begruendungen": [
+        "Richtig.",
+        "Technisch geht es, es ist nur gefährlich.",
+        "Jenkins ist Open Source, es gibt keine Lizenzkosten pro Executor."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wo läuft diese Pipeline?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "Jenkinsfile",
+        "zeilen": [
+          "pipeline {",
+          "    agent { label 'linux && rust' }",
+          "    stages {",
+          "        stage('Test') {",
+          "            steps { sh 'cargo test --locked' }",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Auf einem beliebigen freien Agent, der sowohl das Label `linux` als auch `rust` hat",
+        "Auf einem Agent mit dem Label `linux` oder `rust`",
+        "Auf dem Controller, weil kein Rechnername angegeben ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Label-Ausdrücke kennen `&&`, `||` und `!`. Mit `&&` müssen beide Labels zutreffen. Ein Agent, der nur `linux` hat, aber keine Rust-Toolchain, wird nicht gewählt. `--locked` sorgt dafür, dass genau die Versionen aus `Cargo.lock` gebaut werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre `linux || rust`.",
+        "Mit 0 Executors auf dem Controller läuft dort nichts."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Pipeline as Code",
+      "text": "Früher klickte man Jobs in der Oberfläche zusammen (*Freestyle-Jobs*). Heute liegt die Pipeline als **Jenkinsfile** im Repository, neben `Cargo.toml`. Das bringt:\n\n- Änderungen an der Pipeline laufen durch dasselbe Review wie Code\n- die Pipeline ist versioniert: Ein alter Release-Branch baut mit seiner alten Pipeline\n- eine **Multibranch Pipeline** erkennt jeden Branch und Pull Request mit Jenkinsfile automatisch und baut ihn"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "In einer Multibranch Pipeline pusht jemand einen neuen Branch `feature/can-treiber`, der ein Jenkinsfile enthält. Was passiert?",
+      "optionen": [
+        "Jenkins erkennt den Branch beim nächsten Scan oder per Webhook, legt einen Job dafür an und baut ihn mit dem Jenkinsfile dieses Branches",
+        "Nichts, bis ein Admin den Branch in der Oberfläche einträgt",
+        "Jenkins baut den Branch mit dem Jenkinsfile von `main`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jeder Branch bringt seine eigene Pipeline mit. So kann ein Feature-Branch, der eine neue Stage für den Cross-Build braucht, sie gleich mitliefern und im Pull Request zeigen, dass sie funktioniert. Wird der Branch gelöscht, räumt Jenkins den Job wieder auf.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau diese Handarbeit nimmt die Multibranch Pipeline ab.",
+        "Jeder Branch verwendet sein eigenes Jenkinsfile."
+      ]
+    }
+  ],
+  "praxis": "Wenn du eine Jenkins-Instanz übernimmst: Hat der Controller 0 Executors? Sind die Agents über Labels beschrieben, die sagen, was sie können (`rust`, `arm`, `hil-stm32`), statt über Rechnernamen? Liegen alle Pipelines als Jenkinsfile im Repository, oder gibt es noch Freestyle-Jobs, deren Konfiguration nur in der Oberfläche existiert?",
+  "labor": {
+    "titel": "Jenkins lokal starten",
+    "anleitung": "Starte Jenkins in einem Container, richte es im Browser ein und lege eine Multibranch Pipeline für ein eigenes Rust-Repository mit Jenkinsfile an.",
+    "befehle": [
+      "docker run -d -p 8080:8080 -v jenkins_home:/var/jenkins_home --name jenkins jenkins/jenkins:lts",
+      "docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+    ],
+    "beobachtung": "Unter *Manage Jenkins → Nodes* siehst du den eingebauten Knoten mit seinen Executors. Das offizielle Image enthält keine Rust-Toolchain. Ein `sh 'cargo test'` scheitert dort mit „cargo: not found“. Genau dafür gibt es Agents mit passender Umgebung (Thema der dritten Jenkins-Lektion)."
+  },
+  "begriffe": [
+    {
+      "begriff": "Controller",
+      "englisch": "controller",
+      "erklaerung": "Zentraler Jenkins-Server mit Oberfläche, Konfiguration und Zeitplanung."
+    },
+    {
+      "begriff": "Agent",
+      "englisch": "agent",
+      "erklaerung": "Maschine oder Container, auf dem Jenkins Builds ausführt."
+    },
+    {
+      "begriff": "Executor",
+      "englisch": "executor",
+      "erklaerung": "Ausführungsplatz auf einem Agent für einen gleichzeitig laufenden Build."
+    },
+    {
+      "begriff": "Multibranch Pipeline",
+      "englisch": "multibranch pipeline",
+      "erklaerung": "Jenkins-Job, der für jeden Branch mit Jenkinsfile automatisch eine eigene Pipeline anlegt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Jenkins: Managing Nodes",
+      "url": "https://www.jenkins.io/doc/book/managing/nodes/"
+    },
+    {
+      "titel": "Jenkins: Branches and Pull Requests",
+      "url": "https://www.jenkins.io/doc/book/pipeline/multibranch/"
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m5-l1",
+  "phase": 7,
+  "modul": "7.5 Embedded Linux",
+  "titel": "Rust unter Embedded Linux",
+  "lernziele": [
+    "Ein Rust-Programm für aarch64 oder armv7 cross-kompilieren und gnu von musl unterscheiden",
+    "Rust-Anwendungen mit Yocto oder Buildroot ins Image bringen und als systemd-Dienst starten",
+    "Über `/dev` mit `linux-embedded-hal` und `gpio-cdev` auf Hardware zugreifen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du willst für ein Raspberry-Pi-artiges Board bauen. Was bedeutet diese Ausgabe?",
+      "terminal": {
+        "befehl": "cargo build --target aarch64-unknown-linux-gnu",
+        "ausgabe": [
+          "   Compiling sensord v0.1.0 (/home/user/sensord)",
+          "error[E0463]: can't find crate for `std`",
+          "  |",
+          "  = note: the `aarch64-unknown-linux-gnu` target may not be installed",
+          "  = help: consider downloading the target with `rustup target add aarch64-unknown-linux-gnu`",
+          "",
+          "For more information about this error, try `rustc --explain E0463`."
+        ]
+      },
+      "optionen": [
+        "Die vorkompilierte Standardbibliothek für das Zielsystem fehlt. `rustup target add aarch64-unknown-linux-gnu` installiert sie",
+        "Rust unterstützt aarch64 nicht",
+        "Im Programm fehlt `#![no_std]`",
+        "Der Cross-Linker ist falsch konfiguriert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc selbst ist immer ein Cross-Compiler. Pro Target braucht er aber die passend übersetzte `std`. Nach `rustup target add` kommt meist der nächste Fehler: Der Linker des Host-Systems kann keine aarch64-Binaries linken. Dann trägst du in `.cargo/config.toml` unter `[target.aarch64-unknown-linux-gnu]` einen `linker` wie `aarch64-linux-gnu-gcc` ein oder nimmst ein Werkzeug wie `cross` (Docker) oder `cargo zigbuild`.",
+      "begruendungen": [
+        "Richtig.",
+        "aarch64 Linux ist eine Tier-1-Plattform.",
+        "Unter Linux steht `std` zur Verfügung, `no_std` ist hier nicht nötig.",
+        "Bis zum Linken kommt der Build gar nicht, `std` fehlt schon beim Kompilieren."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "gnu oder musl? Ordne zu.",
+      "paare": [
+        { "links": "`aarch64-unknown-linux-gnu`", "rechts": "Dynamisch gegen die glibc des Zielsystems gelinkt, Version muss passen" },
+        { "links": "`aarch64-unknown-linux-musl`", "rechts": "Standardmässig statisch gelinkt, ein einziges Binary ohne Abhängigkeiten" },
+        { "links": "`armv7-unknown-linux-gnueabihf`", "rechts": "32-Bit-ARM mit Hardware-Gleitkomma, z. B. ältere i.MX6 oder Cortex-A7" },
+        { "links": "`thumbv7em-none-eabihf`", "rechts": "Kein Betriebssystem, nur `core`, für Mikrocontroller" }
+      ],
+      "erklaerung": "Ein typischer Fehler mit gnu-Targets: Auf dem Entwicklungsrechner gebaut, auf dem Gerät „version `GLIBC_2.xx' not found“. musl umgeht das, ist aber bei Speicherallokation und manchen Funktionen langsamer. In Yocto- oder Buildroot-Images passt die glibc automatisch, weil dort mit der Toolchain des Images gebaut wird."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die `.cargo/config.toml` für das Cross-Kompilieren mit der GNU-Toolchain.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[{{?}}.aarch64-unknown-linux-gnu]",
+          "{{?}} = \"aarch64-linux-gnu-gcc\""
+        ]
+      },
+      "luecken": [{ "loesungen": ["target"] }, { "loesungen": ["linker"] }],
+      "auswahl": ["target", "linker", "build", "runner", "profile"],
+      "erklaerung": "rustc erzeugt die Object-Files selbst und ruft für den letzten Schritt den angegebenen Linker auf. Der Cross-GCC kennt die Systembibliotheken (`libc`, `libgcc_s`) für das Zielsystem. Unter Debian/Ubuntu kommt er mit dem Paket `gcc-aarch64-linux-gnu`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ins Image: Yocto und Buildroot",
+      "text": "Produkte bauen kein Binary von Hand, sondern ein ganzes Linux-Image.\n\n- **Yocto**: Seit Yocto 4.x (Kirkstone und neuer) ist Rust-Unterstützung direkt in `openembedded-core` enthalten (`inherit cargo`). Früher übernahm das die Schicht **meta-rust**. Mit **cargo-bitbake** erzeugst du aus einer `Cargo.toml` ein Rezept, das alle Crates als feste Quellen auflistet, damit der Build ohne Netz reproduzierbar ist.\n- **Buildroot**: hat einen `cargo-package`-Infrastrukturtyp, ein Paket gibt nur Quelle und Version an.\n\nIn beiden Fällen baut die Toolchain des Images, glibc und ABI passen also. Gestartet wird die Anwendung meist als **systemd-Dienst**."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese systemd-Unit startet den Rust-Dienst `sensord`. Nach einer Panik bleibt er tot. Welche Zeile ist schuld?",
+      "code": {
+        "sprache": "text",
+        "datei": "/etc/systemd/system/sensord.service",
+        "zeilen": [
+          "[Unit]",
+          "Description=Sensor-Dienst",
+          "After=network.target",
+          "",
+          "[Service]",
+          "ExecStart=/usr/bin/sensord",
+          "Restart=no",
+          "User=sensord",
+          "SupplementaryGroups=gpio i2c",
+          "",
+          "[Install]",
+          "WantedBy=multi-user.target"
+        ]
+      },
+      "fehlerZeile": 7,
+      "erklaerung": "Mit `Restart=no` startet systemd den Dienst nach einem Absturz nicht neu. Üblich ist `Restart=on-failure` mit `RestartSec=2`. Eine Panik beendet den Prozess mit einem Fehlercode (bei `panic = \"abort\"` mit SIGABRT), und systemd erkennt das als Fehlschlag. Für zusätzliche Sicherheit kann der Dienst `WatchdogSec=` nutzen und sich regelmässig über `sd_notify` melden. Gut gelöst ist dagegen Zeile 8/9: eigener Benutzer, nur die nötigen Gruppen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was macht dieser Code auf dem Zielsystem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use gpio_cdev::{Chip, LineRequestFlags};",
+          "use linux_embedded_hal::CdevPin;",
+          "use embedded_hal::digital::OutputPin;",
+          "",
+          "let mut chip = Chip::new(\"/dev/gpiochip0\")?;",
+          "let handle = chip",
+          "    .get_line(17)?",
+          "    .request(LineRequestFlags::OUTPUT, 0, \"sensord\")?;",
+          "let mut led = CdevPin::new(handle)?;",
+          "led.set_high()?;"
+        ]
+      },
+      "optionen": [
+        "Sie öffnet den GPIO-Chip über die Character-Device-Schnittstelle, fordert Leitung 17 als Ausgang an und schaltet sie über das `embedded-hal`-Trait auf High",
+        "Sie schreibt direkt in das GPIO-Register des SoC über `/dev/mem`",
+        "Sie nutzt die veraltete Schnittstelle `/sys/class/gpio`",
+        "Sie lädt einen Kernel-Treiber für Pin 17"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Character-Device-Schnittstelle (`/dev/gpiochipN`) ist der heutige Weg, sysfs-GPIO ist veraltet. Der Kernel weiss, welcher Prozess welche Leitung belegt (Name „sensord“). `CdevPin` implementiert `OutputPin` aus `embedded-hal`. Damit läuft ein generischer Treiber aus Lektion 7.4.2 unverändert unter Linux. Für I²C gibt es analog `I2cdev::new(\"/dev/i2c-1\")`. Welche Leitungen und Busse es gibt, legt der **Device Tree** fest.",
+      "begruendungen": [
+        "Richtig.",
+        "Direkter Registerzugriff über `/dev/mem` umgeht den Kernel und ist hier nicht im Spiel.",
+        "Das wäre `SysfsPin`, hier wird `gpio-cdev` benutzt.",
+        "Treiber werden vom Kernel über den Device Tree geladen, nicht aus der Anwendung."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Auf dem Board existiert `/dev/i2c-1` nicht, obwohl der SoC einen I²C-Controller hat. Wo liegt die Ursache am wahrscheinlichsten?",
+      "optionen": [
+        "Im Device Tree ist der Controller deaktiviert (`status = \"disabled\"`), oder das Modul `i2c-dev` ist nicht geladen",
+        "In der `Cargo.toml` fehlt das Feature `i2c` von `linux-embedded-hal`",
+        "Rust kann unter Linux kein I²C",
+        "Das Programm muss als root laufen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der **Device Tree** beschreibt dem Kernel die Hardware: welche Controller es gibt, an welchen Pins sie hängen, welche Geräte angeschlossen sind. Ist ein Knoten deaktiviert, legt der Kernel kein Gerät an. Auf vielen Boards aktiviert man ihn per Overlay. Das Gerät in `/dev` entsteht unabhängig von deinem Programm. Rechte regelt man über Gruppen (`i2c`) statt über root.",
+      "begruendungen": [
+        "Richtig.",
+        "Cargo-Features ändern nichts daran, welche Gerätedateien der Kernel anlegt.",
+        "`linux-embedded-hal` und `i2cdev` unterstützen I²C seit Jahren.",
+        "Fehlende Rechte führen zu „Permission denied“, nicht zu einer fehlenden Datei."
+      ]
+    }
+  ],
+  "praxis": "In vielen Produkten laufen Mikrocontroller und Linux nebeneinander: Der MCU regelt in Echtzeit, das Linux-System kümmert sich um Netzwerk, Updates und Oberfläche. Rust passt auf beide Seiten. Mit `embedded-hal`-Treibern lässt sich derselbe Sensortreiber auf dem MCU und unter Linux nutzen. Für das Linux-Image lohnt es sich früh, die Rust-Anwendung im Yocto- oder Buildroot-Build zu verankern, statt Binaries von Hand zu kopieren.",
+  "labor": {
+    "titel": "Cross-Build für aarch64",
+    "anleitung": "Installiere das Target und den Cross-Linker und baue ein Hello-World. Prüfe das Ergebnis mit `file`. Baue zum Vergleich eine musl-Variante.",
+    "befehle": [
+      "rustup target add aarch64-unknown-linux-gnu aarch64-unknown-linux-musl",
+      "sudo apt install gcc-aarch64-linux-gnu",
+      "cargo build --release --target aarch64-unknown-linux-gnu",
+      "file target/aarch64-unknown-linux-gnu/release/sensord",
+      "cargo install cross && cross build --release --target aarch64-unknown-linux-musl"
+    ],
+    "beobachtung": "`file` meldet „ELF 64-bit LSB ... ARM aarch64“ und für gnu „dynamically linked“, für musl „statically linked“. Mit `qemu-aarch64` (Paket `qemu-user`) lässt sich das musl-Binary sogar auf dem PC starten."
+  },
+  "begriffe": [
+    { "begriff": "Target-Triple", "englisch": "target triple", "erklaerung": "Bezeichnung der Zielplattform aus Architektur, Hersteller, Betriebssystem und ABI." },
+    { "begriff": "musl", "englisch": "musl libc", "erklaerung": "Schlanke C-Standardbibliothek, mit der Rust statisch gelinkte Binaries erzeugt." },
+    { "begriff": "Device Tree", "englisch": "device tree", "erklaerung": "Beschreibung der Hardware eines Boards, aus der der Linux-Kernel Geräte anlegt." },
+    { "begriff": "GPIO-Character-Device", "englisch": "GPIO character device", "erklaerung": "Kernel-Schnittstelle `/dev/gpiochipN` für den Zugriff auf GPIO-Leitungen aus dem Userspace." }
+  ],
+  "weiterlesen": [
+    { "titel": "The rustc Book: Platform Support", "url": "https://doc.rust-lang.org/rustc/platform-support.html" },
+    { "titel": "The Cargo Book: Configuration", "url": "https://doc.rust-lang.org/cargo/reference/config.html" },
+    { "titel": "docs.rs: linux-embedded-hal", "url": "https://docs.rs/linux-embedded-hal" }
+  ]
+}

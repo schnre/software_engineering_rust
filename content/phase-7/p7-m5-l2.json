@@ -1,0 +1,136 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m5-l2",
+  "phase": 7,
+  "modul": "7.5 Embedded Linux",
+  "titel": "Rust im Kernel und Echtzeit unter Linux",
+  "lernziele": [
+    "Den Stand von Rust for Linux und die Rolle des `kernel`-Crates einordnen",
+    "Erklären, was PREEMPT_RT an der Latenz von Linux ändert",
+    "Einen Rust-Prozess mit `SCHED_FIFO` und `mlockall` für Echtzeit vorbereiten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Kernel-Treiber in Rust darf welche Bibliotheken benutzen?",
+      "optionen": [
+        "`core`, ein angepasstes `alloc` mit fehlbaren Allokationen und das `kernel`-Crate mit sicheren Abstraktionen über die C-APIs des Kernels",
+        "Die ganze `std` inklusive Threads und Dateien",
+        "Beliebige Crates von crates.io über Cargo",
+        "Nur `unsafe` Rust, sichere Abstraktionen gibt es im Kernel nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Kernel ist eine `no_std`-Umgebung. Rust-Code wird mit Kbuild gebaut, nicht mit Cargo. Das `kernel`-Crate kapselt Kernel-APIs (Mutexe, Speicher, Gerätemodell) in sichere Typen. Allokationen können scheitern und liefern ein `Result`, statt zu panicken. Das Ziel: Treiber möglichst ohne eigenes `unsafe`, die `unsafe`-Bindings stecken in geprüften Abstraktionen.",
+      "begruendungen": [
+        "Richtig.",
+        "`std` setzt ein Betriebssystem voraus, der Kernel ist selbst eines.",
+        "Externe Crates werden im Kernel-Build nicht über Cargo eingebunden.",
+        "Gerade sichere Abstraktionen sind der Sinn des Projekts."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Rust for Linux: Stand",
+      "text": "Seit Linux 6.1 (Ende 2022) kann der Kernel Rust-Code enthalten. Inzwischen gibt es echte Treiber in Rust im Hauptzweig, etwa den Nova-Ansatz für NVIDIA-GPUs, den Apple-GPU-Treiber (Asahi, ausserhalb des Hauptzweigs entstanden), Netzwerk-PHY-Treiber und den Binder-Treiber von Android. Rust ist im Kernel nicht mehr als Experiment markiert, aber nur ein kleiner Teil des Codes.\n\nFür Embedded-Entwickler heisst das: Neue Treiber für eigene Hardware können in Rust geschrieben werden, wenn die nötigen Abstraktionen für das Subsystem schon existieren. Sonst muss man sie zuerst schaffen, und das ist Arbeit mit den Maintainern."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Begriffe der Linux-Echtzeit zu.",
+      "paare": [
+        { "links": "PREEMPT_RT", "rechts": "Macht fast den ganzen Kernel unterbrechbar, Interrupt-Handler laufen als Threads" },
+        { "links": "`SCHED_FIFO`", "rechts": "Echtzeit-Scheduling mit fester Priorität 1–99, läuft, bis er blockiert oder verdrängt wird" },
+        { "links": "`mlockall`", "rechts": "Hält alle Speicherseiten im RAM, keine Page Faults zur Laufzeit" },
+        { "links": "`cyclictest`", "rechts": "Misst die Weck-Latenz periodischer Threads über lange Zeit" }
+      ],
+      "erklaerung": "Seit Linux 6.12 ist PREEMPT_RT im Hauptzweig und muss nicht mehr als Patch eingespielt werden. Typische Worst-Case-Latenzen liegen dann im Bereich von einigen zehn Mikrosekunden, stark abhängig von Hardware und Treibern. Für harte Echtzeit im einstelligen Mikrosekundenbereich nimmt man weiterhin einen Mikrocontroller."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Der Code läuft auf dem Testrechner als root ohne Fehler. Was passiert, wenn ein normaler Benutzer ihn startet?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn echtzeit_einrichten(prio: i32) -> std::io::Result<()> {",
+          "    unsafe {",
+          "        if libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) != 0 {",
+          "            return Err(std::io::Error::last_os_error());",
+          "        }",
+          "        let param = libc::sched_param { sched_priority: prio };",
+          "        if libc::sched_setscheduler(0, libc::SCHED_FIFO, &param) != 0 {",
+          "            return Err(std::io::Error::last_os_error());",
+          "        }",
+          "    }",
+          "    Ok(())",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Die Funktion liefert `Err` mit „Operation not permitted (os error 1)“, weil Echtzeitprioritäten und Speichersperren Rechte brauchen",
+        "Der Prozess läuft trotzdem mit `SCHED_FIFO`",
+        "Eine Panik im `unsafe`-Block",
+        "Ein Compilerfehler, weil `libc` nur für root verfügbar ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `CAP_SYS_NICE` (bzw. ein passendes `RLIMIT_RTPRIO`) verweigert der Kernel `SCHED_FIFO`, ohne ausreichendes `RLIMIT_MEMLOCK` scheitert `mlockall`. Auf dem Gerät gibt man dem Dienst gezielt diese Rechte, z. B. in der systemd-Unit mit `LimitRTPRIO=`, `LimitMEMLOCK=infinity` oder `AmbientCapabilities=CAP_SYS_NICE`, statt ihn als root laufen zu lassen. Bequemer als rohe `libc`-Aufrufe sind Crates wie `nix` oder `thread-priority`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Kernel prüft die Rechte bei jedem Aufruf.",
+        "Fehler werden als Rückgabewert gemeldet, nicht als Panik.",
+        "`libc` ist eine normale Bibliothek, die Rechte prüft erst der Kernel."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Ein Echtzeit-Thread läuft mit `SCHED_FIFO` und gesperrtem Speicher. Trotzdem gibt es gelegentlich Ausreisser von mehreren Millisekunden. Welche Zeile ist der Verdächtige?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "echtzeit_einrichten(80)?;",
+          "let mut puffer = [0u8; 64];",
+          "let mut naechster = Instant::now();",
+          "loop {",
+          "    naechster += Duration::from_millis(1);",
+          "    spi.read(&mut puffer)?;",
+          "    let wert = auswerten(&puffer);",
+          "    let log = format!(\"wert={wert}\");",
+          "    regle(wert);",
+          "    schlafe_bis(naechster);",
+          "}"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "`format!` alloziert bei jedem Durchlauf einen `String` auf dem Heap. Der Allokator kann sperren, neue Seiten vom Kernel holen oder lange suchen. In der Echtzeitschleife gilt dasselbe wie auf dem Mikrocontroller: keine Allokation, kein blockierendes Logging, kein `println!` auf ein langsames Terminal. Logdaten gibt man über einen lockfreien Ringpuffer an einen normalen Thread weiter."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Damit ein Linux-Prozess deterministisch reagiert, braucht er einen Kernel mit {{?}}, eine Echtzeit-Policy wie {{?}} und gesperrten Speicher mit {{?}}.",
+      "luecken": [{ "loesungen": ["PREEMPT_RT"] }, { "loesungen": ["SCHED_FIFO"] }, { "loesungen": ["mlockall"] }],
+      "auswahl": ["PREEMPT_RT", "SCHED_FIFO", "mlockall", "SCHED_OTHER", "nice", "malloc"],
+      "erklaerung": "`SCHED_OTHER` ist der normale, faire Scheduler (CFS bzw. EEVDF), und `nice` beeinflusst nur dessen Gewichtung. Echtzeit braucht feste Prioritäten. Ausserdem wichtig: CPU-Frequenzskalierung und tiefe Schlafzustände abschalten und den Echtzeit-Thread auf einen eigenen Kern legen (`isolcpus`, Affinität)."
+    }
+  ],
+  "praxis": "Viele Industriegeräte nutzen Linux mit PREEMPT_RT für Aufgaben im Millisekundenbereich, etwa Feldbus-Kommunikation oder Bewegungssteuerung auf einem eigenen Kern. Rust-Programme eignen sich dafür gut, weil sie ohne GC laufen und Allokationen sichtbar sind. Messen ist Pflicht: `cyclictest` über Stunden unter Last zeigt, ob das System die Latenzanforderung einhält.",
+  "labor": {
+    "titel": "Echtzeit-Rechte ausprobieren",
+    "anleitung": "Baue das Programm mit `mlockall` und `sched_setscheduler` und starte es einmal als normaler Benutzer und einmal mit `sudo`. Prüfe mit `chrt -p <pid>` die Policy des laufenden Prozesses.",
+    "befehle": [
+      "cargo new rt && cd rt && cargo add libc",
+      "cargo run",
+      "sudo ./target/debug/rt",
+      "uname -v"
+    ],
+    "beobachtung": "Als normaler Benutzer kommt „Operation not permitted (os error 1)“. `uname -v` zeigt „PREEMPT_RT“, wenn der Kernel mit Echtzeit-Unterstützung gebaut ist, sonst meist „PREEMPT_DYNAMIC“."
+  },
+  "begriffe": [
+    { "begriff": "Rust for Linux", "englisch": "Rust for Linux", "erklaerung": "Projekt, das Rust als zweite Sprache für Kernel-Code einführt." },
+    { "begriff": "PREEMPT_RT", "englisch": "PREEMPT_RT", "erklaerung": "Kernel-Konfiguration, die Linux fast vollständig unterbrechbar und damit echtzeitfähiger macht." },
+    { "begriff": "SCHED_FIFO", "englisch": "SCHED_FIFO", "erklaerung": "Echtzeit-Scheduling-Policy mit fester Priorität ohne Zeitscheiben." },
+    { "begriff": "Page Fault", "englisch": "page fault", "erklaerung": "Zugriff auf eine Speicherseite, die erst vom Kernel bereitgestellt werden muss; kostet unvorhersehbar Zeit." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust for Linux", "url": "https://rust-for-linux.com/" },
+    { "titel": "Linux Kernel Documentation: Rust", "url": "https://docs.kernel.org/rust/index.html" }
+  ]
+}

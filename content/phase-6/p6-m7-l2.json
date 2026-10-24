@@ -1,0 +1,161 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m7-l2",
+  "phase": 6,
+  "modul": "6.7 Start, Updates und Zuverlässigkeit",
+  "titel": "Bootloader und Firmware-Updates",
+  "lernziele": [
+    "Den Aufbau eines Flash-Speichers mit Bootloader und A/B-Partitionen erklären",
+    "Den Ablauf eines ausfallsicheren Updates mit Test-Boot und Rollback beschreiben",
+    "Signaturprüfung und Flashen mit probe-rs einordnen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "warum-bootloader",
+      "frage": "Ein Gerät im Feld soll per Funk neue Firmware bekommen. Warum schreibt die laufende Firmware sich nicht einfach selbst neu?",
+      "optionen": [
+        "Fällt beim Schreiben der Strom aus, ist die Firmware halb überschrieben und das Gerät startet nie wieder",
+        "Ein Mikrocontroller kann seinen eigenen Flash grundsätzlich nicht beschreiben",
+        "Rust erlaubt keine Schreibzugriffe auf den Flash",
+        "Das wäre zu langsam"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Bootloader** ist ein kleines, selten geändertes Programm am Anfang des Flash. Er entscheidet beim Start, welche Firmware läuft, und kann ein Update übernehmen. Die neue Firmware wird zuerst in einen getrennten Bereich geschrieben. Erst wenn sie vollständig und geprüft ist, wird umgeschaltet.",
+      "begruendungen": [
+        "Richtig.",
+        "Viele können es, das ist nicht das Problem.",
+        "Rust kann über die Flash-Peripherie schreiben, z. B. mit `embedded-storage`.",
+        "Die Dauer ist zweitrangig, es geht um Ausfallsicherheit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Partitionen bei embassy-boot",
+      "text": "Das Crate **`embassy-boot`** ist ein ausfallsicherer Bootloader mit Rollback, mit Varianten für nRF, RP2040 und STM32. Es teilt den Speicher in vier Bereiche, die an Flash-Seiten ausgerichtet sein müssen:",
+      "tabelle": {
+        "kopf": ["Partition", "Inhalt"],
+        "zeilen": [
+          ["BOOTLOADER", "der Bootloader selbst, einige KB"],
+          ["ACTIVE", "die laufende Anwendung"],
+          ["DFU", "Platz für die neue Firmware, mindestens eine Seite grösser als ACTIVE"],
+          ["BOOTLOADER STATE", "Zustand: normal starten, tauschen oder zurückrollen"]
+        ]
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "update-ablauf",
+      "frage": "Bringe den Ablauf eines Updates mit Test-Boot in die richtige Reihenfolge.",
+      "elemente": [
+        "Die Anwendung empfängt das Image und schreibt es in die DFU-Partition",
+        "Die Anwendung prüft die Signatur und markiert das Update (`mark_updated`)",
+        "Neustart: Der Bootloader tauscht ACTIVE und DFU seitenweise",
+        "Die neue Firmware startet und prüft sich selbst (Selbsttest, Verbindung)",
+        "Ist alles gut, bestätigt sie mit `mark_booted`"
+      ],
+      "erklaerung": "Bestätigt die neue Firmware nicht, etwa weil sie abstürzt und der Watchdog zurücksetzt, tauscht der Bootloader beim nächsten Start zurück (**Rollback**). Weil der Tausch seitenweise mit Fortschritt im State-Bereich geschieht, übersteht er auch einen Stromausfall mittendrin."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "ab-varianten",
+      "frage": "Ordne die Update-Strategien zu.",
+      "paare": [
+        { "links": "Tauschen (swap)", "rechts": "Alte Firmware bleibt in DFU erhalten, Rollback möglich, eine Partition läuft" },
+        { "links": "A/B mit zwei Slots", "rechts": "Beide Slots lauffähig, der Bootloader springt abwechselnd in A oder B" },
+        { "links": "Überschreiben ohne Kopie", "rechts": "Spart Flash, aber kein Rollback und gefährlich bei Stromausfall" },
+        { "links": "Test-Boot", "rechts": "Neue Firmware gilt erst nach eigener Bestätigung als gut" }
+      ],
+      "erklaerung": "Echtes A/B braucht Firmware, die an zwei Adressen laufen kann oder zwei verschiedene Builds. Das Tauschverfahren von `embassy-boot` vermeidet das: Die Anwendung läuft immer in ACTIVE und wird nur für diese Adresse gebaut."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "signatur",
+      "frage": "Warum reicht eine CRC-Prüfsumme über das Image nicht, um ein Update abzusichern?",
+      "optionen": [
+        "Eine CRC erkennt zufällige Übertragungsfehler, aber jeder kann für manipulierte Firmware eine passende CRC berechnen. Gegen Angreifer hilft nur eine Signatur mit einem privaten Schlüssel",
+        "CRC ist zu langsam für Mikrocontroller",
+        "CRC funktioniert nur für Texte",
+        "Eine CRC ist genauso sicher wie eine Signatur"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei einer **Signatur** signiert der Hersteller einen Hash des Images mit seinem privaten Schlüssel. Auf dem Gerät liegt nur der öffentliche Schlüssel. `embassy-boot` bietet dafür `verify_and_mark_updated(&public_key, &signature, len)` mit Ed25519, aktiviert über die Features `ed25519-dalek` oder `ed25519-salty`. Den privaten Schlüssel lagert man sicher, nicht im Repository.",
+      "begruendungen": [
+        "Richtig.",
+        "CRC ist sehr schnell, oft sogar in Hardware.",
+        "CRC funktioniert für beliebige Bytes.",
+        "Eine CRC hat kein Geheimnis und schützt nicht gegen absichtliche Änderungen."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "mark-booted-vergessen",
+      "frage": "Nach einem Update läuft die neue Version einwandfrei. Nach dem nächsten Neustart läuft aber wieder die alte. Was fehlt in diesem Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[embassy_executor::main]",
+          "async fn main(spawner: Spawner) {",
+          "    let p = embassy_stm32::init(Default::default());",
+          "    // … Peripherie und Netzwerk starten",
+          "    selbsttest().await.unwrap();",
+          "    spawner.spawn(anwendung()).unwrap();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nach dem erfolgreichen Selbsttest wird `mark_booted()` nicht aufgerufen, darum rollt der Bootloader beim nächsten Start zurück",
+        "Der Selbsttest muss vor `init` laufen",
+        "`spawn` darf nicht in `main` aufgerufen werden",
+        "Nichts, ein Rollback nach jedem Neustart ist normal"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Bootloader kann nicht wissen, ob die neue Firmware funktioniert. Er verlässt sich auf die Bestätigung. Fehlt sie, gilt das Update als fehlgeschlagen. Typisch ist darum ein Aufruf von `FirmwareUpdater::mark_booted()` bzw. `FirmwareState::mark_booted()` nach dem Selbsttest. Wie du `async` und Embassy einsetzt, lernst du in Phase 7.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `init` gibt es keine Peripherie für den Selbsttest.",
+        "Genau dort werden Tasks gestartet.",
+        "Normal ist ein Rollback nur, wenn die Bestätigung ausbleibt."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "probe-rs",
+      "frage": "In der Entwicklung flashst du über den Debug-Adapter (SWD). Ergänze die Befehle.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "probe-rs {{?}}                                  # angeschlossene Adapter anzeigen",
+          "probe-rs {{?}} --chip STM32F411CEUx target/thumbv7em-none-eabihf/release/app",
+          "probe-rs {{?}} --chip STM32F411CEUx target/thumbv7em-none-eabihf/release/app   # flashen, starten, Logs zeigen"
+        ]
+      },
+      "luecken": [{ "loesungen": ["list"] }, { "loesungen": ["download"] }, { "loesungen": ["run"] }],
+      "auswahl": ["list", "download", "run", "build"],
+      "erklaerung": "`probe-rs download` schreibt nur ins Flash, `probe-rs run` flasht, startet und zeigt RTT- und `defmt`-Ausgaben. Eingetragen als `runner` in `.cargo/config.toml`, macht `cargo run` genau das (Modul 6.1). Mit Bootloader musst du beides flashen: den Bootloader an seine Adresse und die Anwendung in ACTIVE. probe-rs baut nichts, das ist Aufgabe von cargo."
+    }
+  ],
+  "praxis": "Plane den Update-Mechanismus vor der ersten Auslieferung: Ein Gerät ohne Bootloader im Feld lässt sich nie mehr per Funk aktualisieren. Teste den Rollback bewusst, etwa mit einer Firmware, die nach dem Start absichtlich paniken lässt. Und halte die Partitionen gross genug: Firmware wächst mit jeder Version.",
+  "labor": {
+    "titel": "probe-rs kennenlernen",
+    "anleitung": "Installiere probe-rs auf deinem Rechner. Auch ohne Board kannst du die Liste der unterstützten Chips und die Hilfe ansehen.",
+    "befehle": [
+      "cargo install probe-rs-tools --locked",
+      "probe-rs chip list | grep STM32F411",
+      "probe-rs run --help"
+    ],
+    "beobachtung": "Die Chip-Liste zeigt die genauen Bezeichnungen für `--chip`. Mit Board und Adapter erscheint der Adapter in `probe-rs list`."
+  },
+  "begriffe": [
+    { "begriff": "Bootloader", "englisch": "bootloader", "erklaerung": "Kleines Programm, das beim Start die Firmware auswählt und Updates einspielt." },
+    { "begriff": "DFU", "englisch": "device firmware update", "erklaerung": "Bereich bzw. Verfahren zum Einspielen neuer Firmware." },
+    { "begriff": "Rollback", "englisch": "rollback", "erklaerung": "Rückkehr zur vorherigen Firmware, wenn die neue nicht bestätigt wird." },
+    { "begriff": "Signatur", "englisch": "digital signature", "erklaerung": "Mit privatem Schlüssel erzeugter Nachweis, dass ein Image vom Hersteller stammt und unverändert ist." }
+  ],
+  "weiterlesen": [
+    { "titel": "embassy-boot (docs.rs)", "url": "https://docs.rs/embassy-boot" },
+    { "titel": "Embassy Book", "url": "https://embassy.dev/book/" },
+    { "titel": "probe-rs", "url": "https://probe.rs/" }
+  ]
+}

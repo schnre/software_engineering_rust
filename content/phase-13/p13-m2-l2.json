@@ -1,0 +1,224 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m2-l2",
+  "phase": 13,
+  "modul": "13.2 Entscheidungen und Trade-offs",
+  "titel": "Einbahnstrassen und Drehtüren",
+  "lernziele": [
+    "Entscheidungen nach ihrer Umkehrbarkeit einordnen und den Aufwand daran ausrichten",
+    "Erkennen, warum öffentliche APIs und Editionen in Rust schwer umkehrbar sind",
+    "Mit `#[non_exhaustive]`, `#[deprecated]` und Spikes Entscheidungen offen halten"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche dieser Entscheidungen ist am schwersten rückgängig zu machen?",
+      "optionen": [
+        "Die öffentliche API eines Crates, das auf crates.io in Version 1.0 veröffentlicht ist und von 40 Projekten genutzt wird",
+        "Der Name einer privaten Hilfsfunktion",
+        "Welches Logging-Crate hinter einer eigenen `Logger`-Schnittstelle steckt",
+        "Ob ein internes Modul `Vec` oder `heapless::Vec` verwendet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jede Änderung, die fremden Code bricht, verlangt eine neue Hauptversion (2.0) nach **SemVer** (Semantic Versioning), und alle Nutzer müssen nachziehen. Solche Entscheidungen sind **Einbahnstrassen** (one-way doors, bei Amazon „Typ 1“). Die anderen sind **Drehtüren** (two-way doors, „Typ 2“): Der Compiler zeigt jede betroffene Stelle, und alles bleibt im eigenen Crate.",
+      "begruendungen": [
+        "Richtig.",
+        "Privat heisst: Der Compiler findet alle Aufrufer, die Umbenennung dauert Minuten.",
+        "Dank eigener Schnittstelle ist das in einem Modul austauschbar.",
+        "Eine interne Änderung, die nur das eigene Crate betrifft."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Den Aufwand an die Umkehrbarkeit anpassen",
+      "text": "Daraus folgt eine einfache Regel: **Drehtüren schnell entscheiden**, von der Person, die am nächsten dran ist. **Einbahnstrassen sorgfältig prüfen**, mit Prototyp, Daten und mehreren Meinungen. Ein häufiger Fehler ist, alles gleich zu behandeln: drei Wochen Diskussion über ein internes Hilfs-Crate, aber eine öffentliche API im Vorbeigehen.\n\nTypische Einbahnstrassen in Rust- und Embedded-Projekten:\n- öffentliche Typen, Traits und Funktionen eines veröffentlichten Crates\n- Speicher- und Protokollformate auf ausgelieferten Geräten\n- die minimale Rust-Version (MSRV), die man Nutzern zusagt\n- die Wahl des Ökosystems, z. B. Embassy oder RTIC als Fundament"
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Das Crate `treiber` markiert `Konfig` mit `#[non_exhaustive]`. Was passiert, wenn eine **andere** Crate diesen Code kompiliert?",
+      "code": {
+        "sprache": "rust",
+        "datei": "app/src/main.rs",
+        "zeilen": [
+          "// im Crate treiber:",
+          "// #[non_exhaustive]",
+          "// pub struct Konfig { pub baud: u32, pub paritaet: bool }",
+          "",
+          "use treiber::Konfig;",
+          "",
+          "fn main() {",
+          "    let k = Konfig { baud: 115_200, paritaet: false };",
+          "    println!(\"{}\", k.baud);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0639: Ausserhalb des Crates darf man die Struktur nicht mit Literal erzeugen",
+        "Kompiliert, `#[non_exhaustive]` betrifft nur Enums",
+        "Fehler E0616: Das Feld `baud` ist privat",
+        "Kompiliert mit einer Warnung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`#[non_exhaustive]` hält eine Drehtür offen: Weil fremder Code `Konfig` nur über einen Konstruktor wie `Konfig::new` erzeugen kann, darf der Autor später ein Feld hinzufügen, ohne eine neue Hauptversion zu brauchen. Lesen kann man die öffentlichen Felder weiterhin. Der Preis ist etwas Komfort für die Nutzer.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Attribut gibt es für Structs, Enums und Enum-Varianten.",
+        "Das Feld ist `pub` und darf gelesen werden.",
+        "Es ist ein harter Fehler, keine Warnung."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Nutzer eures Crates matcht auf `treiber::Fehler`, das mit `#[non_exhaustive]` markiert ist. Was sagt ihm diese Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0004]: non-exhaustive patterns: `&_` not covered",
+          " --> src/main.rs:4:11",
+          "  |",
+          "4 |     match f {",
+          "  |           ^ pattern `&_` not covered",
+          "  |",
+          "  = note: the matched value is of type `&Fehler`",
+          "  = note: `Fehler` is marked as non-exhaustive, so a wildcard `_` is necessary to match exhaustively"
+        ]
+      },
+      "optionen": [
+        "Er braucht einen `_`-Arm, weil der Autor sich vorbehält, später weitere Fehlervarianten hinzuzufügen",
+        "Er hat eine bestehende Variante vergessen",
+        "Das Enum ist privat und darf nicht gematcht werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für den Autor ist das eine bewusste Entscheidung: Neue Fehlerarten sind dann keine brechende Änderung. Für den Nutzer heisst es, dass der Compiler ihn bei neuen Varianten nicht mehr warnt. Innerhalb eines eigenen Projekts ist das ein Nachteil (siehe Lektion 13.1), an einer öffentlichen API oft der richtige Tausch.",
+      "begruendungen": [
+        "Richtig.",
+        "Alle bekannten Varianten sind abgedeckt, es fehlt nur der Platzhalter `_`.",
+        "Das Enum ist öffentlich, sonst käme ein anderer Fehler."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wie gehst du mit diesen Entscheidungen um?",
+      "paare": [
+        { "links": "Fehler-Enum eines veröffentlichten Crates", "rechts": "`#[non_exhaustive]` vorsehen, bevor 1.0 erscheint" },
+        { "links": "Name einer privaten Funktion", "rechts": "Schnell entscheiden, der Compiler hilft beim Ändern" },
+        { "links": "Öffentliche Funktion soll ersetzt werden", "rechts": "Mit `#[deprecated]` markieren, Nachfolger anbieten, erst in der nächsten Hauptversion entfernen" },
+        { "links": "Embassy oder RTIC als Basis für ein neues Produkt", "rechts": "Spike auf echter Hardware, dann bewusst entscheiden und festhalten" }
+      ],
+      "erklaerung": "Gute Architektur verwandelt Einbahnstrassen in Drehtüren: eine schmale öffentliche API, `#[non_exhaustive]` an erweiterbaren Typen, ein Versionsfeld in Formaten. Was dann noch Einbahnstrasse bleibt, verdient die sorgfältige Prüfung."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ihr wollt in einem Bibliotheks-Crate auf Edition 2024 umstellen, versprecht euren Nutzern aber bisher Rust 1.80 als MSRV. Was bedeutet diese Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: failed to parse manifest at `/home/user/projekt/Cargo.toml`",
+          "",
+          "Caused by:",
+          "  rust-version 1.80 is incompatible with the version (1.85.0) required by the specified edition (2024)"
+        ]
+      },
+      "optionen": [
+        "Edition 2024 braucht mindestens Rust 1.85. Der Wechsel hebt die MSRV an, und das trifft alle Nutzer, die noch einen älteren Compiler haben",
+        "Edition 2024 ist inkompatibel mit Crates älterer Editionen",
+        "Man braucht einen Nightly-Compiler",
+        "`rust-version` darf nur bei Binaries gesetzt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Editionen sind pro Crate wählbar und mischen sich problemlos im selben Projekt, das macht sie vergleichsweise harmlos. Für ein veröffentlichtes Crate ist die Umstellung aber eine Zusage an alle Nutzer: Die neue Version verlangt einen neueren Compiler. In zertifizierten oder eingefrorenen Toolchains (mehr dazu in Modul 13.3) ist das eine echte Einbahnstrasse.",
+      "begruendungen": [
+        "Richtig.",
+        "Crates verschiedener Editionen lassen sich frei kombinieren.",
+        "Edition 2024 ist seit Rust 1.85 stabil.",
+        "`rust-version` gilt für jedes Paket, Bibliotheken eingeschlossen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Code so, dass die alte Funktion weiter funktioniert, Nutzer aber gewarnt werden.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "#[{{?}}(since = \"0.4.0\", note = \"nutze `lesen_mit_timeout`\")]",
+          "pub fn lesen() -> u8 {",
+          "    lesen_mit_timeout(100)",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["deprecated"] }
+      ],
+      "auswahl": ["deprecated", "non_exhaustive", "must_use", "expect"],
+      "erklaerung": "Nutzer sehen beim Bauen `warning: use of deprecated function `treiber::lesen`: nutze `lesen_mit_timeout``. So wird aus einer harten Umstellung ein Übergang: Wer will, wechselt sofort, alle anderen bis zur nächsten Hauptversion. Ein Werkzeug wie `cargo-semver-checks` prüft vor dem Veröffentlichen, ob man versehentlich doch etwas gebrochen hat."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Das Team ist unsicher, ob Embassy auf eurem Mikrocontroller die Timing-Anforderungen erfüllt. Was ist der beste nächste Schritt?",
+      "optionen": [
+        "Ein zeitlich begrenzter Spike von zwei Tagen: das kritischste Timing auf echter Hardware nachbauen und messen, danach entscheiden",
+        "Sofort entscheiden, um keine Zeit zu verlieren",
+        "Das ganze Produkt auf Embassy aufbauen und bei Problemen später wechseln",
+        "Weiter Blogartikel lesen, bis die Meinungen eindeutig sind"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Spike** ist eine kurze, zeitlich begrenzte Untersuchung, deren Ergebnis Wissen ist, nicht Produktcode. Er verwandelt eine Wette in eine begründete Entscheidung. Danach wird der Spike-Code meist weggeworfen. Man entscheidet Einbahnstrassen so spät wie verantwortbar, aber nicht später.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei einer Einbahnstrasse wäre das eine Wette.",
+        "Ein späterer Wechsel des Frameworks wäre sehr teuer, genau das macht es zur Einbahnstrasse.",
+        "Fremde Erfahrungen ersetzen keine Messung auf der eigenen Hardware."
+      ]
+    }
+  ],
+  "praxis": "Ein Senior erkennt, welche Entscheidungen Einbahnstrassen sind, und bremst genau dort, während er bei Drehtüren das Team zügig weiterbringt. In Rust-Projekten sind das vor allem öffentliche APIs, MSRV-Zusagen, Formate auf Geräten und die Wahl des Embedded-Frameworks. Du hältst Türen offen, wo es billig ist (`#[non_exhaustive]`, `#[deprecated]`, Versionsfelder), und klärst offene Fragen mit Spikes statt mit langen Diskussionen.",
+  "labor": {
+    "titel": "Eine Drehtür einbauen",
+    "anleitung": "Lege einen Workspace mit einer Bibliothek und einer Anwendung an. Markiere ein öffentliches Enum der Bibliothek mit `#[non_exhaustive]` und eine Funktion mit `#[deprecated]`, und beobachte, was die Anwendung zu sehen bekommt.",
+    "befehle": [
+      "cargo new --lib treiber && cargo new app",
+      "cd app && cargo add --path ../treiber",
+      "cargo build",
+      "rustc --explain E0639"
+    ],
+    "beobachtung": "Innerhalb von `treiber` darf man das Enum weiterhin vollständig matchen, nur fremde Crates brauchen den `_`-Arm. Die Deprecation erscheint als Warnung mit deinem `note`-Text. Beides kostet dich jetzt Minuten und erspart später eine Hauptversion."
+  },
+  "begriffe": [
+    {
+      "begriff": "Einbahnstrasse",
+      "englisch": "one-way door",
+      "erklaerung": "Entscheidung, die sich nur schwer oder gar nicht umkehren lässt (Typ 1)."
+    },
+    {
+      "begriff": "Drehtür",
+      "englisch": "two-way door",
+      "erklaerung": "Entscheidung, die sich mit geringem Aufwand umkehren lässt (Typ 2)."
+    },
+    {
+      "begriff": "Semantische Versionierung",
+      "englisch": "semantic versioning",
+      "erklaerung": "Versionsschema MAJOR.MINOR.PATCH, bei dem nur eine neue Hauptversion bestehende Nutzer brechen darf."
+    },
+    {
+      "begriff": "Spike",
+      "englisch": "spike",
+      "erklaerung": "Kurze, zeitlich begrenzte Untersuchung, die eine offene technische Frage klärt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: SemVer Compatibility",
+      "url": "https://doc.rust-lang.org/cargo/reference/semver.html"
+    },
+    {
+      "titel": "Rust API Guidelines: Future proofing",
+      "url": "https://rust-lang.github.io/api-guidelines/future-proofing.html"
+    },
+    {
+      "titel": "The Rust Edition Guide",
+      "url": "https://doc.rust-lang.org/edition-guide/"
+    }
+  ]
+}

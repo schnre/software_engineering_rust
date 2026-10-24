@@ -1,0 +1,201 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m6-l1",
+  "phase": 11,
+  "modul": "11.6 Datenorientiertes Design",
+  "titel": "Datenorientiertes Design und ECS",
+  "lernziele": [
+    "Daten nach ihren Zugriffsmustern statt nach Objekten anordnen",
+    "Array of Structures und Structure of Arrays unterscheiden",
+    "Verstehen, warum Entity Component Systems gut zum Borrow-Checker passen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was ist die Grundidee von **datenorientiertem Design**?",
+      "optionen": [
+        "Die Daten so anordnen, wie sie verarbeitet werden, damit die CPU sie mit wenigen Cache-Misses lesen kann",
+        "Für jedes Ding der realen Welt ein eigenes Struct mit Methoden anlegen",
+        "Alle Daten in einer Datenbank speichern",
+        "Möglichst viele `Box<dyn Trait>` verwenden, um flexibel zu bleiben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Speicherzugriff, der nicht im Cache liegt, kostet auf modernen CPUs leicht 100 Takte und mehr (Phase 5). Datenorientiertes Design (*data-oriented design*) fragt: Welche Daten werden zusammen gelesen? Die gehören zusammen und dicht hintereinander in den Speicher.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist objektorientiertes Modellieren, das Daten oft verstreut.",
+        "Es geht um die Anordnung im Hauptspeicher.",
+        "Jede `Box` ist eine eigene Heap-Allokation, die Daten liegen verstreut."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Eine Schleife aktualisiert nur die Positionen von 100 000 Partikeln. Warum ist Variante B meist deutlich schneller?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "// A: Array of Structures (AoS)",
+          "struct Partikel { pos: [f32; 3], vel: [f32; 3], farbe: u32, name: [u8; 36] }",
+          "let partikel: Vec<Partikel>;",
+          "",
+          "// B: Structure of Arrays (SoA)",
+          "struct Partikel { pos_x: Vec<f32>, vel_x: Vec<f32>, /* ... */ farbe: Vec<u32> }",
+          "",
+          "for (x, vx) in p.pos_x.iter_mut().zip(&p.vel_x) {",
+          "    *x += vx * dt;",
+          "}"
+        ]
+      },
+      "optionen": [
+        "In B liegen die benötigten Werte dicht hintereinander, jede Cache-Zeile enthält nur nützliche Daten, und der Compiler kann die Schleife vektorisieren (SIMD)",
+        "Weil B weniger Speicher braucht",
+        "Weil `Vec<f32>` intern schneller ist als `Vec<Partikel>`",
+        "Weil `zip` in Rust parallel auf mehreren Kernen läuft"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In A ist ein Partikel 64 Byte gross, gebraucht werden für `x += vx * dt` nur 8 Byte. Der Rest wird mitgeladen und verschwendet. In B füllen 16 `f32` eine 64-Byte-Cache-Zeile vollständig. Wie gross der Gewinn ist, hängt von CPU und Datenmenge ab, deshalb immer messen, z. B. mit `criterion` und `perf stat -e cache-misses`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Speicherbedarf ist etwa gleich, nur anders angeordnet.",
+        "Der Unterschied liegt in der Anordnung, nicht im Container.",
+        "`zip` läuft sequenziell, parallel wäre z. B. `rayon`."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Drohnen sollen einer anderen Drohne folgen. Mit `Vec<Drohne>` und Referenzen klappt das nicht. Warum?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let a = &mut drohnen[0];",
+          "let b = &drohnen[a.ziel];",
+          "a.pos = b.pos;"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0502]: cannot borrow `drohnen` as immutable because it is also borrowed as mutable",
+          "  --> src/main.rs:22:14",
+          "   |",
+          "21 |     let a = &mut drohnen[0];",
+          "   |                  ------- mutable borrow occurs here",
+          "22 |     let b = &drohnen[a.ziel];",
+          "   |              ^^^^^^^ ------ mutable borrow later used here",
+          "   |              |",
+          "   |              immutable borrow occurs here"
+        ]
+      },
+      "optionen": [
+        "Der Borrow-Checker sieht nur den ganzen `Vec`. Er kann nicht beweisen, dass `a.ziel` nicht 0 ist, also könnten `a` und `b` dasselbe Element sein",
+        "Indizes sind in Rust nur für `Copy`-Typen erlaubt",
+        "Der Fehler entsteht, weil `pos` ein Array ist",
+        "Man darf in Rust grundsätzlich nur eine Referenz auf einen `Vec` haben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Objektgraphen mit gegenseitigen Referenzen sind in Rust mühsam. Datenorientierte Lösung: Erst alle Zielpositionen lesen (`let ziel = drohnen[a_idx].ziel; let p = drohnen[ziel].pos;`), dann schreiben. Oder Daten nach Zugriff trennen, sodass gelesen und geschrieben getrennte Arrays sind. Genau das macht ein ECS systematisch.",
+      "begruendungen": [
+        "Richtig.",
+        "Indizes funktionieren für alle Typen.",
+        "Der Feldtyp spielt keine Rolle.",
+        "Mehrere gemeinsame Referenzen sind erlaubt, nur nicht gleichzeitig mit einer veränderbaren."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Entity Component System",
+      "text": "**ECS** ist eine datenorientierte Architektur aus der Spieleentwicklung, auch in Simulation und Robotik verbreitet:\n\n- **Entity**: nur eine ID, kein Verhalten\n- **Component**: reine Daten, z. B. `Position`, je Typ dicht gespeichert\n- **System**: Funktion über alle Entities mit bestimmten Komponenten\n\nIn Rust passt das besonders gut: Ein System deklariert in seiner Signatur, welche Komponenten es liest (`&Position`) und welche es schreibt (`&mut Position`). Statt Referenzen zwischen Objekten gibt es IDs. Der Scheduler kann Systeme ohne Konflikt parallel laufen lassen, weil er ihre Zugriffe kennt. Das bekannteste Rust-ECS ist **Bevy ECS**, das auch ohne die Bevy-Engine nutzbar ist."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt dieses Programm mit `bevy_ecs` aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Component)] struct Position(f32, f32);",
+          "#[derive(Component)] struct Geschwindigkeit(f32, f32);",
+          "",
+          "fn bewegung(mut q: Query<(&mut Position, &Geschwindigkeit)>) {",
+          "    for (mut p, v) in &mut q {",
+          "        p.0 += v.0;",
+          "        p.1 += v.1;",
+          "    }",
+          "}",
+          "",
+          "let mut welt = World::new();",
+          "welt.spawn((Position(0.0, 0.0), Geschwindigkeit(1.0, 0.5)));",
+          "welt.spawn(Position(9.0, 9.0));",
+          "let mut plan = Schedule::default();",
+          "plan.add_systems(bewegung);",
+          "plan.run(&mut welt);",
+          "// danach alle Positionen ausgeben"
+        ]
+      },
+      "optionen": [
+        "`1 0.5` und `9 9`: Das System erfasst nur Entities, die beide Komponenten haben, die zweite bleibt unverändert",
+        "`1 0.5` und `10 9.5`",
+        "`0 0` und `9 9`, weil Systeme erst beim zweiten `run` laufen",
+        "Kompilierfehler, weil die zweite Entity keine Geschwindigkeit hat"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die `Query` wirkt wie ein Filter: Nur Entities mit `Position` **und** `Geschwindigkeit` werden besucht. Statische Hindernisse bekommen einfach keine Geschwindigkeit, ohne eigene Klasse. Das Beispiel wurde mit `bevy_ecs` 0.20 gebaut und ausgeführt.",
+      "begruendungen": [
+        "Richtig, das ist die echte Ausgabe.",
+        "Die zweite Entity hat keine Geschwindigkeit und wird nicht besucht.",
+        "`plan.run` führt die Systeme sofort aus.",
+        "Entities dürfen beliebige Kombinationen von Komponenten haben."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Begriffe zu.",
+      "paare": [
+        { "links": "Entity", "rechts": "Eine ID, die Komponenten zusammenhält" },
+        { "links": "Component", "rechts": "Reine Daten ohne Verhalten" },
+        { "links": "System", "rechts": "Verarbeitet alle Entities mit bestimmten Komponenten" },
+        { "links": "Hot/Cold Splitting", "rechts": "Häufig gelesene Felder von selten gelesenen trennen" }
+      ],
+      "erklaerung": "Hot/Cold Splitting ist der einfachste Einstieg: Felder für die Hauptschleife bleiben im Struct, selten gebrauchte (Name, Konfiguration, Statistik) wandern in eine eigene Struktur, z. B. einen separaten `Vec` mit gleichem Index."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wann lohnt sich datenorientiertes Design, und wann nicht?",
+      "optionen": [
+        "Bei vielen gleichartigen Elementen in heissen Schleifen. Bei wenigen, unterschiedlichen Objekten mit komplexem Verhalten ist ein normales Struct-Design oft klarer",
+        "Immer, Structs mit Methoden sind veraltet",
+        "Nur auf Spielkonsolen",
+        "Nur in Programmen ohne Borrow-Checker"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Firmware mit zehn Zustandsmaschinen profitiert kaum. Eine Punktwolke mit einer Million Punkten, eine Simulation mit vielen Körpern oder eine Signalverarbeitung mit vielen Kanälen dagegen sehr. Zuerst messen, dann umbauen.",
+      "begruendungen": [
+        "Richtig.",
+        "Beide Ansätze haben ihren Platz.",
+        "Das Prinzip gilt auf jeder CPU mit Cache, auch auf grösseren Mikrocontrollern.",
+        "Gerade in Rust hilft datenorientiertes Design, Konflikte mit dem Borrow-Checker zu vermeiden."
+      ]
+    }
+  ],
+  "praxis": "Datenorientiertes Denken hilft auch ohne vollständiges ECS: Strukturen nach Zugriffsmustern schneiden, Daten in zusammenhängenden `Vec`s statt in einzelnen `Box`en halten, Indizes oder Handles statt Referenzen speichern (Crates wie `slotmap`), Polymorphie über Gruppierung nach Typ statt `dyn Trait` in heissen Schleifen.",
+  "labor": {
+    "titel": "AoS gegen SoA messen",
+    "anleitung": "Implementiere beide Varianten für 1 Million Partikel und miss die Aktualisierung der Positionen mit `criterion`. Vergleiche danach die Cache-Misses mit `perf stat`.",
+    "befehle": [
+      "cargo new --lib partikel && cd partikel",
+      "cargo add --dev criterion",
+      "cargo bench",
+      "perf stat -e cycles,cache-misses target/release/deps/partikel-*"
+    ],
+    "beobachtung": "Vergrössere das ungenutzte Feld `name` in der AoS-Variante. Die Laufzeit der AoS-Schleife steigt mit, die der SoA-Variante bleibt gleich, weil sie die zusätzlichen Bytes nie lädt."
+  },
+  "begriffe": [
+    { "begriff": "Datenorientiertes Design", "englisch": "data-oriented design", "erklaerung": "Gestaltung von Software ausgehend von Daten und ihren Zugriffsmustern." },
+    { "begriff": "SoA / AoS", "englisch": "structure of arrays / array of structures", "erklaerung": "Zwei Arten, viele gleichartige Datensätze im Speicher anzuordnen." },
+    { "begriff": "ECS", "englisch": "entity component system", "erklaerung": "Architektur aus IDs, reinen Datenkomponenten und Systemen, die sie verarbeiten." }
+  ],
+  "weiterlesen": [
+    { "titel": "bevy_ecs", "url": "https://docs.rs/bevy_ecs/latest/bevy_ecs/" },
+    { "titel": "The Rust Performance Book", "url": "https://nnethercote.github.io/perf-book/" }
+  ]
+}

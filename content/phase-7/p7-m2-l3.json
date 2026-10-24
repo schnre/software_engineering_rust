@@ -1,0 +1,147 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m2-l3",
+  "phase": 7,
+  "modul": "7.2 RTOS und Frameworks in Rust",
+  "titel": "Prioritätsinversion und klassische RTOS aus Rust",
+  "lernziele": [
+    "Prioritätsinversion erkennen und Priority Inheritance von Priority Ceiling unterscheiden",
+    "Erklären, warum RTIC Prioritätsinversion begrenzt und Deadlocks ausschliesst",
+    "FreeRTOS, Zephyr und Tock OS als Alternativen für Rust einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "reihenfolge",
+      "frage": "Drei Tasks H (hoch), M (mittel), L (niedrig). H und L teilen einen Mutex. Bringe den Ablauf der **Prioritätsinversion** in die richtige Reihenfolge.",
+      "elemente": [
+        "L läuft und sperrt den Mutex",
+        "H wird bereit, verdrängt L und will den Mutex",
+        "H blockiert, L läuft weiter",
+        "M wird bereit und verdrängt L, weil M höher priorisiert ist",
+        "M rechnet lange, H wartet indirekt auf M, obwohl beide nichts teilen"
+      ],
+      "erklaerung": "Das ist **unbegrenzte Prioritätsinversion**: Die Wartezeit von H hängt von einer Task ab, die mit der Ressource nichts zu tun hat. Das berühmteste Beispiel ist der Mars Pathfinder 1997, der dadurch wiederholt neu startete, bis die Priority Inheritance per Fernwartung eingeschaltet wurde."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Gegenmassnahmen zu.",
+      "paare": [
+        { "links": "Priority Inheritance", "rechts": "L erbt die Priorität von H, sobald H auf den Mutex wartet" },
+        { "links": "Priority Ceiling (SRP)", "rechts": "Wer die Ressource sperrt, läuft sofort auf der höchsten Priorität aller Nutzer" },
+        { "links": "Kritischer Abschnitt mit gesperrten Interrupts", "rechts": "Niemand kann unterbrechen, auch völlig Unbeteiligte nicht" }
+      ],
+      "erklaerung": "FreeRTOS-Mutexe nutzen Priority Inheritance. RTIC nutzt Priority Ceiling: Die Priorität wird schon beim Sperren angehoben, nicht erst, wenn jemand wartet. Damit kann M gar nicht erst dazwischen kommen. Globales Sperren ist die gröbste Variante und verschlechtert die Latenz aller Interrupts."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum kann in RTIC keine unbegrenzte Prioritätsinversion entstehen?",
+      "optionen": [
+        "Während L die Ressource im `lock` hält, läuft L auf dem Ceiling. M liegt darunter und kann L nicht verdrängen. H wird höchstens für die Dauer eines kritischen Abschnitts verzögert",
+        "Weil RTIC Priority Inheritance zur Laufzeit berechnet",
+        "Weil RTIC alle Interrupts während jedes `lock` sperrt",
+        "Weil Tasks in RTIC immer dieselbe Priorität haben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei der Stack Resource Policy ist die Blockierzeit einer Task auf **einen** kritischen Abschnitt einer niedriger priorisierten Task begrenzt. Diese Schranke lässt sich direkt in die Antwortzeitanalyse aus Lektion 7.1.2 einsetzen. Dazu kommt: Weil eine Task nie auf eine gehaltene Ressource wartet, sind Deadlocks ausgeschlossen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Ceilings stehen schon beim Kompilieren fest, es gibt keine Laufzeitberechnung.",
+        "Gesperrt wird nur bis zum Ceiling (auf Cortex-M3 und neuer).",
+        "Prioritäten sind frei wählbar."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Zwei Threads in einem Rust-Programm unter einem Thread-basierten RTOS (hier mit `std::sync::Mutex` geschrieben). Was kann passieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "// Thread A",
+          "let _u = UART.lock().unwrap();",
+          "let _s = SPI.lock().unwrap();",
+          "",
+          "// Thread B",
+          "let _s = SPI.lock().unwrap();",
+          "let _u = UART.lock().unwrap();"
+        ]
+      },
+      "optionen": [
+        "Ein Deadlock: A hält UART und wartet auf SPI, B hält SPI und wartet auf UART",
+        "Ein Compilerfehler, weil zwei Mutexe gleichzeitig gesperrt werden",
+        "Nichts, der Borrow-Checker verhindert das zur Laufzeit",
+        "Eine Panik wegen Poisoning"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust verhindert Datenrennen, aber **keine Deadlocks**. Gegen Deadlocks hilft eine feste Sperrreihenfolge, die dokumentiert und überprüft wird. In RTIC ist das Problem strukturell gelöst: Verschachtelte `lock`-Aufrufe heben die Priorität nur weiter an, eine Task wartet nie auf eine andere.",
+      "begruendungen": [
+        "Richtig.",
+        "Mehrere Sperren gleichzeitig sind erlaubt.",
+        "Der Borrow-Checker arbeitet beim Kompilieren und sieht keine Sperrreihenfolgen.",
+        "Poisoning tritt nur auf, wenn ein Thread mit gehaltener Sperre panict."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Klassische RTOS mit Rust",
+      "tabelle": {
+        "kopf": ["System", "Ansatz", "Typischer Einsatz"],
+        "zeilen": [
+          ["FreeRTOS + `freertos-rust`", "C-Kernel, Rust-Wrapper für Tasks, Queues, Mutexe", "Bestehende FreeRTOS-Produkte schrittweise um Rust erweitern"],
+          ["Zephyr + Rust-Modul", "C-Kernel mit Treibern, Devicetree und Netzwerk; Rust-Anwendungen über offizielle Bindings", "Grosse Hardwarevielfalt, Bluetooth, zertifizierbare Basis"],
+          ["Tock OS", "Kernel in Rust, Apps als isolierte Prozesse mit MPU-Schutz", "Mehrere, teils nicht vertrauenswürdige Anwendungen auf einem Chip"],
+          ["RTIC, Embassy", "Reine Rust-Frameworks, kein klassischer Kernel", "Neue Firmware komplett in Rust"]
+        ]
+      },
+      "text": "Nicht jedes Projekt beginnt auf der grünen Wiese. Wer schon FreeRTOS oder Zephyr einsetzt, kann einzelne Komponenten in Rust schreiben und über FFI anbinden. Dann gelten die Regeln des C-Kernels: eigene Stacks pro Task, Mutexe mit Priority Inheritance und Deadlock-Gefahr."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Hersteller möchte auf einem Mikrocontroller Firmware von Drittanbietern ausführen, die sich gegenseitig nicht stören dürfen. Welche Lösung passt am besten?",
+      "optionen": [
+        "Tock OS, weil Anwendungen dort als getrennte Prozesse mit Speicherschutz durch die MPU laufen",
+        "RTIC, weil es deadlockfrei ist",
+        "Embassy, weil es keinen Heap braucht",
+        "Ein Superloop, weil er am einfachsten ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "RTIC und Embassy bauen **eine** Firmware, deren Teile sich vertrauen. Tock trennt Kernel und Anwendungen: Ein Absturz oder Fehlzugriff einer App betrifft nur diese App. Das kostet etwas RAM und Geschwindigkeit, ist aber für Plattformen mit nachladbaren Apps oder Sicherheitsschlüsseln gedacht.",
+      "begruendungen": [
+        "Richtig.",
+        "Deadlockfreiheit schützt nicht vor fehlerhaftem oder bösartigem Fremdcode.",
+        "Embassy-Tasks laufen alle im selben Adressraum ohne Isolation.",
+        "Ein Superloop bietet keinerlei Isolation."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Bei {{?}} wird die Priorität erst angehoben, wenn eine höhere Task wartet. Bei {{?}} geschieht das schon beim Sperren. Rust verhindert Datenrennen, aber keine {{?}}.",
+      "luecken": [{ "loesungen": ["Priority Inheritance"] }, { "loesungen": ["Priority Ceiling"] }, { "loesungen": ["Deadlocks"] }],
+      "auswahl": ["Priority Inheritance", "Priority Ceiling", "Deadlocks", "Round Robin", "Speicherlecks"],
+      "erklaerung": "Priority Ceiling ist einfacher zu analysieren, braucht aber das Wissen, wer welche Ressource benutzt. Genau dieses Wissen hat RTIC zur Übersetzungszeit aus den Task-Attributen."
+    }
+  ],
+  "praxis": "In gemischten Projekten ist die Sperrstrategie eine Architekturentscheidung: Welche Ressourcen werden geteilt, wie lange dauert der längste kritische Abschnitt, in welcher Reihenfolge wird gesperrt? Bei FreeRTOS gehört das in eine Review-Checkliste (Mutex statt binärer Semaphore für gegenseitigen Ausschluss, weil nur Mutexe Priority Inheritance haben). Bei RTIC prüft der Compiler das meiste selbst.",
+  "labor": {
+    "titel": "Deadlock auf dem PC provozieren",
+    "anleitung": "Schreibe ein Programm mit zwei Threads und zwei `std::sync::Mutex` wie im Beispiel. Füge zwischen den beiden `lock` ein kurzes `thread::sleep` ein. Behebe den Deadlock danach mit einer festen Sperrreihenfolge.",
+    "befehle": [
+      "cargo new deadlock && cd deadlock",
+      "cargo run",
+      "timeout 5 cargo run || echo \"hängt\""
+    ],
+    "beobachtung": "Das Programm hängt für immer, ohne Fehlermeldung. Der Compiler hat nichts bemerkt. Mit fester Reihenfolge (immer erst UART, dann SPI) läuft es durch."
+  },
+  "begriffe": [
+    { "begriff": "Prioritätsinversion", "englisch": "priority inversion", "erklaerung": "Eine hoch priorisierte Task wartet indirekt auf eine niedriger priorisierte." },
+    { "begriff": "Priority Inheritance", "englisch": "priority inheritance", "erklaerung": "Der Halter einer Sperre erbt die Priorität der wartenden Task." },
+    { "begriff": "Deadlock", "englisch": "deadlock", "erklaerung": "Zwei oder mehr Tasks warten gegenseitig auf Ressourcen und kommen nie weiter." },
+    { "begriff": "Tock OS", "englisch": "Tock OS", "erklaerung": "In Rust geschriebenes Betriebssystem für Mikrocontroller mit isolierten Anwendungen." }
+  ],
+  "weiterlesen": [
+    { "titel": "RTIC Book", "url": "https://rtic.rs/" },
+    { "titel": "docs.rs: freertos-rust", "url": "https://docs.rs/freertos-rust" },
+    { "titel": "Tock OS", "url": "https://www.tockos.org/" }
+  ]
+}

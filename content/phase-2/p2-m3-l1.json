@@ -1,0 +1,243 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m3-l1",
+  "phase": 2,
+  "modul": "2.3 Move, Copy und Lebenszeiten",
+  "titel": "Move-Semantik ohne Move-Konstruktor",
+  "lernziele": [
+    "Erklären, was bei einem Move in Rust auf Maschinenebene passiert",
+    "Rust-Moves mit `std::move` in C++ vergleichen",
+    "Werte aus Feldern und Containern verschieben, ohne den Borrow Checker zu verärgern"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "`let t = s;` verschiebt einen `String`. Was passiert dabei zur Laufzeit?",
+      "optionen": [
+        "Die 24 Byte (Zeiger, Länge, Kapazität) werden bitweise kopiert, der Heap-Puffer bleibt, wo er ist",
+        "Der Heap-Puffer wird in einen neuen Puffer kopiert",
+        "Ein Move-Konstruktor kopiert den Zeiger und setzt den von `s` auf null",
+        "Nichts: `t` ist nur ein zweiter Name für `s`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Move in Rust ist immer ein **bitweises Kopieren** (wie `memcpy`) der Bytes, die direkt im Wert stecken. Danach gilt die Quelle als nicht initialisiert. Es läuft kein Benutzer-Code, und `s` wird nicht verändert. Oft optimiert der Compiler die Kopie ganz weg. Gemessen: Nach dem Move zeigt `t.as_ptr()` auf denselben Heap-Puffer wie vorher `s.as_ptr()`, aber `&t` hat eine andere Stack-Adresse als `&s`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre ein `clone()`. Ein Move fasst den Heap nie an.",
+        "So arbeitet C++. Rust hat keinen Move-Konstruktor, und `s` wird nicht genullt.",
+        "`t` ist ein neuer Speicherplatz. Erst der Optimierer kann beide zusammenlegen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vergleich mit C++",
+      "text": "In C++ ist `std::move` nur ein Cast. Den eigentlichen Move macht ein Move-Konstruktor, den jede Klasse selbst schreiben kann. Das verschobene Objekt bleibt bestehen, „gültig, aber in unbestimmtem Zustand“, und sein Destruktor läuft später trotzdem.",
+      "tabelle": {
+        "kopf": [
+          "",
+          "C++",
+          "Rust"
+        ],
+        "zeilen": [
+          [
+            "Auslöser",
+            "explizit `std::move(x)`",
+            "implizit bei jeder Übergabe als Wert"
+          ],
+          [
+            "Ausführung",
+            "Move-Konstruktor (Benutzercode)",
+            "bitweise Kopie, kein Benutzercode"
+          ],
+          [
+            "Quelle danach",
+            "benutzbar, Zustand unbestimmt",
+            "Compilerfehler bei Zugriff (E0382)"
+          ],
+          [
+            "Destruktor der Quelle",
+            "läuft trotzdem",
+            "läuft nicht"
+          ],
+          [
+            "Kann fehlschlagen",
+            "ja (ohne `noexcept`)",
+            "nein"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Das C++-Programm kompiliert und läuft. Was gibt es aus?",
+      "code": {
+        "sprache": "cpp",
+        "zeilen": [
+          "std::string s = \"Hallo\";",
+          "std::string t = std::move(s);",
+          "std::cout << s.size() << \" \" << t << \"\\n\";"
+        ]
+      },
+      "optionen": [
+        "In der Praxis `0 Hallo`, garantiert ist nur ein gültiger, unbestimmter Zustand von `s`",
+        "Compilerfehler: `s` wurde verschoben",
+        "Garantiert `5 Hallo`",
+        "Undefined Behavior"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit GCC und libstdc++ kommt `0 Hallo` heraus, der Standard schreibt das aber nicht vor. Kein Compiler hindert dich daran, `s` weiterzubenutzen. Genau diese Lücke schliesst Rust: Der äquivalente Rust-Code scheitert mit E0382. Will man in Rust bewusst einen leeren Wert zurücklassen, sagt man es ausdrücklich, z. B. mit `std::mem::take`.",
+      "begruendungen": [
+        "Richtig.",
+        "C++ prüft verschobene Objekte nicht. Clang-Tidy warnt mit `bugprone-use-after-move`.",
+        "Bei langen Strings ist das praktisch nie so, und auch bei kurzen ist es nicht garantiert.",
+        "`size()` auf einem verschobenen `std::string` ist erlaubt. Das Objekt ist gültig."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Folgen der Move-Semantik",
+      "text": "Weil jeder Move ein simples Kopieren von Bytes ist, darf jeder Rust-Wert jederzeit im Speicher umziehen, ohne dass er es merkt. Das macht `Vec`-Wachstum billig und sicher. Es heisst aber auch: Ein Wert darf keinen Zeiger auf sich selbst speichern, denn der würde nach einem Move ins Leere zeigen. Für solche selbstreferenziellen Typen gibt es `Pin` (Phase 3).\n\nEine verschobene Variable kann man **neu zuweisen**: Nach `let t = s; s = String::from(\"b\");` ist `s` wieder benutzbar (dafür muss `s` mit `mut` deklariert sein)."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was sagt diese Fehlermeldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0382]: borrow of moved value: `k.name`",
+          " --> src/main.rs:6:20",
+          "  |",
+          "4 |     let n = k.name;",
+          "  |             ------ value moved here",
+          "5 |     println!(\"{}\", k.port);",
+          "6 |     println!(\"{}\", k.name);",
+          "  |                    ^^^^^^ value borrowed here after move",
+          "  |",
+          "  = note: move occurs because `k.name` has type `String`, which does not implement the `Copy` trait"
+        ]
+      },
+      "optionen": [
+        "`k` wurde nur teilweise verschoben: `k.port` ist noch benutzbar, `k.name` nicht mehr",
+        "Nach Zeile 4 ist das ganze Struct `k` unbenutzbar, auch `k.port`",
+        "Felder eines Structs darf man grundsätzlich nicht verschieben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust verfolgt Moves pro Feld (**partial move**). Zeile 5 ist erlaubt, Zeile 6 nicht. Das ganze `k` kann man nach einem partiellen Move nicht mehr als Wert benutzen, und hat `Konfig` ein eigenes `Drop`, ist schon das Herausverschieben eines Felds verboten (E0509).",
+      "begruendungen": [
+        "Richtig. Die Meldung zeigt nur Zeile 6 als Fehler, nicht Zeile 5.",
+        "Zeile 5 wird nicht beanstandet, `port` ist noch da.",
+        "Aus einer eigenen, lokalen Variable ohne `Drop`-Implementierung geht das sehr wohl."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Du willst einen `String` aus `namen: &mut Vec<String>` an Index `i` herausholen. Was tut welches Werkzeug?",
+      "paare": [
+        {
+          "links": "`let x = namen[i];`",
+          "rechts": "Fehler E0507: aus einem Index kann man nicht verschieben"
+        },
+        {
+          "links": "`std::mem::take(&mut namen[i])`",
+          "rechts": "Holt den Wert heraus und lässt `String::new()` zurück"
+        },
+        {
+          "links": "`std::mem::replace(&mut namen[i], neu)`",
+          "rechts": "Tauscht gegen einen selbst gewählten Ersatzwert"
+        },
+        {
+          "links": "`namen.swap_remove(i)`",
+          "rechts": "Entfernt das Element, das letzte rückt an seine Stelle"
+        }
+      ],
+      "erklaerung": "Durch eine Referenz darf man nie einfach etwas wegverschieben, sonst bliebe ein Loch zurück, das später gedroppt würde. `take` und `replace` lösen das, indem sie sofort einen gültigen Ersatz hineinlegen. `take` braucht dafür `Default`. Bei `Option`-Feldern ist `feld.take()` das übliche Muster."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "rustc meldet E0505 („cannot move out of `s` because it is borrowed“). In welcher Zeile wird der Fehler gemeldet?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let s = String::from(\"a\");",
+          "    let r = &s;",
+          "    let t = s;",
+          "    println!(\"{r} {t}\");",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Solange eine Referenz `r` auf `s` lebt (bis Zeile 5), darf `s` nicht verschoben werden, sonst würde `r` auf den alten, aufgegebenen Platz zeigen. Lösung: `println!` für `r` vor den Move ziehen oder `t` als `&s` ausleihen."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Ein Move in Rust ist ein {{?}} Kopieren der Bytes. Danach läuft für die Quelle {{?}} Destruktor. Will man bewusst einen leeren Wert zurücklassen, nimmt man {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "bitweises"
+          ]
+        },
+        {
+          "loesungen": [
+            "kein"
+          ]
+        },
+        {
+          "loesungen": [
+            "`std::mem::take`"
+          ]
+        }
+      ],
+      "auswahl": [
+        "bitweises",
+        "tiefes",
+        "kein",
+        "ein",
+        "`std::mem::take`",
+        "`std::move`"
+      ],
+      "erklaerung": "„Tiefes“ Kopieren macht `clone()`. `std::move` gibt es in Rust nicht. Das Schlüsselwort `move` existiert nur bei Closures (Phase 3)."
+    }
+  ],
+  "praxis": "C++-Entwickler suchen in Rust oft nach dem Move-Konstruktor oder schreiben aus Gewohnheit `.clone()`, um „sicher“ zu sein. Beides ist unnötig: Ein Move ist immer billig und kann nicht fehlschlagen. Grosse Werte (z. B. Arrays mit vielen KiB) sind beim Move allerdings so teuer wie ihr `memcpy`, das kann in Embedded-Code bei knappem Stack relevant werden. Dort übergibt man sie per Referenz oder legt sie in eine `Box` oder ein `static`.",
+  "labor": {
+    "titel": "Moves sichtbar machen",
+    "anleitung": "Gib vor und nach `let t = s;` sowohl `s.as_ptr()` bzw. `t.as_ptr()` (Heap-Puffer) als auch die Stack-Adresse der Variable (`&t as *const String`) aus. Merke dir die Adressen vor dem Move in Variablen, weil du nach dem Move nicht mehr auf `s` zugreifen darfst. Probiere danach `mem::take` und `mem::replace` aus.",
+    "befehle": [
+      "cargo new moves && cd moves",
+      "cargo run",
+      "cargo run --release"
+    ],
+    "beobachtung": "Der Heap-Zeiger bleibt gleich, die Stack-Adresse ändert sich (im Debug-Build). Im Release-Build legt der Optimierer `s` und `t` womöglich zusammen. Nach `take` ist die Quelle ein leerer String."
+  },
+  "begriffe": [
+    {
+      "begriff": "Move",
+      "englisch": "move",
+      "erklaerung": "Übergabe eines Werts als bitweise Kopie. Die Quelle wird danach vom Compiler als nicht initialisiert behandelt."
+    },
+    {
+      "begriff": "Partieller Move",
+      "englisch": "partial move",
+      "erklaerung": "Verschieben einzelner Felder aus einem Struct. Die übrigen Felder bleiben benutzbar."
+    },
+    {
+      "begriff": "Selbstreferenzieller Typ",
+      "englisch": "self-referential type",
+      "erklaerung": "Typ, der einen Zeiger auf sich selbst enthält. Darf nicht verschoben werden und braucht `Pin`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: What Is Ownership? (Variables and Data Interacting with Move)",
+      "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html"
+    },
+    {
+      "titel": "std::mem (take, replace, swap)",
+      "url": "https://doc.rust-lang.org/std/mem/index.html"
+    }
+  ]
+}

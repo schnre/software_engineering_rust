@@ -1,0 +1,207 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m1-l1",
+  "phase": 10,
+  "modul": "10.1 Prinzipien",
+  "titel": "SOLID mit Traits",
+  "lernziele": [
+    "Die fünf SOLID-Prinzipien auf Structs, Traits und Generics übertragen",
+    "Verstösse gegen Open/Closed, Liskov und Interface Segregation in Rust-Code erkennen",
+    "SOLID als Heuristik statt als Dogma einsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "srp",
+      "frage": "Was besagt das **Single Responsibility Principle**, übertragen auf ein Rust-Modul oder einen Struct?",
+      "optionen": [
+        "Ein Modul oder Struct sollte nur einen Grund haben, sich zu ändern",
+        "Ein Struct sollte nur einen einzigen `impl`-Block haben",
+        "Jedes Modul sollte genau eine öffentliche Funktion exportieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Es geht um Verantwortung, nicht ums Zählen. Ein Struct `Messstation`, das Sensoren ausliest **und** CSV formatiert **und** per MQTT sendet, ändert sich aus drei unabhängigen Gründen. Besser: drei Typen, die zusammenarbeiten. Das ist die Kohäsion aus Modul 9.1.",
+      "begruendungen": [
+        "Richtig.",
+        "Wie viele `impl`-Blöcke es gibt, ist reine Code-Organisation und sagt nichts über Verantwortung.",
+        "Viele öffentliche Funktionen sind in Ordnung, solange sie einer Aufgabe dienen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "SOLID ohne Klassen",
+      "text": "**SOLID** fasst fünf Entwurfsprinzipien zusammen (geprägt von Robert C. Martin). Rust hat keine Klassen, die Ideen passen trotzdem:\n\n- **S**ingle Responsibility: ein Grund zur Änderung pro Modul oder Typ\n- **O**pen/Closed: neues Verhalten durch eine neue `impl`, nicht durch Ändern bestehender Funktionen\n- **L**iskov Substitution: jede Implementierung eines Traits hält dessen Vertrag ein, auch den undokumentierten Teil\n- **I**nterface Segregation: mehrere kleine Traits statt eines grossen\n- **D**ependency Inversion: Fachlogik hängt von einem Trait ab, nicht von einem konkreten Treiber"
+    },
+    {
+      "typ": "zuordnen",
+      "id": "zuordnen-rust",
+      "frage": "Welches Rust-Mittel setzt welches Prinzip typischerweise um?",
+      "paare": [
+        { "links": "Single Responsibility", "rechts": "Ein Modul pro Aufgabe, z. B. `messung`, `format`, `versand`" },
+        { "links": "Open/Closed", "rechts": "Neuer Sensortyp = neuer Struct mit `impl Sensor`" },
+        { "links": "Liskov Substitution", "rechts": "Jede `impl` hält den dokumentierten Vertrag des Traits ein" },
+        { "links": "Interface Segregation", "rechts": "`Lesen` und `Schreiben` als getrennte Traits" },
+        { "links": "Dependency Inversion", "rechts": "`Regler<Q: TemperaturQuelle>` statt `Regler { fuehler: Tmp117 }`" }
+      ],
+      "erklaerung": "Die Standardbibliothek macht es vor: `std::io::Read` und `std::io::Write` sind getrennte, kleine Traits. Ein Typ implementiert, was er kann. Dependency Inversion kennst du aus Modul 9.3, dort als Dependency Injection über Generics oder `dyn Trait`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "e0046",
+      "frage": "Ein Temperaturfühler soll den Trait `Geraet` implementieren. Was sagt dir diese Ausgabe über das Design?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "trait Geraet {",
+          "    fn lies(&mut self) -> f32;",
+          "    fn schreibe(&mut self, wert: f32);",
+          "    fn kalibriere(&mut self);",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling solid v0.1.0 (/home/user/solid)",
+          "error[E0046]: not all trait items implemented, missing: `schreibe`, `kalibriere`",
+          " --> src/main.rs:9:1",
+          "  |",
+          "3 |     fn schreibe(&mut self, wert: f32);",
+          "  |     ---------------------------------- `schreibe` from trait",
+          "4 |     fn kalibriere(&mut self);",
+          "  |     ------------------------- `kalibriere` from trait",
+          "...",
+          "9 | impl Geraet for Temperaturfuehler {",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `schreibe`, `kalibriere` in implementation"
+        ]
+      },
+      "optionen": [
+        "Der Trait ist zu breit: Ein Fühler kann nicht schreiben. Besser getrennte Traits wie `Lesbar`, `Schreibbar`, `Kalibrierbar`",
+        "Man sollte `schreibe` mit `unimplemented!()` ergänzen, dann ist alles in Ordnung",
+        "Der Compiler kann Traits mit mehr als zwei Methoden nicht automatisch prüfen",
+        "Der Fühler muss `#[derive(Geraet)]` verwenden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Fehler E0046 ist hier ein Design-Signal: Der Trait verlangt mehr, als der Typ sinnvoll kann. Wer mit `unimplemented!()` oder `panic!` stopft, verletzt gleich zwei Prinzipien: Interface Segregation (Trait zu gross) und Liskov (nicht jedes `Geraet` ist überall einsetzbar). Mit kleinen Traits schreibt eine Funktion genau die Fähigkeit in ihre Signatur, die sie braucht: `fn protokolliere(q: &mut impl Lesbar)`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das kompiliert, verschiebt den Fehler aber in eine Panic zur Laufzeit.",
+        "Die Anzahl Methoden spielt keine Rolle, es fehlen schlicht zwei Implementierungen.",
+        "Für eigene Traits gibt es kein `derive`, ausser man schreibt ein prozedurales Makro."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "liskov",
+      "frage": "Der Trait verspricht: `lies` blockiert nie. Welches Prinzip verletzt `LangsamerFuehler`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "/// Vertrag: `lies` blockiert nie und liefert den letzten bekannten Wert.",
+          "trait TemperaturQuelle {",
+          "    fn lies(&mut self) -> f32;",
+          "}",
+          "",
+          "impl TemperaturQuelle for LangsamerFuehler {",
+          "    fn lies(&mut self) -> f32 {",
+          "        while !self.bereit {",
+          "            self.bereit = pruefe_hardware();",
+          "        }",
+          "        21.5",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Liskov Substitution: Die Signatur passt, aber das versprochene Verhalten nicht",
+        "Open/Closed: Der Trait müsste für jeden Fühler geändert werden",
+        "Interface Segregation: Der Trait hat zu viele Methoden",
+        "Keins, der Code kompiliert ja"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Compiler prüft nur Signaturen. Zusagen wie „blockiert nie“, „liefert Werte in °C“ oder „ist idempotent“ stehen in der Dokumentation, und jede Implementierung muss sie einhalten. Ein Regler, der `lies` aus einem Timer-Interrupt aufruft, hängt sonst fest. Solche Verträge gehören in den Doc-Kommentar des Traits und in Tests, die man gegen **jede** Implementierung laufen lässt.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Trait bleibt unverändert, die neue Implementierung ist sogar eine reine Erweiterung.",
+        "Der Trait hat nur eine Methode.",
+        "Kompilieren heisst nur, dass die Typen stimmen, nicht dass der Vertrag eingehalten wird."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Open/Closed: Trait oder Enum?",
+      "text": "In Rust gibt es zwei Arten, Varianten abzubilden, mit entgegengesetzten Stärken:\n\n- **Trait**: Ein neuer Sensortyp ist ein neuer Struct mit `impl Sensor`. Bestehender Code bleibt unberührt, auch in fremden Crates. Das ist Open/Closed im klassischen Sinn.\n- **Enum**: Die Menge der Varianten ist geschlossen. Eine neue Variante zwingt dich, jedes `match` anzupassen, aber der Compiler zeigt dir jede Stelle (E0004). Dafür kommt eine neue **Operation** ohne Änderung an den Varianten aus.\n\nWelche Achse sich öfter ändert, Typen oder Operationen, entscheidet. Mehr dazu in Modul 10.5."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "dip",
+      "frage": "Ergänze den Regler so, dass er nur von einer Abstraktion abhängt (Dependency Inversion).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Regler<Q: {{?}}> {",
+          "    quelle: Q,",
+          "    sollwert: f32,",
+          "}",
+          "",
+          "impl<Q: TemperaturQuelle> Regler<Q> {",
+          "    fn new(quelle: {{?}}, sollwert: f32) -> Self {",
+          "        Self { quelle, sollwert }",
+          "    }",
+          "",
+          "    fn heizen(&mut self) -> bool {",
+          "        self.quelle.{{?}}() < self.sollwert",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["TemperaturQuelle"] },
+        { "loesungen": ["Q"] },
+        { "loesungen": ["lies"] }
+      ],
+      "auswahl": ["TemperaturQuelle", "Q", "lies", "Tmp117", "Box<dyn Any>", "read"],
+      "erklaerung": "Der Regler kennt nur den Trait, den er selbst braucht. Im Produkt bekommt er einen echten I²C-Fühler, im Test einen Fake mit festen Werten. Weil `Q` ein Generic ist, entsteht kein Laufzeit-Overhead: Der Compiler erzeugt pro konkretem Typ eigenen Code (Monomorphisierung, Modul 2.5)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "yagni",
+      "frage": "Ein Kollege führt für jeden Struct im Projekt einen eigenen Trait ein, „falls wir später austauschen wollen“. Wie bewertest du das?",
+      "optionen": [
+        "Als Überabstraktion: Ein Trait lohnt sich, wenn es eine zweite Implementierung oder einen Test-Fake wirklich gibt",
+        "Als vorbildlich: Mehr Traits bedeuten immer bessere Architektur",
+        "Als nötig, weil Rust ohne Traits keine Unit-Tests erlaubt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Traits mit genau einer Implementierung und Generics überall machen Signaturen länger, Fehlermeldungen schwerer lesbar und verlängern die Kompilierzeit. Das Gegengewicht zu SOLID heisst **YAGNI** (*you aren't gonna need it*). Faustregel: Abstraktion einführen, wenn ein Test oder eine zweite Plattform sie braucht. Ein Refactoring von Struct zu Trait ist in Rust dank Compiler-Unterstützung meist schnell gemacht.",
+      "begruendungen": [
+        "Richtig.",
+        "Jede Abstraktion kostet Lesbarkeit. Sie muss sich durch Nutzen bezahlt machen.",
+        "Viele Tests brauchen gar keinen Trait, etwa für reine Funktionen auf Daten."
+      ]
+    }
+  ],
+  "praxis": "Im Review helfen die Prinzipien, ein Unbehagen konkret zu benennen: „Dieser Trait zwingt den Fühler zu einem `unimplemented!()`“ oder „Diese Implementierung blockiert, obwohl der Trait das ausschliesst“. Gerade in Embedded-Treibern lohnt es sich, Verträge wie „blockiert nicht“ oder „darf aus einem Interrupt aufgerufen werden“ im Doc-Kommentar festzuhalten. Ein Senior erkennt aber auch das Gegenteil: Traits für Dinge, die es nur einmal gibt, sind Aufwand ohne Nutzen.",
+  "labor": {
+    "titel": "Stopfstellen finden",
+    "anleitung": "Suche in einem eigenen Projekt oder einem bekannten Crate nach Trait-Implementierungen, die Methoden nur mit `unimplemented!()`, `todo!()` oder `panic!` füllen. Jede Fundstelle ist ein Kandidat für einen kleineren Trait.",
+    "befehle": [
+      "rg -n 'unimplemented!\\(|todo!\\(' src/",
+      "rg -n '^pub trait' src/ | wc -l",
+      "cargo clippy -- -W clippy::todo -W clippy::unimplemented"
+    ],
+    "beobachtung": "Clippy meldet jede Stelle mit `todo!` oder `unimplemented!` als Warnung. Im Produktionscode sollten solche Makros in Trait-Implementierungen nicht vorkommen. Taucht ein grosser Trait viele Male mit Stopfstellen auf, teile ihn in kleinere Traits auf."
+  },
+  "begriffe": [
+    { "begriff": "SOLID", "englisch": "SOLID", "erklaerung": "Fünf Entwurfsprinzipien: Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion." },
+    { "begriff": "Liskov-Prinzip", "englisch": "Liskov substitution principle", "erklaerung": "Jede Implementierung eines Traits muss sich so verhalten, wie der Trait es verspricht, nicht nur dieselbe Signatur haben." },
+    { "begriff": "Interface Segregation", "englisch": "interface segregation principle", "erklaerung": "Mehrere kleine, gezielte Traits statt eines grossen, damit niemand Methoden anbieten oder benutzen muss, die er nicht braucht." },
+    { "begriff": "YAGNI", "englisch": "you aren't gonna need it", "erklaerung": "Keine Abstraktion oder Funktion auf Vorrat bauen, die man noch nicht braucht." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Programming Language, Kapitel 10: Generic Types, Traits, and Lifetimes", "url": "https://doc.rust-lang.org/book/ch10-00-generics.html" },
+    { "titel": "Rust API Guidelines", "url": "https://rust-lang.github.io/api-guidelines/" }
+  ]
+}

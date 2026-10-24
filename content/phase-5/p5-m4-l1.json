@@ -1,0 +1,229 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m4-l1",
+  "phase": 5,
+  "modul": "5.4 Performance verstehen",
+  "titel": "Messen statt raten: Benchmarks mit Criterion",
+  "lernziele": [
+    "Erklären, warum Messungen im Debug-Profil und Einzelmessungen wenig aussagen",
+    "Einen Benchmark mit Criterion und `black_box` aufsetzen",
+    "Die Ausgabe von `cargo bench` mit Konfidenzintervall und Änderung lesen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "debug-messung",
+      "frage": "Eine Summe über 10 Millionen `u64` dauert mit `cargo run` 61 ms, mit `cargo run --release` 17 ms und beim nächsten Release-Lauf 10 ms. Was folgt daraus?",
+      "optionen": [
+        "Debug-Builds taugen nicht für Performance-Messungen, und eine einzelne Messung schwankt stark",
+        "Der Release-Build ist fehlerhaft, weil er zwei verschiedene Zeiten liefert",
+        "Die Funktion ist 6-mal schneller geworden, das gehört ins Changelog",
+        "Man sollte immer die kürzeste Zeit eines Debug-Laufs angeben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Debug-Profil (`opt-level = 0`) optimiert nicht, hat Überlaufprüfungen eingeschaltet und ruft jeden Iterator-Adapter als echte Funktion auf. Wie schnell Code dort läuft, sagt fast nichts über das Release-Verhalten. Und selbst im Release-Build streuen Einzelmessungen: CPU-Takt, Caches, Seitenfehler beim ersten Zugriff und andere Prozesse spielen mit. (Die Zahlen stammen aus einem echten Lauf mit `Instant::now()`.)",
+      "begruendungen": [
+        "Richtig.",
+        "Streuung ist normal. Deshalb misst man viele Male und wertet statistisch aus.",
+        "Verglichen wurden Debug und Release, nicht zwei Versionen der Funktion.",
+        "Debug-Zahlen sind für Performance-Aussagen bedeutungslos."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Criterion",
+      "text": "Das Crate **Criterion** ist der Standard für Mikro-Benchmarks (*micro benchmarks*) auf stable Rust. Es wärmt auf, misst eine Funktion viele tausend Mal in 100 Stichproben, berechnet ein **Konfidenzintervall** (*confidence interval*) und vergleicht automatisch mit dem letzten Lauf.\n\nBenchmarks liegen in `benches/`. `cargo bench` baut sie mit dem `bench`-Profil, das die Einstellungen von `release` übernimmt. `harness = false` schaltet das eingebaute (nur auf nightly verfügbare) `#[bench]`-Gerüst ab, damit Criterion seine eigene `main` mitbringt.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[dev-dependencies]",
+          "criterion = \"0.8\"",
+          "",
+          "[[bench]]",
+          "name = \"summe\"",
+          "harness = false"
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-criterion",
+      "frage": "Ergänze den Benchmark in `benches/summe.rs`.",
+      "code": {
+        "sprache": "rust",
+        "datei": "benches/summe.rs",
+        "zeilen": [
+          "use criterion::{criterion_group, criterion_main, Criterion};",
+          "use std::hint::{{?}};",
+          "",
+          "fn bench(c: &mut Criterion) {",
+          "    let v: Vec<u64> = (0..10_000).collect();",
+          "    c.bench_function(\"summe_iter\", |b| {",
+          "        b.{{?}}(|| summe_iter(black_box(&v)))",
+          "    });",
+          "}",
+          "",
+          "criterion_group!(benches, bench);",
+          "{{?}}!(benches);"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["black_box"] },
+        { "loesungen": ["iter"] },
+        { "loesungen": ["criterion_main"] }
+      ],
+      "auswahl": ["black_box", "iter", "criterion_main", "main", "Instant", "repeat"],
+      "erklaerung": "`b.iter(…)` ruft die Closure so oft auf, wie Criterion es für eine stabile Messung braucht. `criterion_main!` erzeugt die `main`-Funktion, die alle Gruppen ausführt. `std::hint::black_box` ist seit Rust 1.66 stabil und ersetzt das ältere `criterion::black_box`."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "ohne-black-box",
+      "frage": "Ein Benchmark meldet für diese Funktion 0,3 ns – schneller als ein einzelner Speicherzugriff. Was ist wahrscheinlich passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "c.bench_function(\"quadratsumme\", |b| {",
+          "    b.iter(|| {",
+          "        let mut s = 0u64;",
+          "        for i in 0..1000 {",
+          "            s += i * i;",
+          "        }",
+          "        s",
+          "    })",
+          "});"
+        ]
+      },
+      "optionen": [
+        "Die Eingabe ist eine Konstante. Der Optimierer hat das Ergebnis zur Compilezeit ausgerechnet, gemessen wird fast nichts",
+        "Criterion misst falsch, wenn die Closure einen Wert zurückgibt",
+        "Die CPU hat die Schleife auf 1000 Kerne verteilt",
+        "Im `bench`-Profil sind Überlaufprüfungen aktiv, das beschleunigt Schleifen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "LLVM erkennt, dass `0..1000` bekannt ist, und ersetzt die Schleife durch eine Konstante. Genau dafür gibt es `black_box`: Der Optimierer muss annehmen, dass der Wert beliebig sein könnte, z. B. `for i in 0..black_box(1000)`. Den Rückgabewert der Closure übergibt Criterion übrigens selbst an `black_box`, damit die Berechnung nicht ganz wegfällt.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Rückgabewert ist sogar erwünscht: Criterion verhindert damit, dass die Berechnung ganz entfernt wird.",
+        "Eine Schleife wird nie automatisch auf mehrere Kerne verteilt.",
+        "Im `bench`-Profil (wie `release`) sind Überlaufprüfungen ausgeschaltet. Schneller würden sie ohnehin nichts machen."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "criterion-ausgabe",
+      "frage": "Du hast die Implementierung geändert und `cargo bench` erneut ausgeführt. Was sagt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo bench",
+        "ausgabe": [
+          "Benchmarking summe_iter: Collecting 100 samples in estimated 5.0143 s (1.5M iterations)",
+          "Benchmarking summe_iter: Analyzing",
+          "summe_iter              time:   [3.6127 µs 3.8681 µs 4.1156 µs]",
+          "                        change: [−57.286% −51.802% −45.730%] (p = 0.00 < 0.05)",
+          "                        Performance has improved."
+        ]
+      },
+      "optionen": [
+        "Bester Schätzwert 3,87 µs pro Aufruf, wahrscheinlich zwischen 3,61 und 4,12 µs. Gegenüber dem letzten Lauf etwa 52 % schneller, statistisch signifikant",
+        "Der schnellste Aufruf dauerte 3,61 µs, der langsamste 4,12 µs",
+        "Die Funktion wurde nur einmal gemessen, das Ergebnis ist unsicher",
+        "Die Änderung ist zufällig, weil p kleiner als 0,05 ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die drei Zahlen sind untere Grenze, Schätzwert und obere Grenze eines Konfidenzintervalls (standardmässig 95 %), nicht Minimum und Maximum. `change` vergleicht mit dem gespeicherten letzten Lauf in `target/criterion/`. Ein kleiner p-Wert heisst: Ein so grosser Unterschied wäre durch Zufall sehr unwahrscheinlich. Vorsicht: Das gilt nur, wenn beide Läufe unter gleichen Bedingungen auf derselben Maschine stattfanden.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist ein Konfidenzintervall für den Mittelwert, keine Extremwerte.",
+        "Gemessen wurde 100 Stichproben mit insgesamt 1,5 Millionen Aufrufen.",
+        "Genau umgekehrt: Ein kleiner p-Wert spricht gegen Zufall."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Gute Benchmarks",
+      "text": "- **Realistische Eingaben**: Grösse und Verteilung wie im Betrieb. Ein Sortierbenchmark mit bereits sortierten Daten misst etwas anderes.\n- **Ruhige Maschine**: Kein Browser-Video nebenher, Laptop am Netzteil. Auf CI-Runnern schwanken Zeiten oft um 10 % und mehr.\n- **Gleiche Bedingungen**: Für Vergleiche Baseline speichern (`cargo bench -- --save-baseline vorher`) und gegen sie messen (`--baseline vorher`).\n- **Makro vor Mikro**: Ein Mikro-Benchmark zeigt, ob eine Funktion schneller wurde, nicht, ob das ganze Programm es merkt. Wo die Zeit wirklich bleibt, zeigt erst ein Profiler (nächste Lektion).\n\nAlternativen zu Criterion: `divan` (kompakter, mit Allokationszählung) und `iai-callgrind`, das Instruktionen statt Zeit zählt und deshalb auch auf lauten CI-Runnern stabil ist."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "profile-einstellungen",
+      "frage": "Welche Einstellung in `[profile.release]` bewirkt was?",
+      "paare": [
+        { "links": "`opt-level = 3`", "rechts": "Höchste Optimierungsstufe, Standard im Release-Profil" },
+        { "links": "`lto = \"fat\"`", "rechts": "Optimierung über Crate-Grenzen hinweg beim Linken" },
+        { "links": "`codegen-units = 1`", "rechts": "Langsamerer Build, dafür mehr Optimierungsmöglichkeiten" },
+        { "links": "`debug = true`", "rechts": "Debuginfo für Profiler, ohne die Optimierung zu ändern" },
+        { "links": "`panic = \"abort\"`", "rechts": "Kein Unwinding-Code, etwas kleineres Binary" }
+      ],
+      "erklaerung": "Benchmarks sollten mit genau dem Profil laufen, mit dem ausgeliefert wird. Wer in Produktion LTO nutzt, aber ohne misst, vergleicht Äpfel mit Birnen. LTO und Codegen-Units sind Thema in Phase 1."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "ci-benchmarks",
+      "frage": "Das Team will Performance-Regressionen in der CI automatisch erkennen. Die Criterion-Zeiten auf den geteilten CI-Runnern schwanken um ±15 %. Was ist am sinnvollsten?",
+      "optionen": [
+        "Instruktionen zählen (z. B. `iai-callgrind`) oder dedizierte Benchmark-Maschinen nutzen",
+        "Jede Abweichung über 1 % als Fehler melden",
+        "Benchmarks in der CI im Debug-Profil laufen lassen, das geht schneller",
+        "Benchmarks ganz weglassen, Performance kann man nicht automatisch prüfen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zeitmessungen auf geteilter Hardware sind zu verrauscht für feine Schwellen. Die Anzahl ausgeführter Instruktionen unter Valgrind/Callgrind ist dagegen fast deterministisch. Sie bildet Cache-Effekte nur unvollständig ab, eignet sich aber gut als Frühwarnsystem. Echte Zeitmessungen gehören auf ruhige, immer gleiche Maschinen.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei ±15 % Rauschen würde fast jeder Lauf rot.",
+        "Debug-Zahlen sagen nichts über die ausgelieferte Performance.",
+        "Mit dem richtigen Messverfahren geht es gut, viele Projekte machen das."
+      ]
+    }
+  ],
+  "praxis": "Bevor du eine Optimierung im Review akzeptierst, fragst du nach der Messung: Welches Profil, welche Eingabe, wie viele Wiederholungen, wie gross ist die Streuung? „Fühlt sich schneller an“ und eine einzelne `Instant::now()`-Messung im Debug-Build sind keine Belege. Ein Criterion-Bericht mit Baseline-Vergleich ist es.",
+  "labor": {
+    "titel": "Zwei Implementierungen vergleichen",
+    "anleitung": "Lege ein Bibliotheks-Crate mit zwei Summenfunktionen an: eine mit Indexschleife `for i in 0..v.len()`, eine mit `v.iter().sum()`. Miss beide mit Criterion. Speichere zuerst eine Baseline und miss danach die zweite Variante dagegen.",
+    "befehle": [
+      "cargo new --lib bench && cd bench",
+      "cargo add --dev criterion",
+      "cargo bench -- --save-baseline vorher",
+      "cargo bench -- --baseline vorher",
+      "xdg-open target/criterion/report/index.html"
+    ],
+    "beobachtung": "Criterion zeigt `time`, `change` und eine Einschätzung (`improved`, `regressed` oder `No change in performance detected`). Der HTML-Bericht enthält Verteilungen und Regressionsdiagramme. Ausreisser (*outliers*) werden gezählt und gemeldet. Viele „high severe“ deuten auf eine unruhige Maschine hin."
+  },
+  "begriffe": [
+    {
+      "begriff": "Mikro-Benchmark",
+      "englisch": "micro benchmark",
+      "erklaerung": "Messung einer kleinen, isolierten Codeeinheit, meist einer einzelnen Funktion."
+    },
+    {
+      "begriff": "Konfidenzintervall",
+      "englisch": "confidence interval",
+      "erklaerung": "Bereich, in dem der wahre Wert mit einer gewählten Wahrscheinlichkeit (z. B. 95 %) liegt."
+    },
+    {
+      "begriff": "black_box",
+      "englisch": "black box",
+      "erklaerung": "`std::hint::black_box` verhindert, dass der Optimierer einen Wert als bekannt annimmt und Berechnungen wegoptimiert."
+    },
+    {
+      "begriff": "Baseline",
+      "englisch": "baseline",
+      "erklaerung": "Gespeicherte Referenzmessung, gegen die spätere Läufe verglichen werden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Criterion.rs auf docs.rs",
+      "url": "https://docs.rs/criterion"
+    },
+    {
+      "titel": "std::hint::black_box",
+      "url": "https://doc.rust-lang.org/std/hint/fn.black_box.html"
+    },
+    {
+      "titel": "The Cargo Book: Profiles",
+      "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+    }
+  ]
+}

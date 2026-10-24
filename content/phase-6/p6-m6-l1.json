@@ -1,0 +1,158 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m6-l1",
+  "phase": 6,
+  "modul": "6.6 Analoge Werte und DMA",
+  "titel": "ADC: Spannungen messen",
+  "lernziele": [
+    "Auflösung, Referenzspannung und Abtastung eines ADC erklären",
+    "Rohwerte mit Festkomma-Arithmetik ohne Überlauf in Millivolt umrechnen",
+    "Rauschen durch Mittelung reduzieren"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "lsb",
+      "frage": "Ein 12-Bit-ADC mit 3,3 V Referenzspannung. Welcher Spannung entspricht ein Schritt (1 LSB) ungefähr?",
+      "optionen": ["0,8 mV", "3,3 mV", "12,9 mV", "0,08 mV"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Ein **ADC** (*analog-to-digital converter*) bildet die Spannung zwischen 0 und der **Referenzspannung** auf 2¹² = 4096 Stufen ab. 3300 mV / 4096 ≈ 0,8 mV. Feiner als das kann der ADC nicht unterscheiden, in der Praxis ist er durch Rauschen sogar etwas ungenauer.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre bei 10 Bit (1024 Stufen).",
+        "Das wäre bei 8 Bit (256 Stufen).",
+        "Das wäre bei 16 Bit (65 536 Stufen)."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Wie ein ADC misst",
+      "text": "Ein typischer Mikrocontroller-ADC arbeitet nach dem Prinzip der **sukzessiven Approximation** (SAR): Er lädt in der **Abtastzeit** (*sample time*) einen kleinen Kondensator auf die Eingangsspannung auf und vergleicht dann Bit für Bit. Hat die Quelle einen hohen Innenwiderstand, braucht der Kondensator mehr Zeit. Ist die Abtastzeit zu kurz, misst du zu niedrige Werte.\n\nIm HAL wählst du Kanal und Abtastzeit pro Messung, z. B. bei `stm32f4xx-hal` mit `adc.convert(&pin, SampleTime::Cycles_480)`. Den Pin vorher mit `into_analog()` umschalten, Typestate wie in Modul 6.3."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "ueberlauf",
+      "frage": "Die Umrechnung `fn millivolt(roh: u16) -> u16 { roh * 3300 / 4095 }` wird auf dem PC mit `roh = 2048` getestet. Was zeigt das?",
+      "terminal": {
+        "befehl": "cargo run",
+        "ausgabe": [
+          "thread 'main' (11087) panicked at src/main.rs:2:5:",
+          "attempt to multiply with overflow",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+        ]
+      },
+      "optionen": [
+        "`2048 · 3300` passt nicht in `u16`. Im Debug-Build panikt Rust, im Release-Build kommt ohne Prüfung ein falscher Wert heraus",
+        "Die Division durch 4095 ist das Problem",
+        "Der Fehler tritt nur auf dem PC auf, auf dem Mikrocontroller rechnet `u16` in 32 Bit",
+        "`u16` kann keine Millivolt darstellen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Zwischenrechnung braucht bis zu 4095 · 3300 ≈ 13,5 Mio., also mehr als 16 Bit. Rust rechnet im Typ der Operanden, es gibt keine Erweiterung auf `int` wie in C. Mit `--release` liefert dieselbe Funktion für 2048 den Wert 2, weil `overflow-checks` dort standardmässig aus sind. Richtig ist: erst erweitern, dann rechnen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Division ist harmlos, das Problem entsteht bei der Multiplikation davor.",
+        "Rust rechnet auf jedem Target im Typ `u16`. Das ist ein Unterschied zu C.",
+        "Bis 3300 mV passt in `u16`. Nur das Zwischenergebnis ist zu gross."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "festkomma",
+      "frage": "Ergänze die Umrechnung in Festkomma-Arithmetik mit Rundung.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "const VREF_MV: u32 = 3300;",
+          "const MAX: u32 = 4095;",
+          "",
+          "fn millivolt(roh: u16) -> u32 {",
+          "    (u32::{{?}}(roh) * VREF_MV + {{?}}) / MAX",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["from"] }, { "loesungen": ["MAX / 2"] }],
+      "auswahl": ["from", "try_from", "MAX / 2", "1"],
+      "erklaerung": "`u32::from(roh)` ist eine verlustfreie Erweiterung, besser als `as`, weil sie nie still abschneidet. Die Hälfte des Teilers vorher zu addieren, rundet kaufmännisch statt abzuschneiden. Ergebnis: 0 → 0, 2048 → 1650, 4095 → 3300. **Festkomma** heisst: Du rechnest in Ganzzahlen mit einer festen Einheit (hier mV) statt in `f32`. Auf einem Cortex-M0 ohne FPU ist das ein Vielfaches schneller."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "vref-kalibrierung",
+      "frage": "Die Versorgung des Boards schwankt zwischen 3,25 V und 3,35 V, und der ADC benutzt sie als Referenz. Was hilft?",
+      "optionen": [
+        "Die interne Referenz (VREFINT) mitmessen und mit dem ab Werk gespeicherten Kalibrierwert die tatsächliche Versorgung berechnen",
+        "Die Abtastzeit verlängern",
+        "Mit `f64` statt `u32` rechnen",
+        "Mehr Bits verwenden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der ADC misst immer relativ zur Referenz. Schwankt sie um 3 %, schwankt jeder Messwert mit. Viele Chips haben eine stabile interne Referenz und im Flash einen Kalibrierwert. `stm32f4xx-hal` nutzt das in `Adc::sample_to_millivolts`, das intern mit der kalibrierten VDDA rechnet.",
+      "begruendungen": [
+        "Richtig.",
+        "Das hilft bei hochohmigen Quellen, nicht bei einer falschen Referenz.",
+        "Die Genauigkeit der Rechnung ist nicht das Problem, sondern die Annahme 3,3 V.",
+        "Mehr Bits verfeinern die Stufen, die Referenz bleibt ungenau."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "mittelung",
+      "frage": "Vier Messungen ergeben 2040, 2052, 2047 und 2061. Was liefert diese Funktion?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn mittel(werte: &[u16; 4]) -> u16 {",
+          "    let summe: u32 = werte.iter().map(|&w| u32::from(w)).sum();",
+          "    (summe / 4) as u16",
+          "}"
+        ]
+      },
+      "optionen": ["2050", "2051", "8200", "Eine Panik wegen Überlauf"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Summe ist 8200, geteilt durch 4 ergibt 2050. Mittelung über N Messungen reduziert zufälliges Rauschen ungefähr um den Faktor √N: Vier Werte halbieren es. Mit einer Zweierpotenz als N wird die Division zu einer Schiebeoperation. Die Summe in `u32` zu bilden, verhindert den Überlauf aus dem vorigen Schritt.",
+      "begruendungen": [
+        "Richtig.",
+        "Ganzzahlige Division rundet ab, und 8200 / 4 geht ohnehin glatt auf.",
+        "Das ist die Summe vor der Division.",
+        "Die Summe wird in `u32` gebildet, das reicht für sehr viele 12-Bit-Werte."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "adc-fehler",
+      "frage": "Ordne die Symptome den Ursachen zu.",
+      "paare": [
+        { "links": "Werte zu niedrig bei hochohmigem Spannungsteiler", "rechts": "Abtastzeit zu kurz" },
+        { "links": "Alle Werte um denselben Faktor daneben", "rechts": "Referenzspannung anders als angenommen" },
+        { "links": "Werte springen um viele LSB", "rechts": "Rauschen, z. B. durch Schaltregler oder fehlende Filterung" },
+        { "links": "Im Release-Build plötzlich Unsinn", "rechts": "Überlauf in der Umrechnung, nur im Debug geprüft" }
+      ],
+      "erklaerung": "Der letzte Punkt ist typisch für Rust-Firmware: Tests im Debug-Build finden den Überlauf als Panik. Wer sicher sein will, rechnet mit `checked_mul` oder schaltet `overflow-checks = true` auch im Release-Profil ein (Modul 1.6)."
+    }
+  ],
+  "praxis": "Bei Messwerten im Feld geht es selten um die letzte Stelle hinter dem Komma, sondern um Robustheit: Referenz kalibrieren, Abtastzeit passend zur Quelle wählen, mitteln und plausibilisieren. Die Umrechnungsfunktionen sind reine Logik ohne Hardware, schreibe dafür Unit-Tests auf dem PC, inklusive der Randwerte 0 und 4095.",
+  "labor": {
+    "titel": "Überlauf und Rundung testen",
+    "anleitung": "Schreibe die naive und die korrigierte Umrechnung und teste beide mit 0, 1, 2048 und 4095, einmal im Debug- und einmal im Release-Build.",
+    "befehle": [
+      "cargo new adc && cd adc",
+      "cargo run",
+      "cargo run --release",
+      "cargo test"
+    ],
+    "beobachtung": "Die naive Version panikt im Debug-Build und liefert im Release-Build falsche Werte (für 2048 nur 2). Die Version mit `u32::from` liefert 0, 1, 1650 und 3300."
+  },
+  "begriffe": [
+    { "begriff": "ADC", "englisch": "analog-to-digital converter", "erklaerung": "Baustein, der eine Spannung in einen Zahlenwert umwandelt." },
+    { "begriff": "Auflösung", "englisch": "resolution", "erklaerung": "Anzahl Bits bzw. Stufen, in die der Messbereich geteilt wird." },
+    { "begriff": "Referenzspannung", "englisch": "reference voltage", "erklaerung": "Spannung, die dem Maximalwert des ADC entspricht." },
+    { "begriff": "Festkomma", "englisch": "fixed-point arithmetic", "erklaerung": "Rechnen mit Ganzzahlen in einer festen Einheit statt mit Gleitkomma." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Arithmetic overflow", "url": "https://doc.rust-lang.org/reference/expressions/operator-expr.html" },
+    { "titel": "stm32f4xx-hal (docs.rs)", "url": "https://docs.rs/stm32f4xx-hal" }
+  ]
+}

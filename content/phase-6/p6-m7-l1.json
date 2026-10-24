@@ -1,0 +1,154 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m7-l1",
+  "phase": 6,
+  "modul": "6.7 Start, Updates und Zuverlässigkeit",
+  "titel": "Vom Reset bis #[entry]",
+  "lernziele": [
+    "Den Startablauf eines Cortex-M mit `cortex-m-rt` Schritt für Schritt beschreiben",
+    "Erklären, warum `.data` kopiert und `.bss` genullt werden muss, bevor Rust-Code läuft",
+    "`memory.x`, Vektortabelle und Stack-Pointer zuordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "erste-zwei-worte",
+      "frage": "Was liest ein Cortex-M nach dem Reset als Erstes aus dem Speicher?",
+      "optionen": [
+        "Zwei Worte am Anfang der Vektortabelle: den Startwert des Stack-Pointers und die Adresse des Reset-Handlers",
+        "Die Funktion `main`",
+        "Eine Konfigurationsdatei aus dem Flash",
+        "Den ersten Befehl bei Adresse 0"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Kern lädt das erste Wort in den **Stack-Pointer** (SP) und das zweite in den Programmzähler. Darum kann der Reset-Handler bereits Funktionen aufrufen. `cortex-m-rt` legt die Tabelle per Linker-Skript an den Anfang des Flash: Das erste Wort ist `_stack_start` (standardmässig das Ende des RAM), das zweite die Adresse von `Reset`.",
+      "begruendungen": [
+        "Richtig.",
+        "`main` kommt erst nach der Initialisierung.",
+        "Ein Mikrocontroller hat kein Dateisystem beim Start.",
+        "Bei Cortex-M steht an Adresse 0 kein Befehl, sondern der Stack-Startwert."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "startablauf",
+      "frage": "Bringe den Startablauf mit `cortex-m-rt` in die richtige Reihenfolge.",
+      "elemente": [
+        "Kern lädt SP und Reset-Vektor aus der Vektortabelle",
+        "`Reset` ruft `__pre_init` auf (standardmässig leer)",
+        "`.bss` wird mit Nullen gefüllt",
+        "`.data` wird aus dem Flash ins RAM kopiert",
+        "FPU wird eingeschaltet (nur bei Targets mit FPU)",
+        "Sprung in die mit `#[entry]` markierte Funktion"
+      ],
+      "erklaerung": "Der Reset-Handler von `cortex-m-rt` ist in Assembler geschrieben (`global_asm!`), weil vor dem Initialisieren des RAM kein Rust-Code laufen darf. Kehrt die `#[entry]`-Funktion doch zurück, landet der Kern auf einem `udf`-Befehl und damit im HardFault, darum die Signatur `-> !`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": ".data und .bss",
+      "text": "Ein `static ZAEHLER: AtomicU32 = AtomicU32::new(7);` braucht beim Start den Wert 7 im RAM. Der Startwert liegt im Flash (die **Ladeadresse**, LMA), die Variable selbst im RAM (die **Laufzeitadresse**, VMA). Der Reset-Handler kopiert den Block `.data` von `__sidata` nach `__sdata`…`__edata`.\n\nStatische Werte, die mit Nullen beginnen, landen in `.bss`. Sie brauchen keinen Platz im Flash, der Reset-Handler setzt den Bereich `__sbss`…`__ebss` auf 0. Diese Symbole definiert das Linker-Skript `link.x`."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "sektion-zuordnen",
+      "frage": "Wo landen diese Rust-Items?",
+      "paare": [
+        { "links": "`static TABELLE: [u16; 4] = [1, 2, 3, 4];`", "rechts": "`.rodata` im Flash" },
+        { "links": "`static Z: AtomicU32 = AtomicU32::new(7);`", "rechts": "`.data`: im RAM, Startwert im Flash" },
+        { "links": "`static mut PUFFER: [u8; 1024] = [0; 1024];`", "rechts": "`.bss`: im RAM, beim Start genullt" },
+        { "links": "`fn main() -> !`", "rechts": "`.text` im Flash" }
+      ],
+      "erklaerung": "Ein `static` mit innerer Veränderlichkeit (Atomic, `Mutex`, `Cell`) muss ins RAM, auch wenn es nicht `mut` ist. Ein `const` belegt keinen eigenen Speicherplatz, er wird an jeder Verwendungsstelle eingesetzt. Mit `cargo size -- -A` siehst du die Grösse jeder Sektion (Modul 1.4)."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "memory-x",
+      "frage": "Ergänze die `memory.x` für einen STM32F411 mit 512 KB Flash und 128 KB RAM.",
+      "code": {
+        "sprache": "linker",
+        "datei": "memory.x",
+        "zeilen": [
+          "MEMORY",
+          "{",
+          "  FLASH : ORIGIN = {{?}}, LENGTH = 512K",
+          "  RAM   : ORIGIN = {{?}}, LENGTH = {{?}}",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["0x08000000"] }, { "loesungen": ["0x20000000"] }, { "loesungen": ["128K"] }],
+      "auswahl": ["0x08000000", "0x20000000", "128K", "0x00000000", "512K"],
+      "erklaerung": "`cortex-m-rt` erwartet genau die Regionen `FLASH` und `RAM`. Optional kannst du `_stack_start` setzen, etwa um den Stack in einen schnellen CCM-RAM zu legen. Stimmen die Werte nicht, meldet der Linker einen Überlauf (zu klein) oder das Programm stürzt beim ersten Zugriff ab (zu gross oder falsche Adresse)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "pre-init",
+      "frage": "Ein Chip startet mit aktivem Watchdog, der abläuft, bevor ein grosses `.bss` genullt ist. Was ist in aktuellem `cortex-m-rt` der empfohlene Weg?",
+      "optionen": [
+        "Eine Funktion `__pre_init` mit `core::arch::global_asm!` in Assembler schreiben. Das Attribut `#[pre_init]` ist veraltet, weil Rust-Code vor der RAM-Initialisierung undefiniertes Verhalten ist",
+        "`#[pre_init] unsafe fn deaktiviere_watchdog()` in Rust verwenden",
+        "Den Watchdog in der ersten Zeile von `main` ausschalten",
+        "`.bss` im Linker-Skript entfernen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cortex-m-rt` 0.7.6 hat `#[pre_init]` als *deprecated* markiert. Rust-Code darf annehmen, dass alle `static`s ihren Startwert haben, und das stimmt vor dem Kopieren von `.data` nicht. Der Reset-Handler ruft weiterhin `__pre_init` auf, das du in Assembler bereitstellen kannst. Für Spezialfälle gibt es Features wie `zero-init-ram`, `set-vtor` oder `paint-stack`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das funktioniert noch, erzeugt aber eine Deprecation-Warnung und ist formal undefiniertes Verhalten.",
+        "Dann ist es eventuell zu spät, der Watchdog hat schon zurückgesetzt.",
+        "Ohne `.bss` hätten genullte `static`s zufällige Startwerte."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "stack-ueberlauf",
+      "frage": "Der Stack beginnt am Ende des RAM und wächst nach unten. `.bss` und `.data` liegen am Anfang des RAM. Was passiert bei zu tiefer Rekursion?",
+      "code": {
+        "sprache": "text",
+        "zeilen": [
+          "0x2002_0000  ┌──────────────┐  <- _stack_start",
+          "             │ Stack ↓      │",
+          "             │              │",
+          "             │ .bss         │",
+          "0x2000_0000  │ .data        │",
+          "             └──────────────┘"
+        ]
+      },
+      "optionen": [
+        "Der Stack wächst still in `.bss` und `.data` hinein und überschreibt `static`s, ohne dass es einen Fehler gibt",
+        "Rust erkennt den Überlauf und panikt mit „stack overflow“ wie auf dem PC",
+        "Der Kern löst sofort einen MemManage Fault aus",
+        "Der Stack wächst automatisch in den Flash"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auf dem PC fängt eine Wächterseite (*guard page*) des Betriebssystems den Überlauf ab. Auf einem Cortex-M ohne MPU-Konfiguration gibt es so etwas nicht. Abhilfe: **flip-link** vertauscht die Anordnung, sodass der Stack unten liegt und beim Überlauf aus dem RAM heraus läuft. Das löst einen HardFault aus, statt Daten zu zerstören (Phase 7).",
+      "begruendungen": [
+        "Richtig.",
+        "Die Erkennung auf dem PC kommt vom Betriebssystem, das hier fehlt.",
+        "Nur, wenn die MPU entsprechend eingerichtet ist. Standardmässig nicht.",
+        "Flash ist nicht beschreibbar wie RAM."
+      ]
+    }
+  ],
+  "praxis": "Wenn eine Firmware „vor `main`“ abstürzt, liegt es fast immer am Start: falsche `memory.x`, ein Bootloader, der VTOR nicht setzt, oder ein Watchdog, der während der RAM-Initialisierung zuschlägt. Mit `cargo objdump -- -h` und `nm` prüfst du Adressen und Symbole wie `Reset`, `__sbss` und `_stack_start`, bevor du den Debugger anwirfst.",
+  "labor": {
+    "titel": "Sektionen eines Rust-Binaries",
+    "anleitung": "Schreibe auf dem PC ein Programm mit einem `static`-Array, einem `static mut` mit Nullen und einem `static mut` mit Startwert. Prüfe mit `nm`, in welcher Sektion sie landen.",
+    "befehle": [
+      "rustc --edition 2024 -O st.rs -o st",
+      "nm -C st | grep -E 'TABELLE|ZAEHLER|PUFFER'",
+      "objdump -h st | grep -E 'rodata|\\.data|\\.bss'"
+    ],
+    "beobachtung": "Das unveränderliche Array erscheint mit `r` (read-only), das `static mut` mit Startwert mit `d` (data), genullte Daten mit `b` (bss). Nicht benutzte `static`s entfernt der Optimierer ganz."
+  },
+  "begriffe": [
+    { "begriff": "Reset-Handler", "englisch": "reset handler", "erklaerung": "Code, der nach dem Reset RAM initialisiert und dann `main` aufruft." },
+    { "begriff": ".bss", "englisch": "block started by symbol", "erklaerung": "Sektion für mit Nullen initialisierte statische Daten; braucht keinen Platz im Flash." },
+    { "begriff": "Ladeadresse", "englisch": "load memory address, LMA", "erklaerung": "Adresse, an der Daten im Image liegen, z. B. Startwerte im Flash." },
+    { "begriff": "memory.x", "englisch": "memory.x", "erklaerung": "Linker-Skript-Fragment mit den Speicherregionen FLASH und RAM für `cortex-m-rt`." }
+  ],
+  "weiterlesen": [
+    { "titel": "cortex-m-rt (docs.rs)", "url": "https://docs.rs/cortex-m-rt" },
+    { "titel": "The Embedonomicon", "url": "https://docs.rust-embedded.org/embedonomicon/" }
+  ]
+}

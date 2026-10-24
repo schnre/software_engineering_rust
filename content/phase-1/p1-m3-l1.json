@@ -1,0 +1,238 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m3-l1",
+  "phase": 1,
+  "modul": "1.3 Bibliotheken",
+  "titel": "Crate-Typen: rlib, staticlib, cdylib & Co.",
+  "lernziele": [
+    "Die Crate-Typen `bin`, `lib`/`rlib`, `dylib`, `staticlib`, `cdylib` und `proc-macro` unterscheiden",
+    "Beschreiben, was in einem `.rlib` steckt",
+    "Erklären, warum Rust-Programme standardmässig statisch gegen Rust-Crates linken"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Dein Rust-Programm nutzt 120 Crates von crates.io. Welche davon braucht es beim Start als eigene Datei auf dem Zielsystem?",
+      "optionen": [
+        "Keine: Alle Rust-Crates sind ins Binary hineingelinkt, nur Systembibliotheken wie `libc` werden dynamisch geladen",
+        "Alle 120, als `.so`-Dateien neben dem Programm",
+        "Nur die Standardbibliothek `libstd.so`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo baut Abhängigkeiten als **rlib** und linkt sie statisch ins Programm. Auch `std` wird statisch gelinkt. Auf Linux zeigt `ldd` bei einem typischen Rust-Programm deshalb nur `libc.so.6`, `libgcc_s.so.1` (für das Unwinding) und den Loader.",
+      "begruendungen": [
+        "Richtig. Ein Rust-Binary lässt sich meist als einzelne Datei ausliefern.",
+        "Das wäre nur so, wenn alle Crates als `dylib` gebaut würden. Das tut Cargo standardmässig nicht.",
+        "Auch `std` liegt standardmässig im Binary. `libstd-….so` gibt es zwar, sie wird aber nur mit `-C prefer-dynamic` verwendet."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sechs Crate-Typen",
+      "text": "Den Typ legst du in `Cargo.toml` unter `[lib] crate-type = […]` fest oder bei rustc mit `--crate-type`.",
+      "tabelle": {
+        "kopf": [
+          "Typ",
+          "Ergebnis (Linux)",
+          "Für wen"
+        ],
+        "zeilen": [
+          [
+            "`bin`",
+            "ausführbare Datei",
+            "Endnutzer"
+          ],
+          [
+            "`lib` / `rlib`",
+            "`libname.rlib`",
+            "andere Rust-Crates (Standard für Bibliotheken)"
+          ],
+          [
+            "`dylib`",
+            "`libname.so`",
+            "Rust-Programme, die dynamisch linken"
+          ],
+          [
+            "`staticlib`",
+            "`libname.a`",
+            "C/C++-Programme, statisch"
+          ],
+          [
+            "`cdylib`",
+            "`libname.so`",
+            "C, Python, Node … über das C-ABI"
+          ],
+          [
+            "`proc-macro`",
+            "`libname.so`",
+            "rustc selbst, zur Compilezeit"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was steckt in einem `.rlib`?",
+      "terminal": {
+        "befehl": "ar t libmathe.rlib",
+        "ausgabe": [
+          "lib.rmeta",
+          "lib.rmeta-link",
+          "mathe.mathe.57bea18cfcf54103-cgu.0.rcgu.o"
+        ]
+      },
+      "optionen": [
+        "Ein `ar`-Archiv mit Metadaten für rustc und Object-Files mit dem Maschinencode",
+        "Nur Rust-Quelltext, den das nutzende Crate neu übersetzt",
+        "Eine fertig gelinkte Shared Library mit anderer Endung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `.rlib` ist ein gewöhnliches `ar`-Archiv wie eine `.a`-Datei. Die Metadaten (`lib.rmeta`) enthalten Typen, Signaturen, `pub`-Informationen und das MIR generischer und `#[inline]`-Funktionen. rustc braucht sie, um das nutzende Crate zu prüfen. Die `.rcgu.o`-Dateien sind die Object-Files der Codegen-Units. Deshalb braucht Rust keine Header-Dateien.",
+      "begruendungen": [
+        "Richtig. Metadaten ersetzen die Header, die Object-Files liefern den Code.",
+        "Quelltext steckt nicht drin. Für Generics liefert das `.rlib` aufbereitetes MIR, keinen Text.",
+        "`ar t` funktioniert nur mit Archiven. Eine Shared Library ist eine ELF-Datei."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Crate-Typ passt zum Vorhaben?",
+      "paare": [
+        {
+          "links": "Rust-Code in eine bestehende C-Firmware (`make`, `arm-none-eabi-gcc`) einbauen",
+          "rechts": "`staticlib`"
+        },
+        {
+          "links": "Ein Python-Modul in Rust schreiben (z. B. mit PyO3)",
+          "rechts": "`cdylib`"
+        },
+        {
+          "links": "Eine Bibliothek auf crates.io veröffentlichen",
+          "rechts": "`lib` (rlib)"
+        },
+        {
+          "links": "Ein eigenes `#[derive(Register)]` schreiben",
+          "rechts": "`proc-macro`"
+        }
+      ],
+      "erklaerung": "`staticlib` und `cdylib` sind für Nicht-Rust-Nutzer gedacht und exportieren nur, was mit `#[unsafe(no_mangle)] extern \"C\"` markiert ist. `rlib` ist das Format für Rust-zu-Rust. `proc-macro` wird von rustc beim Übersetzen geladen und läuft auf dem Build-Rechner, nicht auf dem Ziel."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Dieselbe kleine Bibliothek mit einer exportierten Funktion `mathe_addiere`, einmal als `staticlib`, einmal als `cdylib` gebaut. Warum ist die `.a` so viel grösser?",
+      "terminal": {
+        "befehl": "ls -l libmathe.*",
+        "ausgabe": [
+          "-rw-r--r-- 1 user user 21988126 libmathe.a",
+          "-rw-r--r-- 1 user user     7566 libmathe.rlib",
+          "-rwxr-xr-x 1 user user  4316888 libmathe.so"
+        ]
+      },
+      "optionen": [
+        "Die `staticlib` enthält die ganze Standardbibliothek als Object-Files. Erst der C-Linker wirft Unbenutztes weg",
+        "Die `staticlib` wird immer ohne Optimierung gebaut",
+        "Die `.a` enthält den Quelltext aller Abhängigkeiten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine `staticlib` muss für sich allein linkbar sein. Deshalb packt rustc alle benötigten Rust-Crates, inklusive `std`, `core` und `alloc`, als Object-Files ins Archiv (hier über 300). Die `cdylib` ist bereits gelinkt, unbenutzter Code ist entfernt, und sie exportiert nur `mathe_addiere`. Das `.rlib` ist winzig, weil es `std` nicht enthält: Das bringt der spätere Rust-Linkschritt mit.",
+      "begruendungen": [
+        "Richtig. `ar t libmathe.a | wc -l` zählt hier 328 Object-Files.",
+        "Beide wurden mit `-O` gebaut. Die Grösse kommt vom Inhalt, nicht von der Optimierung.",
+        "Auch eine `staticlib` enthält nur Maschinencode und Symbole, keinen Quelltext."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze `Cargo.toml`, damit dieselbe Bibliothek sowohl für Rust-Nutzer als auch als Shared Library für C gebaut wird.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[{{?}}]",
+          "crate-type = [\"rlib\", \"{{?}}\"]"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "lib"
+          ]
+        },
+        {
+          "loesungen": [
+            "cdylib"
+          ]
+        }
+      ],
+      "auswahl": [
+        "lib",
+        "cdylib",
+        "package",
+        "dylib"
+      ],
+      "erklaerung": "`crate-type` gehört in den Abschnitt `[lib]`. Mehrere Typen sind erlaubt, Cargo baut dann alle. `dylib` wäre eine Rust-Shared-Library ohne stabiles ABI und für C-Nutzer ungeeignet."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Worin unterscheiden sich `dylib` und `cdylib`?",
+      "optionen": [
+        "`dylib` exportiert die ganze Rust-Schnittstelle für Rust-Nutzer derselben Compiler-Version, `cdylib` nur die `extern \"C\"`-Funktionen",
+        "`dylib` ist für macOS, `cdylib` für Linux",
+        "`cdylib` ist die ältere Bezeichnung für `dylib`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine `dylib` enthält Rust-Metadaten und exportiert viele gemangelte Rust-Symbole. In unserem Beispiel waren es 1763 Einträge in `nm -D`, bei der `cdylib` genau einer. Weil Rust kein stabiles ABI hat, funktioniert eine `dylib` nur mit genau dem rustc, der sie gebaut hat (Lektion 1.3.3). In der Praxis ist `cdylib` deutlich häufiger.",
+      "begruendungen": [
+        "Richtig. `cdylib` ist die Variante für die Aussenwelt.",
+        "Beide gibt es auf allen Plattformen. Nur die Dateiendung unterscheidet sich (`.so`, `.dylib`, `.dll`).",
+        "Es sind zwei verschiedene Typen mit unterschiedlichem Zweck."
+      ]
+    }
+  ],
+  "praxis": "Im Embedded-Bereich ist `staticlib` der übliche Weg, Rust schrittweise in bestehende C-Firmware einzuführen: Ein Modul nach dem anderen wird in Rust neu geschrieben und als `.a` dazugelinkt. Auf dem Desktop und Server ist `cdylib` der Weg für Plugins, Python- (PyO3, maturin) und Node-Module. Achtung bei mehreren `staticlib`s in einem C-Programm: Jede bringt ihre eigene Kopie von `std` mit, was zu doppelten Symbolen führen kann. Besser ist ein gemeinsames Rust-Crate als einzige `staticlib`.",
+  "labor": {
+    "titel": "Ein Crate, vier Formate",
+    "anleitung": "Schreibe eine `mathe.rs` mit einer normalen `pub fn` und einer `#[unsafe(no_mangle)] pub extern \"C\" fn` und baue sie in allen Bibliotheks-Formaten.",
+    "befehle": [
+      "for t in rlib staticlib cdylib; do rustc -O --crate-type=$t mathe.rs; done",
+      "ls -l libmathe.*",
+      "ar t libmathe.rlib && ar t libmathe.a | wc -l",
+      "nm -D --defined-only libmathe.so",
+      "rustc --crate-type=staticlib --print native-static-libs mathe.rs"
+    ],
+    "beobachtung": "Die `cdylib` exportiert nur die `extern \"C\"`-Funktion. Die letzte Zeile nennt die Systembibliotheken, die ein C-Programm zusätzlich zur `.a` linken muss, auf Linux etwa `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`."
+  },
+  "begriffe": [
+    {
+      "begriff": "rlib",
+      "englisch": "Rust library",
+      "erklaerung": "Standardformat für Rust-Bibliotheken: `ar`-Archiv mit Metadaten und Object-Files."
+    },
+    {
+      "begriff": "Crate-Metadaten",
+      "englisch": "crate metadata",
+      "erklaerung": "Von rustc erzeugte Beschreibung der öffentlichen Schnittstelle eines Crates. Ersetzt Header-Dateien."
+    },
+    {
+      "begriff": "staticlib",
+      "englisch": "static library crate type",
+      "erklaerung": "Crate-Typ, der eine `.a` mit allen Rust-Abhängigkeiten für C-Linker erzeugt."
+    },
+    {
+      "begriff": "cdylib",
+      "englisch": "C dynamic library",
+      "erklaerung": "Crate-Typ für eine Shared Library, die nur die C-ABI-Exporte nach aussen zeigt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Reference: Linkage",
+      "url": "https://doc.rust-lang.org/reference/linkage.html"
+    },
+    {
+      "titel": "The Cargo Book: Cargo Targets (crate-type)",
+      "url": "https://doc.rust-lang.org/cargo/reference/cargo-targets.html"
+    }
+  ]
+}

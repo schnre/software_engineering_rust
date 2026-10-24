@@ -1,0 +1,181 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m2-l2",
+  "phase": 6,
+  "modul": "6.2 Register und Bits",
+  "titel": "Peripheral Access Crates",
+  "lernziele": [
+    "Erklären, wie aus einer SVD-Datei mit svd2rust ein PAC entsteht",
+    "Register mit `read`, `write` und `modify` eines PACs ansprechen",
+    "Begründen, warum `Peripherals::take()` Peripherie als Singleton mit Ownership verwaltet"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "svd-was",
+      "frage": "Woher kennt ein PAC wie `stm32f4` die Adressen und Bitfelder von über hundert Peripherie-Blöcken?",
+      "optionen": [
+        "Es wird mit `svd2rust` aus der SVD-Datei des Herstellers erzeugt, einer XML-Beschreibung aller Register",
+        "Jemand hat alle Register aus dem Referenzhandbuch von Hand abgetippt",
+        "Es liest die Register zur Laufzeit aus dem Chip aus",
+        "rustc kennt die Register aller Chips eingebaut"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine **SVD-Datei** (*System View Description*) beschreibt Peripherie, Register, Felder und erlaubte Werte maschinenlesbar. **svd2rust** generiert daraus ein **PAC** (*Peripheral Access Crate*): ein Modul pro Peripherie, eine Methode pro Register, eine Methode pro Feld. SVD-Dateien haben Fehler, darum korrigieren Projekte wie `stm32-rs` sie mit Patch-Dateien, bevor sie generieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei Tausenden Registern wäre das fehleranfällig und kaum wartbar.",
+        "Die Struktur ist zur Compilezeit bekannt, das macht den Zugriff kostenlos.",
+        "rustc kennt nur Architekturen wie Thumb, keine Peripherie bestimmter Hersteller."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die read/write/modify-API",
+      "text": "Jedes Register hat drei Grundoperationen. `write` beginnt beim **Resetwert** des Registers, `modify` beim aktuellen Inhalt. Die Closures bekommen typisierte Hilfsobjekte: `r` zum Lesen, `w` zum Schreiben. Alles wird zu genau den volatile Zugriffen inliniert, die du von Hand schreiben würdest.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use stm32f4::stm32f411 as pac;",
+          "",
+          "let dp = pac::Peripherals::take().unwrap();",
+          "dp.RCC.ahb1enr().modify(|_, w| w.gpioaen().set_bit());",
+          "dp.GPIOA.moder().modify(|_, w| w.moder5().output());",
+          "dp.GPIOA.bsrr().write(|w| w.bs5().set_bit());",
+          "let an = dp.GPIOA.odr().read().odr5().bit_is_set();",
+          "dp.GPIOA.odr().write(|w| unsafe { w.bits(1 << 5) });"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Takt für GPIOA einschalten, andere Bits bleiben erhalten." },
+          { "zeile": 5, "text": "Aufzählungswerte aus der SVD werden zu Methoden wie `output()`." },
+          { "zeile": 6, "text": "`write`: alle anderen Bits auf Resetwert; bei `BSRR` genau richtig." },
+          { "zeile": 8, "text": "Rohe Bits sind `unsafe`, weil sie ungültige Feldwerte erzeugen könnten." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "write-statt-modify",
+      "frage": "PA2 ist bereits als alternative Funktion (UART) konfiguriert. Danach läuft dieser Code. Was passiert mit PA2?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "dp.GPIOA.moder().write(|w| w.moder5().output());"
+        ]
+      },
+      "optionen": [
+        "PA2 fällt auf seinen Resetwert zurück und die UART sendet nicht mehr, weil `write` alle nicht genannten Felder auf den Resetwert setzt",
+        "PA2 bleibt unverändert, weil nur `moder5` geschrieben wird",
+        "Compilerfehler, weil `write` nur ganze Register kennt",
+        "Panik zur Laufzeit wegen eines Konflikts"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`write` schreibt das **ganze** Register: Was du nicht nennst, bekommt den Resetwert. Um ein einzelnes Feld zu ändern, nimmst du `modify(|_, w| …)`. Das ist ein Lese-Ändere-Schreibe-Zugriff, mit dem Risiko aus der letzten Lektion, wenn eine ISR dazwischenkommt.",
+      "begruendungen": [
+        "Richtig.",
+        "Das gilt für `modify`, nicht für `write`.",
+        "Die Closure darf beliebig viele oder wenige Felder setzen.",
+        "Es gibt keine Prüfung zur Laufzeit, es wird einfach geschrieben."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "pac-api",
+      "frage": "Ergänze: Bit 0 (`CEN`) im Steuerregister `CR1` von TIM2 setzen, ohne andere Felder zu ändern, und danach den Zählerstand lesen.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "dp.TIM2.cr1().{{?}}(|_, w| w.cen().{{?}}());",
+          "let stand: u32 = dp.TIM2.cnt().{{?}}().bits();"
+        ]
+      },
+      "luecken": [{ "loesungen": ["modify"] }, { "loesungen": ["set_bit"] }, { "loesungen": ["read"] }],
+      "auswahl": ["modify", "write", "set_bit", "clear_bit", "read", "get"],
+      "erklaerung": "`modify` erhält die übrigen Felder von `CR1`. `set_bit()` gibt es für 1-Bit-Felder, `bits(n)` für breitere. `read()` liefert ein Lese-Objekt, `.bits()` daraus den rohen Registerwert."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "zweimal-gpioa",
+      "frage": "Ein Kollege will GPIOA an zwei Treiber übergeben. Was sagt dir die Meldung?",
+      "terminal": {
+        "befehl": "cargo check",
+        "ausgabe": [
+          "error[E0382]: use of moved value: `dp.GPIOA`",
+          " --> src/lib.rs:7:28",
+          "  |",
+          "6 |     let led = Led { _g: dp.GPIOA };",
+          "  |                         -------- value moved here",
+          "7 |     let taster = Led { _g: dp.GPIOA };",
+          "  |                            ^^^^^^^^ value used here after move",
+          "  |",
+          "  = note: move occurs because `dp.GPIOA` has type `Periph<stm32f4::stm32f411::gpioa::RegisterBlock, 1073872896>`, which does not implement the `Copy` trait"
+        ]
+      },
+      "optionen": [
+        "Die Peripherie ist ein Wert mit genau einem Besitzer. Nach dem ersten Move kann niemand anders mehr darauf zugreifen",
+        "Das PAC hat einen Fehler, `Periph` sollte `Copy` sein",
+        "Man muss `dp.GPIOA.clone()` schreiben",
+        "1073872896 ist ein falscher Wert, das ist die eigentliche Ursache"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Genau das ist der Trick: Der Borrow-Checker verhindert, dass zwei Programmteile unkoordiniert an denselben Registern drehen. Die Zahl im Typ ist die Basisadresse `0x4002_0000` dezimal, sie steckt im Typ, nicht im Speicher. Ein `Periph`-Wert ist darum nullgross, die Garantie kostet zur Laufzeit nichts. Teilen musst du bewusst: aufteilen mit `split()` (HAL) oder mit `&` bzw. einem Mutex.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre gerade gewollt nicht `Copy`, sonst gäbe es keine Exklusivität.",
+        "`Periph` implementiert kein `Clone`, aus demselben Grund.",
+        "`1073872896` ist `0x4002_0000`, die korrekte Basisadresse von GPIOA."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "take-zweimal",
+      "frage": "Was liefert ein zweiter Aufruf von `pac::Peripherals::take()`?",
+      "optionen": ["`None`", "Eine zweite, unabhängige Kopie aller Peripherie", "Eine Panik", "Denselben Wert noch einmal"],
+      "korrekt": 0,
+      "erklaerung": "`take()` merkt sich in einer `static`-Variable, ob die Peripherie schon ausgegeben wurde (abgesichert durch einen kritischen Abschnitt). Darum gibt es im ganzen Programm genau ein **Singleton**. Wer es trotzdem braucht, etwa im Panic-Handler, nimmt `unsafe { Peripherals::steal() }` und übernimmt damit selbst die Verantwortung.",
+      "begruendungen": [
+        "Richtig.",
+        "Das würde die Exklusivität aushebeln.",
+        "Erst das `unwrap()` auf `None` würde paniken.",
+        "Der Wert wurde beim ersten Mal herausgegeben (verschoben) und ist weg."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "schichten",
+      "frage": "Ordne die Schichten der Embedded-Rust-Welt zu.",
+      "paare": [
+        { "links": "SVD-Datei", "rechts": "XML-Beschreibung der Register vom Hersteller" },
+        { "links": "PAC", "rechts": "Generierter, typsicherer Zugriff auf jedes Register" },
+        { "links": "HAL-Crate", "rechts": "Treiber mit Konzepten wie Pin, Serial, Timer" },
+        { "links": "`cortex-m`", "rechts": "Zugriff auf Kern-Peripherie wie NVIC und SysTick" }
+      ],
+      "erklaerung": "Die Kern-Peripherie gehört zu ARM, nicht zum Hersteller. Darum kommt sie aus `cortex_m::Peripherals::take()`, die Herstellerperipherie aus `pac::Peripherals::take()`. HAL-Crates implementieren die Traits aus `embedded-hal`, damit Treiber über Chipgrenzen hinweg funktionieren (Modul 6.3)."
+    }
+  ],
+  "praxis": "Im Alltag arbeitest du meist mit dem HAL und greifst nur für Spezialfälle zum PAC, etwa für ein Register, das der HAL nicht abdeckt. Dann gilt: `modify` statt `write`, wenn du andere Felder erhalten willst, und Referenzhandbuch daneben öffnen. Bei auffälligem Verhalten lohnt ein Blick, ob die SVD-Datei (und damit das PAC) einen bekannten Fehler hat.",
+  "labor": {
+    "titel": "Ein PAC erkunden",
+    "anleitung": "Lege eine Bibliothek an, füge das PAC für den STM32F411 hinzu und lass dir die Dokumentation erzeugen. Suche `GPIOA`, das Register `MODER` und das Feld `MODER5`.",
+    "befehle": [
+      "cargo new --lib pac-test && cd pac-test",
+      "cargo add stm32f4 --features stm32f411",
+      "cargo add cortex-m",
+      "cargo check",
+      "cargo doc --open"
+    ],
+    "beobachtung": "Das PAC kompiliert auch auf dem PC, `cargo check` reicht zum Ausprobieren der API. Die Dokumentation zeigt für jedes Feld die erlaubten Werte als Methoden."
+  },
+  "begriffe": [
+    { "begriff": "PAC", "englisch": "peripheral access crate", "erklaerung": "Aus einer SVD-Datei generiertes Crate mit typsicherem Registerzugriff." },
+    { "begriff": "SVD-Datei", "englisch": "System View Description", "erklaerung": "XML-Beschreibung aller Peripherie-Register eines Chips." },
+    { "begriff": "svd2rust", "englisch": "svd2rust", "erklaerung": "Werkzeug, das aus einer SVD-Datei Rust-Code für ein PAC erzeugt." },
+    { "begriff": "Singleton", "englisch": "singleton", "erklaerung": "Objekt, das es im Programm genau einmal gibt; hier über `take()` vergeben." }
+  ],
+  "weiterlesen": [
+    { "titel": "svd2rust (docs.rs)", "url": "https://docs.rs/svd2rust" },
+    { "titel": "stm32f4 PAC (docs.rs)", "url": "https://docs.rs/stm32f4" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

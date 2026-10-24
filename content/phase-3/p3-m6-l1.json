@@ -1,0 +1,205 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m6-l1",
+  "phase": 3,
+  "modul": "3.6 Neue Sprachmittel",
+  "titel": "Deklarative Makros mit macro_rules!",
+  "lernziele": [
+    "Makros mit Fragment-Spezifizierern und Wiederholungen lesen und schreiben",
+    "Hygiene verstehen und von C-Präprozessor-Makros abgrenzen",
+    "Entscheiden, wann ein Makro statt einer Funktion oder eines Generics nötig ist"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "expr-klammert",
+      "frage": "Was gibt `quadrat!(2 + 3)` aus? In C liefert `#define QUADRAT(x) x * x` für `QUADRAT(2 + 3)` den Wert 11.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "macro_rules! quadrat {",
+          "    ($x:expr) => { $x * $x };",
+          "}",
+          "",
+          "println!(\"{}\", quadrat!(2 + 3));"
+        ]
+      },
+      "optionen": ["`25`", "`11`", "Compilerfehler: `expr` passt nicht auf `2 + 3`", "`10`"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Rust-Makros arbeiten nicht auf Text, sondern auf **Token-Bäumen** (*token trees*). Der Fragment-Spezifizierer `$x:expr` erfasst einen ganzen Ausdruck, der beim Einsetzen als Einheit erhalten bleibt, so als stünde er in Klammern. Das klassische Klammerproblem des C-Präprozessors gibt es nicht. Ausgewertet wird `2 + 3` allerdings zweimal: Bei Ausdrücken mit Nebenwirkungen bindet man ihn darum zuerst an eine lokale Variable.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist das Ergebnis der Textersetzung in C: `2 + 3 * 2 + 3`.",
+        "`2 + 3` ist ein gültiger Ausdruck.",
+        "Das wäre `2 * (2 + 3)` oder ähnliches, so wird nicht eingesetzt."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Fragment-Spezifizierer passt?",
+      "paare": [
+        { "links": "`$x:expr`", "rechts": "Ein Ausdruck wie `a + 1` oder `f(x)`" },
+        { "links": "`$n:ident`", "rechts": "Ein Bezeichner wie `GPIOA`" },
+        { "links": "`$t:ty`", "rechts": "Ein Typ wie `Vec<u8>`" },
+        { "links": "`$t:tt`", "rechts": "Ein einzelner Token-Baum, z. B. `+` oder `( … )`" },
+        { "links": "`$l:literal`", "rechts": "Ein Literal wie `0x40` oder `\"text\"`" }
+      ],
+      "erklaerung": "Weitere Spezifizierer sind `pat` (Muster), `path`, `block`, `stmt`, `item`, `lifetime`, `vis` und `meta`. `tt` ist der flexibelste und wird für fortgeschrittene Makros genutzt, die eigene Mini-Sprachen parsen (*tt munchers*)."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze das Makro, das aus einer Liste `NAME = ADRESSE` Konstanten erzeugt (ein abschliessendes Komma soll erlaubt sein).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "macro_rules! register {",
+          "    ($($name:{{?}} = $adr:expr),* $(,)?) => {",
+          "        $( const $name: u32 = $adr; ){{?}}",
+          "    };",
+          "}",
+          "",
+          "register! { GPIOA = 0x4800_0000, GPIOB = 0x4800_0400, }"
+        ]
+      },
+      "luecken": [{ "loesungen": ["ident"] }, { "loesungen": ["*"] }],
+      "auswahl": ["ident", "*", "expr", "+", "ty", "?"],
+      "erklaerung": "**Wiederholungen** schreibt man als `$( … ) Trenner Operator`: `*` für null oder mehr, `+` für eins oder mehr, `?` für optional. `$(,)?` erlaubt ein abschliessendes Komma. Im Ergebnis wird `$( … )*` für jedes erkannte Paar wiederholt, hier entstehen zwei `const`-Definitionen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "hygiene",
+      "frage": "Das Makro soll die lokale Variable `x` des Aufrufers ausgeben. Warum geht es nicht?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "macro_rules! sag {",
+          "    () => { println!(\"{}\", x) };",
+          "}",
+          "fn main() { let x = 5; sag!(); }"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0425]: cannot find value `x` in this scope",
+          " --> src/main.rs:2:29",
+          "  |",
+          "2 |     () => { println!(\"{}\", x) };",
+          "  |                             ^ not found in this scope",
+          "3 | }",
+          "4 | fn main() { let x = 5; sag!(); }",
+          "  |                        ------ in this macro invocation",
+          "  |",
+          "help: an identifier with the same name exists, but is not accessible due to macro hygiene"
+        ]
+      },
+      "optionen": [
+        "**Hygiene**: Lokale Bezeichner im Makrorumpf gehören zum Kontext der Definition, nicht zum Aufrufort. `x` muss als Argument (`$x:ident`) übergeben werden",
+        "Makros dürfen grundsätzlich keine lokalen Variablen lesen",
+        "Das Makro muss mit `#[macro_export]` markiert werden",
+        "`println!` darf in einem Makro nicht verwendet werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Hygiene verhindert versehentliche Namenskollisionen: Eine Variable `y`, die ein Makro intern anlegt, überdeckt keine gleichnamige Variable des Aufrufers und umgekehrt. Im C-Präprozessor ist genau das eine häufige Fehlerquelle. Wer bewusst einen Namen des Aufrufers verwenden will, lässt ihn übergeben. Hygiene gilt für lokale Variablen und Labels, nicht für Items wie Funktionen.",
+      "begruendungen": [
+        "Richtig.",
+        "Über ein Argument wie `sag!(x)` geht es.",
+        "`#[macro_export]` betrifft die Sichtbarkeit in anderen Crates.",
+        "Makros dürfen andere Makros aufrufen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sichtbarkeit und Rekursion",
+      "text": "`macro_rules!`-Makros sind **textuell geordnet**: Sie gelten erst ab ihrer Definition im Modul. Mit **`#[macro_export]`** werden sie im Wurzelmodul des Crates veröffentlicht und lassen sich von aussen mit `use mein_crate::register;` importieren. Innerhalb des Makros verweist `$crate::` sicher auf das definierende Crate, egal wie der Nutzer es benannt hat.\n\nMakros dürfen sich selbst rekursiv aufrufen. Damit lassen sich variable Argumentlisten verarbeiten:",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "macro_rules! maximum {",
+          "    ($x:expr) => { $x };",
+          "    ($x:expr, $($rest:expr),+) => {{",
+          "        let a = $x;",
+          "        let b = maximum!($($rest),+);",
+          "        if a > b { a } else { b }",
+          "    }};",
+          "}",
+          "// maximum!(3, 9, 4) == 9"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Basisfall: ein Argument." },
+          { "zeile": 3, "text": "Regeln werden der Reihe nach probiert, die erste passende gewinnt." }
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wann ist ein Makro die richtige Wahl statt einer generischen Funktion?",
+      "optionen": [
+        "Wenn Code erzeugt werden muss, den eine Funktion nicht ausdrücken kann: variable Argumentzahl, neue Items (`const`, `struct`, `impl`) oder Prüfungen zur Übersetzungszeit wie bei `format!`",
+        "Immer, weil Makros schneller sind als Funktionen",
+        "Wenn die Funktion mehr als drei Parameter hat",
+        "Wenn man Typprüfungen umgehen will"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Generische Funktionen werden ebenso eingebettet und sind leichter zu lesen, zu testen und zu dokumentieren. Makros brauchen einen Grund: `vec![…]` mit variabler Länge, `println!` mit Formatprüfung, Impls für viele Zahlentypen auf einmal oder Register-Tabellen. Fehlermeldungen in Makros sind schwerer zu lesen, und rust-analyzer kann sie schlechter unterstützen.",
+      "begruendungen": [
+        "Richtig.",
+        "Generische Funktionen werden genauso inline optimiert.",
+        "Die Parameterzahl allein ist kein Grund, eher ein Hinweis auf einen Struct als Parameter.",
+        "Der expandierte Code wird ganz normal typgeprüft."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "hygiene-ausgabe",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "macro_rules! setze {",
+          "    ($v:ident) => { let y = 1; $v = y + 1; };",
+          "}",
+          "",
+          "let y = 10;",
+          "let mut z = 0;",
+          "setze!(z);",
+          "println!(\"{} {}\", y, z);"
+        ]
+      },
+      "optionen": ["`10 2`", "`1 2`", "`10 11`", "Compilerfehler: `y` ist doppelt definiert"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Das `y` im Makro ist ein anderes `y` als das des Aufrufers, auch wenn beide gleich heissen. Darum bleibt das äussere `y` bei 10, und `z` wird `1 + 1 = 2`. `z` dagegen wurde als Argument übergeben und gehört zum Aufrufer, die Zuweisung trifft also wirklich dessen Variable.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre ohne Hygiene der Fall, wie beim C-Präprozessor.",
+        "Im Makro wird das interne `y = 1` verwendet, nicht das äussere.",
+        "Ein erneutes `let` überdeckt in Rust einfach (Shadowing), und hier sind es ohnehin verschiedene Bezeichner."
+      ]
+    }
+  ],
+  "praxis": "Im Embedded-Bereich erzeugen Makros Register-Tabellen, Interrupt-Vektoren, Impls für viele Peripherie-Instanzen (`impl_uart!(USART1, USART2, …)`) und Logging (`defmt::info!`). Zum Verstehen fremder Makros hilft `cargo expand` (Modul 1.1), das den Code nach der Expansion zeigt. Eigene Makros sollten klein bleiben und mit Doctests dokumentiert sein.",
+  "labor": {
+    "titel": "Ein Register-Makro",
+    "anleitung": "Schreibe ein Makro `bitfeld!`, das aus `bitfeld!(Steuer: u32 { EN: 0, MODUS: 1..=2, IRQ: 7 })` einen Newtype mit Getter- und Setter-Methoden pro Feld erzeugt. Sieh dir das Ergebnis mit `cargo expand` an.",
+    "befehle": [
+      "cargo new --lib bitfeld && cd bitfeld",
+      "cargo install cargo-expand",
+      "cargo expand",
+      "cargo test"
+    ],
+    "beobachtung": "`cargo expand` zeigt den erzeugten Code ohne Makros. Fehler im Makro meldet rustc mit dem Hinweis „in this macro invocation“ und zeigt auf die Aufrufstelle."
+  },
+  "begriffe": [
+    { "begriff": "Deklaratives Makro", "englisch": "declarative macro / macro by example", "erklaerung": "Makro mit `macro_rules!`, das Muster über Token-Bäume abgleicht und Code einsetzt." },
+    { "begriff": "Fragment-Spezifizierer", "englisch": "fragment specifier", "erklaerung": "Art des erwarteten Syntaxteils, z. B. `expr`, `ident`, `ty`, `tt`." },
+    { "begriff": "Token-Baum", "englisch": "token tree", "erklaerung": "Ein Token oder eine geklammerte Gruppe von Tokens, die Eingabe von Makros." },
+    { "begriff": "Hygiene", "englisch": "hygiene", "erklaerung": "Lokale Namen im Makro kollidieren nicht mit Namen am Aufrufort." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Macros By Example", "url": "https://doc.rust-lang.org/reference/macros-by-example.html" },
+    { "titel": "The Rust Book: Macros", "url": "https://doc.rust-lang.org/book/ch20-05-macros.html" }
+  ]
+}

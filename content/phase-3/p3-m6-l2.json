@@ -1,0 +1,180 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m6-l2",
+  "phase": 3,
+  "modul": "3.6 Neue Sprachmittel",
+  "titel": "Prozedurale Makros",
+  "lernziele": [
+    "Die drei Arten prozeduraler Makros unterscheiden",
+    "Ein Derive-Makro mit `syn` und `quote` in einem eigenen proc-macro-Crate aufbauen",
+    "Die Kosten prozeduraler Makros für die Buildzeit einschätzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Makro-Arten ihrem Erscheinungsbild zu.",
+      "paare": [
+        { "links": "Derive-Makro", "rechts": "`#[derive(Serialize)]` an einem Struct oder Enum" },
+        { "links": "Attribut-Makro", "rechts": "`#[tokio::main]` oder `#[embassy_executor::task]` an einer Funktion" },
+        { "links": "Funktionsartiges Makro", "rechts": "`sqlx::query!(\"SELECT …\")` mit Prüfung beim Übersetzen" },
+        { "links": "Deklaratives Makro", "rechts": "`macro_rules! register { … }` im selben Crate" }
+      ],
+      "erklaerung": "Ein **prozedurales Makro** (*procedural macro*) ist eine Rust-Funktion, die der Compiler beim Übersetzen ausführt: Sie bekommt einen `TokenStream` und gibt einen neuen zurück. Ein **Derive-Makro** ergänzt Code neben dem Typ, ein **Attribut-Makro** ersetzt das markierte Item, ein **funktionsartiges Makro** ersetzt den Aufruf. Deklarative Makros (Modul 3.6, Lektion 1) brauchen kein eigenes Crate."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau eines Derive-Makros",
+      "text": "Prozedurale Makros leben in einem eigenen Crate mit `proc-macro = true` in `[lib]`. Es wird für den **Host** übersetzt, nicht für das Ziel, denn es läuft im Compiler. Fast alle nutzen drei Crates:\n\n- **`syn`** parst den `TokenStream` in einen Syntaxbaum (`DeriveInput` mit Name, Feldern, Attributen).\n- **`quote`** erzeugt aus einer Vorlage mit `#variable` wieder Tokens.\n- **`proc-macro2`** ist die von beiden genutzte, auch in Tests verwendbare Fassung von `proc_macro`.",
+      "code": {
+        "sprache": "rust",
+        "datei": "beschreibung_derive/src/lib.rs",
+        "zeilen": [
+          "use proc_macro::TokenStream;",
+          "use quote::quote;",
+          "use syn::{parse_macro_input, DeriveInput};",
+          "",
+          "#[proc_macro_derive(Beschreibung)]",
+          "pub fn beschreibung(input: TokenStream) -> TokenStream {",
+          "    let ast = parse_macro_input!(input as DeriveInput);",
+          "    let name = &ast.ident;",
+          "    let text = name.to_string();",
+          "    quote! {",
+          "        impl #name {",
+          "            pub fn beschreibung() -> &'static str { #text }",
+          "        }",
+          "    }",
+          "    .into()",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Registriert das Derive unter dem Namen `Beschreibung`." },
+          { "zeile": 7, "text": "Bei Parse-Fehlern erzeugt das Makro eine saubere Compilermeldung." },
+          { "zeile": 11, "text": "`#name` setzt den Bezeichner ein, `#text` ein String-Literal." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "derive-ergebnis",
+      "frage": "Mit dem Makro oben: Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "datei": "app/src/main.rs",
+        "zeilen": [
+          "use beschreibung_derive::Beschreibung;",
+          "",
+          "#[derive(Beschreibung)]",
+          "struct Pumpe;",
+          "",
+          "fn main() { println!(\"{}\", Pumpe::beschreibung()); }"
+        ]
+      },
+      "optionen": ["`Pumpe`", "`name`", "`#name`", "Compilerfehler: `Beschreibung` ist kein Trait"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`name.to_string()` liefert zur Übersetzungszeit den Text `\"Pumpe\"`, `quote!` setzt ihn als Literal ein. Ein Derive muss keinen gleichnamigen Trait implementieren, es darf beliebigen Code neben den Typ stellen. Üblich ist trotzdem ein Trait mit gleichem Namen in einem Begleit-Crate, wie bei `serde` und `serde_derive`.",
+      "begruendungen": [
+        "Richtig.",
+        "`name` ist eine Variable im Makro, ihr Wert ist der Bezeichner `Pumpe`.",
+        "`#name` ist die Platzhalter-Syntax von `quote!` und wird ersetzt.",
+        "Derive-Makros dürfen beliebigen Code erzeugen, ein Trait ist nicht nötig."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "proc-macro-crate-typ",
+      "frage": "Beim ersten Build des Makro-Crates erscheint diese Meldung. Was fehlt?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling beschreibung_derive v0.1.0 (/home/user/projekt/beschreibung_derive)",
+          "error: the `#[proc_macro_derive]` attribute is only usable with crates of the `proc-macro` crate type",
+          " --> src/lib.rs:5:1",
+          "  |",
+          "5 | #[proc_macro_derive(Beschreibung)]",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "",
+          "error[E0432]: unresolved import `proc_macro`",
+          " --> src/lib.rs:1:5"
+        ]
+      },
+      "optionen": [
+        "In `Cargo.toml` fehlt `[lib]` mit `proc-macro = true`",
+        "Es fehlt `cargo add proc_macro`",
+        "Das Makro-Crate braucht `#![no_std]`",
+        "Derive-Makros müssen im selben Crate wie der Typ stehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Erst mit dem Crate-Typ `proc-macro` stellt rustc das eingebaute Crate `proc_macro` bereit und erlaubt die Attribute `#[proc_macro_derive]`, `#[proc_macro_attribute]` und `#[proc_macro]`. Ein proc-macro-Crate darf ausser den Makros nichts exportieren. Gemeinsame Typen und Traits kommen deshalb in ein zweites, normales Crate.",
+      "begruendungen": [
+        "Richtig.",
+        "`proc_macro` ist Teil der Toolchain und kommt nicht von crates.io.",
+        "Das Crate läuft auf dem Host, `no_std` ist dort weder nötig noch hilfreich.",
+        "Im Gegenteil: Ein Makro-Crate kann nur Makros exportieren, Typen stehen woanders."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Was passiert in welcher Reihenfolge, wenn `cargo build` ein Programm mit `#[derive(Beschreibung)]` übersetzt?",
+      "elemente": [
+        "Cargo übersetzt `syn`, `quote` und `proc-macro2` für den Host",
+        "Cargo übersetzt das proc-macro-Crate zu einer dynamischen Bibliothek für den Host",
+        "rustc parst `app/src/main.rs` und findet `#[derive(Beschreibung)]`",
+        "rustc lädt die Bibliothek und ruft `beschreibung(TokenStream)` auf",
+        "rustc fügt die erzeugten Tokens ein und führt Typprüfung und Codegen durch"
+      ],
+      "erklaerung": "Die Makro-Expansion liegt vor der Typprüfung (Modul 1.1). Darum kennt ein Makro nur Tokens, keine Typen: Es weiss nicht, ob ein Feldtyp `Copy` ist oder was hinter einem Alias steckt. Beim Cross-Compiling für Embedded-Ziele wird das Makro-Crate trotzdem für den Host übersetzt."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "`cargo build --timings` zeigt, dass ein sauberer Build lange auf `syn` wartet. Was hilft am meisten?",
+      "optionen": [
+        "Prüfen, welche Abhängigkeiten proc-Makros mitbringen, und unnötige Features oder Crates entfernen. Auf eine einheitliche `syn`-Hauptversion achten",
+        "Alle proc-Makros durch `build.rs` ersetzen",
+        "`opt-level = 3` für das Entwicklungsprofil setzen",
+        "`syn` mit `--release` vorkompilieren und ins Repository legen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`syn` mit vollem Parser ist ein grosses Crate und liegt auf dem kritischen Pfad, weil alle Crates mit Derives darauf warten. Zwei Hauptversionen von `syn` im Baum (sichtbar mit `cargo tree -d`) verdoppeln diese Arbeit. Hilfreich sind schlanke Feature-Sets, das Ausschalten nicht benötigter Derives (`default-features = false`) und bei Bedarf schlankere Alternativen. Inkrementelle Builds betrifft das kaum, denn Makros werden zwischengespeichert.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Build-Skript generiert Code anders, löst aber das Abhängigkeitsproblem nicht.",
+        "Das macht Builds eher langsamer. Nur für Makro-Crates kann `[profile.dev.build-override]` sinnvoll sein.",
+        "Cargo verwaltet Builds selbst, eingecheckte Artefakte sind nicht vorgesehen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Ein prozedurales Makro bekommt einen {{?}} und gibt einen neuen zurück. Zum Parsen verwendet man meist {{?}}, zum Erzeugen von Code {{?}}. Den Code nach der Expansion zeigt {{?}}.",
+      "luecken": [{ "loesungen": ["TokenStream"] }, { "loesungen": ["syn"] }, { "loesungen": ["quote"] }, { "loesungen": ["cargo expand"] }],
+      "auswahl": ["TokenStream", "syn", "quote", "cargo expand", "String", "serde", "cargo tree"],
+      "erklaerung": "Ein proc-Makro arbeitet auf Tokens, nicht auf Text als `String`. `cargo expand` ist ein Zusatzwerkzeug (`cargo install cargo-expand`) und das wichtigste Hilfsmittel, um Makros zu verstehen und zu debuggen."
+    }
+  ],
+  "praxis": "Du nutzt prozedurale Makros täglich: `serde`, `thiserror`, `clap`, `tokio::main`, `defmt::Format`, `embassy_executor::task`, `rtic::app`. Eigene schreibt man seltener, etwa für Register-Beschreibungen, Protokoll-Serialisierung oder Testhelfer. Gute Makros erzeugen klare Fehlermeldungen (`syn::Error::new_spanned`) und haben Tests, z. B. mit `trybuild` für erwartete Compilerfehler.",
+  "labor": {
+    "titel": "Ein eigenes Derive",
+    "anleitung": "Lege ein Workspace mit zwei Crates an: `beschreibung_derive` (proc-macro) und `app`. Baue das Derive aus der Lektion nach und erweitere es so, dass es für Structs mit benannten Feldern eine Methode `felder() -> &'static [&'static str]` erzeugt. Miss den sauberen Build mit `--timings`.",
+    "befehle": [
+      "cargo new --lib beschreibung_derive && cargo new app",
+      "cd beschreibung_derive && cargo add syn quote proc-macro2",
+      "cd ../app && cargo add --path ../beschreibung_derive",
+      "cargo build --timings",
+      "cargo tree -d"
+    ],
+    "beobachtung": "Im Timing-Bericht siehst du `syn` auf dem kritischen Pfad vor dem eigenen Makro-Crate. `cargo tree -d` zeigt doppelte Versionen, falls Abhängigkeiten verschiedene `syn`-Hauptversionen ziehen."
+  },
+  "begriffe": [
+    { "begriff": "Prozedurales Makro", "englisch": "procedural macro", "erklaerung": "Rust-Funktion, die beim Übersetzen Tokens in Tokens umwandelt." },
+    { "begriff": "Derive-Makro", "englisch": "derive macro", "erklaerung": "Prozedurales Makro für `#[derive(…)]`, das Code neben einem Typ ergänzt." },
+    { "begriff": "Attribut-Makro", "englisch": "attribute macro", "erklaerung": "Prozedurales Makro, das das markierte Item ersetzt, z. B. `#[tokio::main]`." },
+    { "begriff": "TokenStream", "englisch": "token stream", "erklaerung": "Folge von Token-Bäumen, Ein- und Ausgabe prozeduraler Makros." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Procedural Macros", "url": "https://doc.rust-lang.org/reference/procedural-macros.html" },
+    { "titel": "syn auf docs.rs", "url": "https://docs.rs/syn" },
+    { "titel": "quote auf docs.rs", "url": "https://docs.rs/quote" }
+  ]
+}

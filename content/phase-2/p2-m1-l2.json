@@ -1,0 +1,269 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m1-l2",
+  "phase": 2,
+  "modul": "2.1 Speicherlayout zur Laufzeit",
+  "titel": "Layout von Typen",
+  "lernziele": [
+    "Padding und Alignment eines Structs ausrechnen und erklären, warum `repr(Rust)` Felder umordnen darf",
+    "Wissen, wann `#[repr(C)]` oder `#[repr(u8)]` nötig ist",
+    "Niche-Optimierung, Fat Pointer und Zero-Sized Types erkennen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Wie gross sind die beiden Structs auf x86-64 (`size_of`)?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct A { a: u8, b: u32, c: u16 }",
+          "",
+          "#[repr(C)]",
+          "struct B { a: u8, b: u32, c: u16 }"
+        ]
+      },
+      "optionen": [
+        "`A`: 8 Byte, `B`: 12 Byte",
+        "Beide 12 Byte",
+        "Beide 7 Byte",
+        "`A`: 12 Byte, `B`: 8 Byte"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Nutzdaten sind 1 + 4 + 2 = 7 Byte. Weil `u32` auf 4 Byte ausgerichtet sein muss, braucht `B` in C-Reihenfolge Füllbytes: `a` bei 0, 3 Byte **Padding**, `b` bei 4, `c` bei 8, dann 2 Byte Padding am Ende, damit die Grösse ein Vielfaches des Alignments (4) ist. Für `A` darf rustc die Felder umsortieren: gemessen liegen `b` bei 0, `c` bei 4 und `a` bei 6, das ergibt 8 Byte.",
+      "begruendungen": [
+        "Richtig. Mit `std::mem::offset_of!` kannst du die Offsets selbst nachmessen.",
+        "So wäre es, wenn Rust die Felder in Quellreihenfolge legen müsste. Das gilt nur für `repr(C)`.",
+        "Ohne Padding wäre `b` falsch ausgerichtet. Das erlaubt kein Typ in Rust.",
+        "Genau umgekehrt: Die Freiheit zum Umordnen hat `repr(Rust)`, nicht `repr(C)`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Alignment, Padding und repr",
+      "text": "Jeder Typ hat ein **Alignment** (Ausrichtung): Seine Adresse muss ein Vielfaches davon sein, bei `u32` also von 4. Damit das für jedes Feld stimmt, fügt der Compiler **Padding** (Füllbytes) ein.\n\nDas Standard-Layout `repr(Rust)` gibt fast **keine Garantien**: Reihenfolge der Felder und Padding sind Sache des Compilers und dürfen sich zwischen Versionen ändern. Mit `#[repr(C)]` gilt die Regel von C: Felder in Quellreihenfolge, Padding nach C-ABI. Das braucht man für FFI, für Hardware-Register und für Daten, die byteweise über Leitungen gehen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Struct wird an eine C-Funktion übergeben. Was sagt rustc?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Paket {",
+          "    typ: u8,",
+          "    laenge: u32,",
+          "}",
+          "unsafe extern \"C\" {",
+          "    fn sende_paket(p: *const Paket);",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: `extern` block uses type `Paket`, which is not FFI-safe",
+          " --> src/main.rs:6:23",
+          "  |",
+          "6 |     fn sende_paket(p: *const Paket);",
+          "  |                       ^^^^^^^^^^^^ not FFI-safe",
+          "  |",
+          "  = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct",
+          "  = note: this struct has unspecified layout",
+          "  = note: `#[warn(improper_ctypes)]` on by default"
+        ]
+      },
+      "optionen": [
+        "Ohne `#[repr(C)]` ist das Layout von `Paket` nicht festgelegt, die C-Seite könnte die Felder an anderen Offsets erwarten",
+        "Raw Pointer dürfen grundsätzlich nicht an C übergeben werden",
+        "`u8` gibt es in C nicht, man muss `c_char` verwenden",
+        "Die Warnung ist nur kosmetisch, weil rustc die Felder ohnehin nie umordnet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Lint `improper_ctypes` prüft Typen an FFI-Grenzen. Ein `repr(Rust)`-Struct hat ein unspezifiziertes Layout, also kann niemand garantieren, dass es zum `struct paket` in C passt. Mit `#[repr(C)]` über `struct Paket` verschwindet die Warnung. Mehr zu FFI in Phase 6.",
+      "begruendungen": [
+        "Richtig. „unspecified layout“ ist der Kern der Meldung.",
+        "Raw Pointer sind der Normalfall an FFI-Grenzen. Problematisch ist der Typ, auf den sie zeigen.",
+        "`u8` entspricht `uint8_t` und ist FFI-sicher.",
+        "rustc ordnet Felder tatsächlich um, wie das Beispiel mit `A` zeigt."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches `repr` passt zu welchem Zweck?",
+      "paare": [
+        {
+          "links": "kein Attribut (`repr(Rust)`)",
+          "rechts": "Compiler wählt Reihenfolge und Padding frei, meist kompakt"
+        },
+        {
+          "links": "`#[repr(C)]`",
+          "rechts": "Layout wie in C, für FFI und Speicherabbilder"
+        },
+        {
+          "links": "`#[repr(u8)]` auf einem Enum",
+          "rechts": "Diskriminante ist garantiert ein `u8`, z. B. für Protokoll-Codes"
+        },
+        {
+          "links": "`#[repr(transparent)]`",
+          "rechts": "Newtype mit genau einem Feld hat dasselbe Layout wie dieses Feld"
+        }
+      ],
+      "erklaerung": "`repr(u8)` legt den Typ der **Diskriminante** fest, also der Zahl, die die Variante eines Enums kennzeichnet. Explizite Werte wie `Timeout = 0x02` müssen dann in ein `u8` passen, sonst meldet rustc einen Fehler. `repr(transparent)` ist ideal für Wrapper wie `struct Millis(u32)`, die über FFI wie ein nacktes `u32` aussehen sollen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche dieser Typen sind auf x86-64 genau 8 Byte gross?",
+      "optionen": [
+        "`Option<&u8>`",
+        "`Option<Box<u8>>`",
+        "`Option<u64>`",
+        "`&[u8]`"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "Referenzen und `Box` sind nie null. Diesen ungültigen Wert (die **Nische**, niche) benutzt der Compiler, um `None` darzustellen. `Option<&T>` braucht deshalb kein zusätzliches Flag und ist so gross wie ein Zeiger. Das ist dieselbe Darstellung wie ein nullbarer Zeiger in C. Ein `u64` hat keine ungültigen Werte, `Option<u64>` braucht ein Flag plus Padding: 16 Byte.",
+      "begruendungen": [
+        "Richtig. Niche-Optimierung: `None` ist die Null.",
+        "Richtig. Auch `Box` ist nie null.",
+        "16 Byte: Jeder `u64`-Wert ist gültig, also braucht es ein Extra-Feld. `Option<NonZeroU64>` wäre wieder 8 Byte.",
+        "16 Byte: Ein Slice ist ein Fat Pointer aus Zeiger und Länge."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Fat Pointer und Zero-Sized Types",
+      "text": "Zeigt eine Referenz auf einen Typ ohne feste Grösse (**dynamically sized type**, DST), trägt sie Zusatzinformation mit und wird zum **Fat Pointer**. Umgekehrt gibt es Typen, die gar keinen Speicher brauchen: **Zero-Sized Types** (ZST). Ein `Vec<()>` belegt nie Heap, ein `HashSet<T>` ist intern eine `HashMap<T, ()>`.",
+      "tabelle": {
+        "kopf": [
+          "Typ",
+          "Grösse (64-Bit)",
+          "Inhalt"
+        ],
+        "zeilen": [
+          [
+            "`&u32`, `Box<u32>`",
+            "8",
+            "Adresse"
+          ],
+          [
+            "`&[T]`, `&str`, `Box<[T]>`",
+            "16",
+            "Adresse + Länge"
+          ],
+          [
+            "`&dyn Trait`, `Box<dyn Trait>`",
+            "16",
+            "Adresse + Zeiger auf vtable"
+          ],
+          [
+            "`()`, `struct Leer;`, `[u8; 0]`",
+            "0",
+            "nichts"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die gemessenen Grössen auf x86-64.",
+      "text": "`size_of::<Option<bool>>()` ist {{?}}, weil `bool` nur 0 und 1 benutzt. `size_of::<Option<u32>>()` ist {{?}}. Ein `struct Marker;` ohne Felder hat die Grösse {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "1"
+          ]
+        },
+        {
+          "loesungen": [
+            "8"
+          ]
+        },
+        {
+          "loesungen": [
+            "0"
+          ]
+        }
+      ],
+      "auswahl": [
+        "0",
+        "1",
+        "2",
+        "5",
+        "8"
+      ],
+      "erklaerung": "Ein `bool` hat 254 ungültige Bitmuster, eines davon (2) wird zu `None`. Bei `u32` sind alle Muster gültig, also kommt ein Flag dazu, und wegen des Alignments von 4 wird daraus 4 + 4 = 8 Byte, nicht 5. Zero-Sized Types sind in Rust echte Typen, die zur Laufzeit verschwinden. Das nutzt man für Marker und Typzustände (Phase 3)."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieser Code liest ein Register-Abbild per Pointer-Cast aus einem DMA-Puffer, der wie das C-Struct im Datenblatt aufgebaut ist. Welche Zeile ist der Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Debug, Clone, Copy)]",
+          "struct Kopf {",
+          "    version: u8,",
+          "    flags: u8,",
+          "    laenge: u16,",
+          "    pruefsumme: u32,",
+          "}",
+          "",
+          "fn lies_kopf(puffer: &[u8; 8]) -> Kopf {",
+          "    unsafe { puffer.as_ptr().cast::<Kopf>().read_unaligned() }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 1,
+      "erklaerung": "Es fehlt `#[repr(C)]`. Ohne das Attribut darf rustc die Felder beliebig anordnen, der Cast in Zeile 10 interpretiert die Bytes dann womöglich falsch, ohne dass ein Compiler oder Test es merkt. Zeile 1 wird zu `#[repr(C)]` plus `#[derive(…)]`. Noch besser ist es, gar nicht zu casten, sondern Felder mit `u16::from_le_bytes` zu lesen oder Crates wie `zerocopy` oder `bytemuck` zu nutzen (Phase 3)."
+    }
+  ],
+  "praxis": "Im Embedded-Alltag begegnet dir Layout ständig: Register-Blöcke in einer PAC (Peripheral Access Crate) sind `#[repr(C)]`, Protokoll-Enums haben `#[repr(u8)]`, und Wrapper um Handles sind `#[repr(transparent)]`. Gleichzeitig ist `Option<&T>` oder `Option<NonZeroU32>` gratis, du musst also keine magischen Nullwerte erfinden. Sobald Bytes die Grenze deines Programms verlassen (FFI, Flash, Funk), gehört ein explizites `repr` dazu.",
+  "labor": {
+    "titel": "Layout nachmessen",
+    "anleitung": "Schreibe ein kleines Programm, das mit `std::mem::size_of`, `align_of` und `offset_of!` die Structs `A` und `B` aus der ersten Übung vermisst. Ergänze `Option<&u8>`, `Option<u32>`, `Option<char>`, `&[u8]`, `&dyn std::fmt::Debug` und `()`. Für einen Gesamtüberblick über alle Typen eines Crates gibt es zusätzlich das nightly-Flag `-Zprint-type-sizes`.",
+    "befehle": [
+      "cargo new layout && cd layout",
+      "cargo run"
+    ],
+    "beobachtung": "`A` ist 8 Byte (Offsets b=0, c=4, a=6), `B` ist 12 Byte (a=0, b=4, c=8). `Option<&u8>` ist 8 Byte, `Option<u32>` ebenfalls 8, `Option<char>` nur 4 (ein `char` ist höchstens 0x10FFFF, darüber ist eine Nische), Fat Pointer sind 16 Byte, `()` ist 0."
+  },
+  "begriffe": [
+    {
+      "begriff": "Alignment",
+      "englisch": "alignment",
+      "erklaerung": "Zahl, durch die die Adresse eines Werts teilbar sein muss. Bestimmt zusammen mit der Feldgrösse das Padding."
+    },
+    {
+      "begriff": "Padding",
+      "englisch": "padding",
+      "erklaerung": "Ungenutzte Füllbytes, die der Compiler zwischen oder nach Feldern einfügt, damit jedes Feld richtig ausgerichtet ist."
+    },
+    {
+      "begriff": "Niche-Optimierung",
+      "englisch": "niche optimization",
+      "erklaerung": "Der Compiler kodiert Enum-Varianten in ungültigen Bitmustern eines Felds, z. B. `None` als Nullzeiger."
+    },
+    {
+      "begriff": "Fat Pointer",
+      "englisch": "fat pointer, wide pointer",
+      "erklaerung": "Zeiger auf einen Typ ohne feste Grösse, mit Zusatzinformation: Länge bei Slices, vtable-Zeiger bei Trait-Objekten."
+    },
+    {
+      "begriff": "Zero-Sized Type",
+      "englisch": "zero-sized type (ZST)",
+      "erklaerung": "Typ mit Grösse 0, z. B. `()` oder ein Struct ohne Felder. Belegt zur Laufzeit keinen Speicher."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Reference: Type Layout",
+      "url": "https://doc.rust-lang.org/reference/type-layout.html"
+    },
+    {
+      "titel": "The Rustonomicon: Data Representation in Rust",
+      "url": "https://doc.rust-lang.org/nomicon/data.html"
+    }
+  ]
+}

@@ -1,0 +1,228 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m2-l4",
+  "phase": 1,
+  "modul": "1.2 Der Linker",
+  "titel": "Linker wählen und LTO",
+  "lernziele": [
+    "Einen schnelleren Linker wie lld oder mold in `.cargo/config.toml` einstellen",
+    "Thin und fat LTO unterscheiden und im Cargo-Profil konfigurieren",
+    "Die Wirkung von `lto` und `codegen-units` auf Grösse und Buildzeit abschätzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du änderst eine Zeile in `main.rs` und baust neu. rustc ist nach 0,3 s fertig, der ganze Build dauert aber 2 s. Was ist der wahrscheinlichste Engpass?",
+      "optionen": [
+        "Der Link-Schritt, denn das Programm wird bei jeder Änderung komplett neu gelinkt",
+        "Das Herunterladen der Abhängigkeiten",
+        "Das erneute Übersetzen der Standardbibliothek"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Inkrementelle Kompilierung spart Arbeit in rustc, aber der Linker fügt jedes Mal alle Object-Files und `.rlib`s zum Programm zusammen. Bei grossen Projekten mit viel Debuginfo kann das der grösste Posten sein. Deshalb lohnt sich ein schneller Linker vor allem im Entwicklungsalltag.",
+      "begruendungen": [
+        "Richtig. Linken ist nicht inkrementell.",
+        "Abhängigkeiten werden nur einmal heruntergeladen und gebaut.",
+        "Die Standardbibliothek kommt vorkompiliert mit der Toolchain und wird nie neu übersetzt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Linker austauschen",
+      "text": "Auf `x86_64-unknown-linux-gnu` linkt rustc inzwischen standardmässig mit dem mitgelieferten **rust-lld**. Auf anderen Plattformen ist oft noch der System-Linker (GNU `ld`) aktiv. Noch schneller ist häufig **mold**. Den Linker legst du pro Target in `.cargo/config.toml` fest. `-C link-arg=…` reicht ein einzelnes Argument an den Linker-Treiber weiter.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[target.x86_64-unknown-linux-gnu]",
+          "linker = \"clang\"",
+          "rustflags = [\"-C\", \"link-arg=-fuse-ld=mold\"]"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "Gilt nur für dieses Target. Beim Cross-Kompilieren steht hier z. B. der Linker für ARM."
+          },
+          {
+            "zeile": 2,
+            "text": "Programm, das rustc als Linker-Treiber aufruft."
+          },
+          {
+            "zeile": 3,
+            "text": "`-fuse-ld=mold` sagt clang, welchen eigentlichen Linker es verwenden soll."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze das Release-Profil für maximale Optimierung über alle Crates hinweg.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "lto = {{?}}",
+          "{{?}} = 1"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "\"fat\""
+          ]
+        },
+        {
+          "loesungen": [
+            "codegen-units"
+          ]
+        }
+      ],
+      "auswahl": [
+        "\"fat\"",
+        "codegen-units",
+        "\"off\"",
+        "opt-level"
+      ],
+      "erklaerung": "`lto = \"fat\"` (gleichbedeutend mit `true`) führt den LLVM-IR aller Crates zu einem Modul zusammen und optimiert es als Ganzes. `codegen-units = 1` verhindert, dass das eigene Crate in Teile zerfällt. `lto = \"off\"` schaltet LTO ganz ab. `opt-level` steuert die Optimierungsstufe, nicht LTO."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Werte von `lto` im Cargo-Profil ihrer Wirkung zu.",
+      "paare": [
+        {
+          "links": "`lto = false` (Standard)",
+          "rechts": "Thin LTO nur zwischen den CGUs des eigenen Crates"
+        },
+        {
+          "links": "`lto = \"off\"`",
+          "rechts": "Kein LTO, auch nicht innerhalb des Crates"
+        },
+        {
+          "links": "`lto = \"thin\"`",
+          "rechts": "Thin LTO über alle Crates: parallel, fast so gut wie fat"
+        },
+        {
+          "links": "`lto = \"fat\"`",
+          "rechts": "Alle Crates in ein LLVM-Modul: beste Optimierung, langsamster Build"
+        }
+      ],
+      "erklaerung": "**LTO** (Link-Time Optimization) verschiebt Optimierung an den Zeitpunkt, an dem der Code aller Crates bekannt ist. So kann LLVM Funktionen über Crate-Grenzen hinweg inlinen und Unbenutztes entfernen. Thin LTO tauscht nur Zusammenfassungen aus und arbeitet parallel, fat LTO nimmt alles in ein Modul."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Release-Builds eines kleinen Programms mit `serde` und `serde_json`, gemessen auf dieser Maschine. Was zeigt die Messung?",
+      "terminal": {
+        "befehl": "ls -l target/release/messwerte   # je Konfiguration",
+        "ausgabe": [
+          "lto = false,  codegen-units = 16:  481888 Bytes",
+          "lto = \"thin\", codegen-units = 16:  467456 Bytes",
+          "lto = \"fat\",  codegen-units = 16:  403376 Bytes",
+          "lto = \"fat\",  codegen-units = 1:   403448 Bytes"
+        ]
+      },
+      "optionen": [
+        "Fat LTO verkleinert das Binary hier um rund 16 Prozent, weil über Crate-Grenzen hinweg Unbenutztes wegfällt",
+        "LTO wirkt nur auf die Laufzeit, nie auf die Grösse",
+        "`codegen-units = 1` halbiert die Grösse zusätzlich"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Hauptgewinn kommt hier von fat LTO. `codegen-units = 1` ändert bei fat LTO kaum etwas, weil ohnehin alles zusammengeführt wird. Die genauen Zahlen hängen stark vom Projekt ab. Die Buildzeit schwankte in der Messung stark und lag mit LTO teils beim Doppelten, weil am Ende ein zusätzlicher Optimierungsschritt über den Code aller Crates läuft. Miss deshalb immer im eigenen Projekt.",
+      "begruendungen": [
+        "Richtig. Von etwa 471 KiB auf etwa 394 KiB.",
+        "Bessere Optimierung entfernt auch toten Code. Das sieht man hier direkt an der Grösse.",
+        "Die beiden fat-Varianten unterscheiden sich nur um wenige Bytes."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Jemand versucht, LTO über eine Umgebungsvariable statt über das Profil einzuschalten. Warum scheitert das?",
+      "terminal": {
+        "befehl": "RUSTFLAGS=\"-C lto=fat\" cargo build --release",
+        "ausgabe": [
+          "error: options `-C embed-bitcode=no` and `-C lto` are incompatible",
+          "",
+          "error: could not compile `unicode-ident` (lib) due to 1 previous error",
+          "error: could not compile `proc-macro2` (build script) due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "Cargo baut Abhängigkeiten ohne eingebetteten LLVM-Bitcode, wenn das Profil kein LTO verlangt. `RUSTFLAGS` gilt aber für jedes Crate und widerspricht dem",
+        "LTO ist nur auf nightly verfügbar",
+        "`unicode-ident` unterstützt kein LTO und muss ersetzt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "LTO ist eine Entscheidung für den ganzen Build, nicht für einzelne rustc-Aufrufe. Cargo koordiniert, welche Crates Bitcode mitliefern und welches Crate am Ende die Optimierung durchführt. Deshalb gehört `lto` ins Profil, z. B. auch über `CARGO_PROFILE_RELEASE_LTO=fat`.",
+      "begruendungen": [
+        "Richtig. Cargo setzt `-C embed-bitcode=no` als Optimierung, wenn kein LTO im Profil steht.",
+        "`-C lto` ist eine stabile Option. Das Problem ist der Widerspruch zu Cargos Einstellungen.",
+        "Jedes Crate scheitert so, `unicode-ident` ist nur zufällig als Erstes dran."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Konfiguration passt am besten zu **Entwicklung** und welche zu einer **Firmware für einen Mikrocontroller mit 256 KiB Flash**?",
+      "optionen": [
+        "Entwicklung: dev-Profil mit schnellem Linker. Firmware: Release mit `lto = \"fat\"`, `codegen-units = 1`, `opt-level = \"s\"` oder `\"z\"`",
+        "Entwicklung: `lto = \"fat\"`, damit Tests realistisch sind. Firmware: dev-Profil, damit Debugging einfacher ist",
+        "Beide gleich: LTO hat auf Embedded-Targets keine Wirkung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im Alltag zählt kurze Wartezeit, also kein LTO und viele CGUs. Auf Mikrocontrollern zählt jedes Byte Flash. Dort ist fat LTO mit einer CGU und Grössenoptimierung üblich, die Buildzeit ist zweitrangig. Mehr zu Binary-Grösse in Modul 1.4.",
+      "begruendungen": [
+        "Richtig. Genau so sind viele Embedded-Rust-Vorlagen konfiguriert.",
+        "Fat LTO im Alltag kostet bei jedem Build viel Zeit. Und ein unoptimiertes dev-Build passt oft nicht einmal ins Flash.",
+        "LTO arbeitet auf LLVM IR und ist unabhängig vom Target. Gerade dort ist es besonders nützlich."
+      ]
+    }
+  ],
+  "praxis": "Eine bewährte Aufteilung: `.cargo/config.toml` legt für den Alltag einen schnellen Linker fest (z. B. mold auf Linux), das `[profile.release]` in `Cargo.toml` aktiviert `lto` und `codegen-units = 1` für Auslieferungen. Für CI-Pipelines, die oft bauen, aber selten ausliefern, lohnt sich ein eigenes Profil, z. B. `[profile.dist]` mit `inherits = \"release\"` und LTO, während `release` schneller bleibt.",
+  "labor": {
+    "titel": "LTO messen",
+    "anleitung": "Baue ein Programm mit einigen Abhängigkeiten (z. B. `serde_json`) mehrfach im Release-Profil. Die Profilwerte lassen sich über Umgebungsvariablen überschreiben, ohne `Cargo.toml` zu ändern.",
+    "befehle": [
+      "cargo build --release && ls -l target/release/messwerte",
+      "CARGO_PROFILE_RELEASE_LTO=thin cargo build --release && ls -l target/release/messwerte",
+      "CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 cargo build --release && ls -l target/release/messwerte",
+      "readelf -p .comment target/release/messwerte"
+    ],
+    "beobachtung": "Jede Änderung am Profil baut alle Crates neu. Fat LTO liefert meist das kleinste Binary und braucht am längsten. `.comment` zeigt, welcher Linker tatsächlich gearbeitet hat, z. B. `Linker: LLD`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Link-Time Optimization",
+      "englisch": "link-time optimization, LTO",
+      "erklaerung": "Optimierung über alle Crates hinweg, bevor der Maschinencode endgültig erzeugt wird."
+    },
+    {
+      "begriff": "Thin LTO",
+      "englisch": "thin LTO",
+      "erklaerung": "Parallele LTO-Variante, die nur Zusammenfassungen zwischen Modulen austauscht."
+    },
+    {
+      "begriff": "Fat LTO",
+      "englisch": "fat LTO",
+      "erklaerung": "LTO-Variante, die allen LLVM IR zu einem Modul zusammenführt. Beste Optimierung, langsamster Build."
+    },
+    {
+      "begriff": "mold",
+      "englisch": "mold linker",
+      "erklaerung": "Sehr schneller, paralleler Linker für ELF-Systeme wie Linux."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Profiles",
+      "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+    },
+    {
+      "titel": "The Cargo Book: Configuration (target.<triple>.linker)",
+      "url": "https://doc.rust-lang.org/cargo/reference/config.html"
+    },
+    {
+      "titel": "The rustc book: Linker-plugin-based LTO",
+      "url": "https://doc.rust-lang.org/rustc/linker-plugin-lto.html"
+    }
+  ]
+}

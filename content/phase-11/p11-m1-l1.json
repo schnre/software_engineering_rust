@@ -1,0 +1,130 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m1-l1",
+  "phase": 11,
+  "modul": "11.1 Architekturstile im Überblick",
+  "titel": "Die wichtigsten Architekturstile",
+  "lernziele": [
+    "Die verbreiteten Architekturstile und ihre Stärken kennen",
+    "Stile anhand von Qualitätsanforderungen auswählen",
+    "Architekturstile in bekannten Rust-Projekten wiedererkennen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was unterscheidet einen **Architekturstil** von einem Entwurfsmuster wie Builder oder Newtype?",
+      "optionen": [
+        "Ein Stil prägt die Struktur des ganzen Systems: welche Arten von Bausteinen es gibt und wie sie kommunizieren dürfen",
+        "Ein Stil ist ein Entwurfsmuster für grössere Structs",
+        "Ein Stil legt die Programmiersprache und das Build-System fest",
+        "Stile gibt es nur bei Webanwendungen, nicht bei Embedded-Systemen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Architekturstil** (*architectural style*) ist eine Familie von Systemen mit gleichem Grundaufbau: Schichten, Pipes & Filters, Ereignisse, Plugins, Client-Server oder Actors. Entwurfsmuster (Phase 10) lösen lokale Probleme innerhalb eines Bausteins. Der Stil entscheidet, welche Qualitäten das System leicht erreicht und welche teuer werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Muster wirken lokal, Stile auf das ganze System.",
+        "Sprache und Build-System sind Technologieentscheidungen, kein Stil.",
+        "Gerade Embedded-Systeme nutzen Schichten, Ereignisse und Actors sehr bewusst."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne jedem Stil seine Kernidee zu.",
+      "paare": [
+        { "links": "Schichten", "rechts": "Jede Ebene nutzt nur die darunterliegende, z. B. Anwendung → Treiber → HAL → PAC" },
+        { "links": "Pipes & Filters", "rechts": "Daten fliessen durch eine Kette unabhängiger Verarbeitungsschritte" },
+        { "links": "Ereignisgesteuert", "rechts": "Bausteine veröffentlichen Ereignisse und reagieren auf Ereignisse anderer" },
+        { "links": "Microkernel / Plugin", "rechts": "Kleiner stabiler Kern, Funktionalität kommt über Erweiterungen dazu" },
+        { "links": "Client-Server", "rechts": "Ein Dienst beantwortet Anfragen vieler Clients" },
+        { "links": "Actors", "rechts": "Unabhängige Einheiten mit eigenem Zustand, die nur Nachrichten austauschen" }
+      ],
+      "erklaerung": "Die Stile schliessen sich nicht aus. Eine Firmware kann intern geschichtet sein (embedded-hal, Phase 10), ihre Tasks als Actors organisieren und Messwerte als Pipeline verarbeiten."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Stil prägt diese Rust-Projekte am stärksten?",
+      "paare": [
+        { "links": "embedded-hal mit PAC, HAL und Treiber-Crates", "rechts": "Schichten" },
+        { "links": "Iterator-Ketten mit `filter`, `map`, `fold`", "rechts": "Pipes & Filters" },
+        { "links": "Bevy-Plugins, die einer `App` Systeme hinzufügen", "rechts": "Microkernel / Plugin" },
+        { "links": "Embassy-Tasks, die über `Channel` kommunizieren", "rechts": "Actors" }
+      ],
+      "erklaerung": "In Bevy ist fast alles ein Plugin, sogar Rendering und Eingabe. Embassy-Tasks besitzen ihren Zustand exklusiv und reden über Kanäle miteinander, das ist ein Actor-System im Kleinen (Modul 11.2)."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Stile und Qualitäten",
+      "text": "Jeder Stil fördert bestimmte Qualitäten und kostet andere:\n\n- **Schichten**: gut austauschbar und testbar, aber jede Schicht kann Latenz kosten.\n- **Pipes & Filters**: Schritte einzeln test- und wiederverwendbar, ideal für Signalverarbeitung. Schwierig bei Rückkopplung.\n- **Ereignisgesteuert**: lose Kopplung, leicht erweiterbar, aber Abläufe schwer nachzuvollziehen.\n- **Plugin**: erweiterbar ohne Änderung am Kern, aber stabile Schnittstellen nötig.\n- **Client-Server**: zentrale Daten und Logik, aber der Server ist Engpass und Single Point of Failure.\n- **Actors**: keine geteilten Daten, Nebenläufigkeit ohne Locks, aber Nachrichtenfluss und Puffer müssen entworfen werden.\n\nRusts Ownership passt besonders gut zu Actors und Pipelines: Eine Nachricht wird in einen Kanal *bewegt* (move) und gehört danach dem Empfänger."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Datenlogger soll Messwerte erfassen, filtern, komprimieren und speichern. Später sollen weitere Filter dazukommen. Welcher Stil passt am besten?",
+      "optionen": [
+        "Pipes & Filters: jeder Schritt ein eigener Filter, die Kette lässt sich erweitern",
+        "Client-Server mit einem zentralen Logger-Server",
+        "Eine einzige Schicht ohne Unterteilung",
+        "Microkernel mit dynamisch geladenen Bibliotheken für jeden Schritt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Datenfluss ist linear, die Schritte sind unabhängig. In Rust lässt sich das als Iterator-Kette, als Folge von Tasks mit Kanälen oder als `Stream` bauen (Modul 11.3).",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Server hilft nicht, die Verarbeitungsschritte zu strukturieren.",
+        "Ohne Struktur wird das Hinzufügen von Filtern teuer.",
+        "Dynamisches Laden wäre für feste Verarbeitungsschritte unnötig komplex, ein einfacher Trait genügt."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was gilt für reale Systeme wie einen Roboter mit ROS 2?",
+      "optionen": [
+        "Sie kombinieren mehrere Stile: Nodes kommunizieren ereignisgesteuert über Topics, Services sind Client-Server, Sensordaten laufen durch Pipelines",
+        "Sie verwenden immer genau einen Stil",
+        "Der Stil ergibt sich automatisch aus der Programmiersprache",
+        "Stile spielen nur in der Planung eine Rolle, im Code sind sie nicht zu erkennen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wichtig ist, die Stile **bewusst** einzusetzen und zu dokumentieren, wo welcher gilt. Sonst entsteht ein unklarer Mix, in dem jeder Baustein anders kommuniziert. Mehr zu ROS 2 in Modul 11.5.",
+      "begruendungen": [
+        "Richtig.",
+        "Grössere Systeme kombinieren fast immer mehrere Stile.",
+        "Rust erlaubt jeden dieser Stile.",
+        "Gut umgesetzte Stile sind im Code an Modulen, Traits und Kanälen klar erkennbar."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Schritte einer bewussten Stilwahl in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Die wichtigsten Qualitätsziele festlegen, z. B. Latenz, Erweiterbarkeit, Testbarkeit",
+        "Passende Stile für das System und seine Teile auswählen",
+        "Die Entscheidung als ADR dokumentieren (Modul 10.7)",
+        "Die Regeln im Code absichern, z. B. mit Crate-Grenzen und Prüfungen in CI (Modul 11.7)"
+      ],
+      "erklaerung": "Stile folgen aus den Qualitätszielen, nicht aus Vorlieben. Eine Regel, die niemand prüft, erodiert mit der Zeit. Deshalb lohnt es sich, sie maschinell abzusichern."
+    }
+  ],
+  "praxis": "Wenn du in eine neue Codebase einsteigst, frage zuerst: Welche Stile sind hier im Einsatz, und wo? Ein Blick auf den Workspace (`Cargo.toml`), die Crate-Grenzen und die verwendeten Kanäle (`mpsc`, `broadcast`, Embassy `Channel`) verrät oft mehr als jedes Diagramm. Wenn du selbst entwirfst, begründe den Stil mit Qualitätszielen und schreibe es auf.",
+  "labor": {
+    "titel": "Stile in einem echten Projekt finden",
+    "anleitung": "Lade ein bekanntes Rust-Projekt herunter und untersuche seine Struktur. Suche nach Kanälen, Traits für Erweiterungen und Schichten.",
+    "befehle": [
+      "git clone --depth 1 https://github.com/embassy-rs/embassy.git",
+      "ls embassy",
+      "grep -rl \"Channel<\" embassy/examples | head"
+    ],
+    "beobachtung": "Embassy ist geschichtet (`embassy-stm32` als HAL, `embassy-executor`, `embassy-sync`, `embassy-net`). Die Beispiele zeigen Tasks, die über `Channel` und `Signal` kommunizieren, also Actors im Kleinen."
+  },
+  "begriffe": [
+    { "begriff": "Architekturstil", "englisch": "architectural style", "erklaerung": "Grundlegende Struktur- und Kommunikationsform eines ganzen Systems." },
+    { "begriff": "Pipes & Filters", "englisch": "pipes and filters", "erklaerung": "Stil, bei dem Daten durch eine Kette unabhängiger Verarbeitungsschritte fliessen." },
+    { "begriff": "Microkernel", "englisch": "microkernel", "erklaerung": "Stil mit kleinem, stabilem Kern, der über Plugins erweitert wird." },
+    { "begriff": "Actor", "englisch": "actor", "erklaerung": "Einheit mit eigenem Zustand, die nur über Nachrichten mit anderen kommuniziert." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Fearless Concurrency", "url": "https://doc.rust-lang.org/book/ch16-00-concurrency.html" },
+    { "titel": "Embassy", "url": "https://embassy.dev/" }
+  ]
+}

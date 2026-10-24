@@ -1,0 +1,206 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m2-l2",
+  "phase": 11,
+  "modul": "11.2 Ereignisgesteuerte Architekturen",
+  "titel": "Actors und hierarchische Zustandsmaschinen",
+  "lernziele": [
+    "Das Actor-Modell als Task mit Mailbox in Rust umsetzen",
+    "Run-to-Completion und das Active-Object-Muster verstehen",
+    "Hierarchische Zustandsmaschinen mit statig lesen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was macht einen **Actor** aus?",
+      "optionen": [
+        "Er besitzt seinen Zustand exklusiv und verändert ihn nur, wenn er eine Nachricht aus seiner Mailbox verarbeitet",
+        "Er teilt seinen Zustand über `Arc<Mutex<_>>` mit allen anderen Tasks",
+        "Er ist ein Thread mit höchster Priorität",
+        "Er ist ein Trait-Objekt, das per `dyn` aufgerufen wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Actor** ist ein Task mit privatem Zustand und einer **Mailbox** (Postfach, meist ein Kanal). Weil nur der Actor selbst seinen Zustand anfasst, braucht er keine Locks. In Rust ist das natürlich: Der Zustand wird in den Task *bewegt*, und Nachrichten werden in den Kanal bewegt.",
+      "begruendungen": [
+        "Richtig.",
+        "Geteilter Zustand mit Mutex ist genau das, was Actors vermeiden.",
+        "Priorität hat mit dem Actor-Modell nichts zu tun.",
+        "Ein Trait-Objekt ist dynamische Polymorphie, kein Nebenläufigkeitsmodell."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wie liest `main` den Zählerstand?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "enum Befehl {",
+          "    Erhoehe(u32),",
+          "    Lies(oneshot::Sender<u32>),",
+          "}",
+          "",
+          "async fn zaehler_actor(mut postfach: mpsc::Receiver<Befehl>) {",
+          "    let mut stand = 0;",
+          "    while let Some(b) = postfach.recv().await {",
+          "        match b {",
+          "            Befehl::Erhoehe(n) => stand += n,",
+          "            Befehl::Lies(antwort) => { let _ = antwort.send(stand); }",
+          "        }",
+          "    }",
+          "}",
+          "",
+          "// in main:",
+          "tx.send(Befehl::Erhoehe(5)).await?;",
+          "let (atx, arx) = oneshot::channel();",
+          "tx.send(Befehl::Lies(atx)).await?;",
+          "println!(\"{}\", arx.await?);"
+        ]
+      },
+      "optionen": [
+        "Die Nachricht `Lies` trägt einen `oneshot::Sender` mit, über den der Actor antwortet. Ausgabe: `5`",
+        "`main` greift direkt auf `stand` zu",
+        "Der Actor schreibt den Stand in eine globale `static mut`",
+        "Ausgabe `0`, weil `Lies` vor `Erhoehe` verarbeitet wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist das Request-Response-Muster über Nachrichten: Die Antwortadresse reist in der Anfrage mit. Die Mailbox ist ein FIFO, deshalb wird `Erhoehe(5)` vor `Lies` verarbeitet. Frameworks wie **actix** und **ractor** bieten dafür fertige Typen (`Addr`, `ActorRef`, `call`), aber das Grundprinzip ist genau dieser Code.",
+      "begruendungen": [
+        "Richtig.",
+        "`stand` ist eine lokale Variable des Actors, `main` sieht sie nicht.",
+        "Es gibt keinen globalen Zustand.",
+        "Ein `mpsc`-Kanal bewahrt die Reihenfolge eines Senders."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Logger-Actor hält ein `Rc<String>` über ein `.await` hinweg. Warum lehnt `tokio::spawn` ihn ab?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: future cannot be sent between threads safely",
+          "   --> src/main.rs:14:18",
+          "    |",
+          " 14 |     tokio::spawn(logger_actor(rx));",
+          "    |                  ^^^^^^^^^^^^^^^^ future returned by `logger_actor` is not `Send`",
+          "    |",
+          "    = help: within `impl Future<Output = ()>`, the trait `Send` is not implemented for `Rc<String>`",
+          "note: future is not `Send` as this value is used across an await"
+        ]
+      },
+      "optionen": [
+        "Der Multi-Thread-Executor kann den Task zwischen Threads verschieben, `Rc` darf aber nicht zwischen Threads wandern",
+        "Actors dürfen in Tokio keine Strings enthalten",
+        "`Rc` ist in async-Funktionen generell verboten",
+        "Es fehlt `#[tokio::main]`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Lösungen: `Arc` statt `Rc`, oder `Rc` nicht über ein `.await` halten, oder einen lokalen Executor (`LocalSet`) verwenden. In Embassy laufen alle Tasks eines Executors auf einem Kern; dort gilt diese Grenze nicht, dafür muss der Task-Zustand statisch allokierbar sein.",
+      "begruendungen": [
+        "Richtig.",
+        "`String` ist `Send`, das Problem ist `Rc`.",
+        "`Rc` ist erlaubt, solange der Future nicht `Send` sein muss oder `Rc` kein `.await` überspannt.",
+        "Die Meldung betrifft die `Send`-Grenze von `tokio::spawn`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Active Object und Run-to-Completion",
+      "text": "Ein **Active Object** ist ein Actor, dessen Verhalten eine Zustandsmaschine ist: eigene Queue, eigener Task, eigene Zustandsmaschine. Jede Nachricht wird vollständig verarbeitet, bevor die nächste drankommt (**Run-to-Completion**, RTC). Dadurch gibt es innerhalb eines Actors keine Wettläufe und keine Rekursion über einen synchronen Event-Bus.\n\nIn Embassy ist ein `#[embassy_executor::task]` mit einer Schleife über `channel.receive().await` genau so ein Active Object. In RTIC übernehmen Software-Tasks mit Nachrichten-Queues diese Rolle (Phase 7)."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Diese Zustandsmaschine nutzt das Crate **statig**. Die LED blinkt (`led_on`). Was passiert bei `ButtonPressed`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[state_machine(initial = \"State::led_on()\")]",
+          "impl Blinky {",
+          "    #[state(superstate = \"blinking\")]",
+          "    fn led_on(event: &Event) -> Outcome<State> {",
+          "        match event {",
+          "            Event::TimerElapsed => Transition(State::led_off()),",
+          "            _ => Super,",
+          "        }",
+          "    }",
+          "    // led_off analog, ebenfalls superstate = \"blinking\"",
+          "",
+          "    #[superstate]",
+          "    fn blinking(event: &Event) -> Outcome<State> {",
+          "        match event {",
+          "            Event::ButtonPressed => Transition(State::not_blinking()),",
+          "            _ => Super,",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`led_on` behandelt das Ereignis nicht und gibt es mit `Super` an den Oberzustand `blinking` weiter, der in `not_blinking` wechselt",
+        "Nichts, weil `led_on` nur `TimerElapsed` kennt",
+        "Kompilierfehler, weil `ButtonPressed` im `match` von `led_on` fehlt",
+        "Die Maschine wechselt nach `led_off`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist der Kern einer **hierarchischen Zustandsmaschine** (HSM): Gemeinsames Verhalten mehrerer Zustände steht einmal im Oberzustand (*superstate*). Ohne Hierarchie müsste jeder Blinkzustand den Knopf selbst behandeln. statig erzeugt aus den Funktionen ein `enum State` und arbeitet ohne Heap, ist also auch in `no_std` nutzbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Unbehandelte Ereignisse wandern mit `Super` nach oben.",
+        "Der Platzhalter `_` deckt alle anderen Ereignisse ab.",
+        "Nur `TimerElapsed` führt nach `led_off`."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Begriffe zu.",
+      "paare": [
+        { "links": "Mailbox", "rechts": "Kanal, über den ein Actor seine Nachrichten empfängt" },
+        { "links": "Run-to-Completion", "rechts": "Eine Nachricht wird ganz verarbeitet, bevor die nächste beginnt" },
+        { "links": "Superstate", "rechts": "Oberzustand, der gemeinsames Verhalten mehrerer Zustände enthält" },
+        { "links": "Supervision", "rechts": "Ein Eltern-Actor überwacht Kinder und startet sie bei Fehlern neu" }
+      ],
+      "erklaerung": "Supervision stammt aus Erlang und wird in Rust z. B. von **ractor** angeboten: Stirbt ein Actor durch einen Panic, erfährt sein Supervisor davon und entscheidet über einen Neustart."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Eigenschaft eines Actor-Systems musst du **bewusst entwerfen**?",
+      "optionen": [
+        "Grösse der Mailboxen und das Verhalten, wenn sie voll sind",
+        "Die Locks um den Zustand jedes Actors",
+        "Die Freigabe des Speichers, den Rust ohnehin automatisch verwaltet",
+        "Nichts, Actors sind automatisch frei von Verklemmungen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Unbegrenzte Mailboxen verschieben Überlast nur in den Speicher. Begrenzte Mailboxen brauchen eine Strategie: warten, ältestes verwerfen oder Fehler melden. Auch Actors können sich verklemmen, wenn A auf eine Antwort von B wartet und B auf A.",
+      "begruendungen": [
+        "Richtig.",
+        "Actors brauchen gerade keine Locks für ihren eigenen Zustand.",
+        "Speicherfreigabe übernimmt Ownership.",
+        "Gegenseitiges Warten auf Antworten kann auch Actors blockieren."
+      ]
+    }
+  ],
+  "praxis": "Das Muster „ein Task besitzt eine Ressource und nimmt Befehle über einen Kanal entgegen“ ist in Rust allgegenwärtig: ein Task für den Funk-Treiber in Embassy, ein Actor für die Datenbankverbindung in einem Tokio-Dienst. Beginne mit Kanälen aus `tokio` oder `embassy-sync`. Ein Framework wie ractor lohnt sich erst, wenn du Supervision oder verteilte Actors brauchst.",
+  "labor": {
+    "titel": "Einen Actor schreiben",
+    "anleitung": "Baue den Zähler-Actor aus der Lektion nach und ergänze einen Befehl `Zuruecksetzen`. Prüfe, was passiert, wenn du den Antwortkanal verwirfst, bevor der Actor antwortet.",
+    "befehle": [
+      "cargo new actor && cd actor",
+      "cargo add tokio --features full",
+      "cargo run"
+    ],
+    "beobachtung": "Verwirft der Aufrufer `arx`, liefert `antwort.send(stand)` ein `Err` zurück. Deshalb steht im Actor `let _ =`: Der Actor darf an einem verschwundenen Aufrufer nicht scheitern."
+  },
+  "begriffe": [
+    { "begriff": "Actor", "englisch": "actor", "erklaerung": "Nebenläufige Einheit mit privatem Zustand, die nur über Nachrichten kommuniziert." },
+    { "begriff": "Active Object", "englisch": "active object", "erklaerung": "Actor mit eigener Queue, eigenem Task und einer Zustandsmaschine als Verhalten." },
+    { "begriff": "Run-to-Completion", "englisch": "run-to-completion", "erklaerung": "Jedes Ereignis wird vollständig verarbeitet, bevor das nächste beginnt." },
+    { "begriff": "Hierarchische Zustandsmaschine", "englisch": "hierarchical state machine", "erklaerung": "Zustandsmaschine, in der Zustände Oberzustände mit gemeinsamem Verhalten haben." }
+  ],
+  "weiterlesen": [
+    { "titel": "statig", "url": "https://docs.rs/statig/latest/statig/" },
+    { "titel": "ractor", "url": "https://docs.rs/ractor/latest/ractor/" },
+    { "titel": "tokio::sync::oneshot", "url": "https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html" }
+  ]
+}

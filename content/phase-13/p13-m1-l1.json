@@ -1,0 +1,238 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p13-m1-l1",
+  "phase": 13,
+  "modul": "13.1 Technische Schulden und Refactoring",
+  "titel": "Technische Schulden in Rust steuern",
+  "lernziele": [
+    "Typische Rust-Schulden wie `unwrap`, `clone` und undokumentiertes `unsafe` erkennen und messbar machen",
+    "Schulden mit Lints und `#[expect]` sichtbar registrieren statt sie zu verstecken",
+    "Den Compiler beim Refactoring als Sicherheitsnetz nutzen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche dieser Stellen ist eine typische **technische Schuld** (technical debt) in Rust-Code?",
+      "optionen": [
+        "Ein `.unwrap()` beim Parsen von Konfigurationsdaten, die von aussen kommen",
+        "Ein `match`, das alle Varianten eines Enums einzeln behandelt",
+        "Eine Funktion, die `&[u8]` statt `Vec<u8>` als Parameter nimmt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Technische Schulden sind Abkürzungen, die jede spätere Änderung verteuern, bis man sie behebt. Das `unwrap` war schnell geschrieben, aber jede fehlerhafte Konfiguration bringt das Gerät nun mit einem Panic zum Stehen. Die „Zinsen“ zahlt man bei jedem Feldfehler und jeder Suche nach der Ursache.",
+      "begruendungen": [
+        "Richtig. Der Fehlerfall wurde aufgeschoben, nicht gelöst.",
+        "Das ist im Gegenteil gut: Der Compiler meldet jede neue Variante.",
+        "Ein ausgeliehener Slice ist flexibler als ein besessener Vektor, keine Schuld."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Woran man Rust-Schulden erkennt",
+      "text": "Rust macht viele Schulden **sichtbar im Code**, man muss nur danach suchen:",
+      "tabelle": {
+        "kopf": ["Muster", "Was aufgeschoben wurde", "Typischer Abbau"],
+        "zeilen": [
+          ["`.unwrap()`, `.expect(\"todo\")`", "Fehlerbehandlung", "`?` und ein eigener Fehlertyp"],
+          ["`.clone()` gegen den Borrow-Checker", "Klare Besitzverhältnisse", "Ownership umbauen, ausleihen"],
+          ["`unsafe` ohne `// SAFETY:`", "Begründung der Invarianten", "Kommentar, sichere Hülle, Test"],
+          ["`todo!()`, `unimplemented!()`", "Ganze Funktionalität", "Ticket und Test, dann umsetzen"],
+          ["`#[allow(...)]` ohne Grund", "Eine Warnung", "`#[expect(..., reason = \"…\")]`"]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du zählst die `unwrap`-Aufrufe pro Datei. Aus der Git-Historie weisst du: `parser.rs` wurde im letzten Jahr 140-mal geändert, `konfig.rs` nur 4-mal. Wo setzt du mit dem Abbau an?",
+      "terminal": {
+        "befehl": "grep -rc 'unwrap()' src/ | sort -t: -k2 -rn",
+        "ausgabe": [
+          "src/protokoll/parser.rs:23",
+          "src/konfig.rs:9",
+          "src/main.rs:5",
+          "src/treiber/uart.rs:2"
+        ]
+      },
+      "optionen": [
+        "Bei `parser.rs`: viele Abkürzungen in Code, der ständig geändert wird",
+        "Bei `konfig.rs`: Konfiguration ist immer am kritischsten",
+        "Bei `uart.rs`: Treiber sollten nie `unwrap` enthalten, egal wie viele",
+        "Überall gleichzeitig, sonst bleibt der Code uneinheitlich"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zinsen zahlt man dort, wo Code **geändert** wird. Ein **Hotspot** ist Code, der oft angefasst wird und zugleich viele Mängel hat. Die Zählung ist ein grobes Mass, kein Urteil: Ein `unwrap` auf einem Wert, der beweisbar immer `Some` ist, ist harmlos. Trotzdem ist die Kombination aus Häufigkeit und Änderungsrate eine gute, objektive Prioritätenliste.",
+      "begruendungen": [
+        "Richtig.",
+        "Mit 4 Änderungen im Jahr kosten die 9 `unwrap` dort wenig Zinsen.",
+        "Zwei Stellen in stabilem Code sind nicht der dringendste Fall.",
+        "Ein Grossumbau über alles ist riskant und schwer zu reviewen."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "In `Cargo.toml` steht `[lints.clippy] unwrap_used = \"warn\"`. Jemand behebt das `unwrap` unten, lässt aber das Attribut stehen. Was meldet `cargo clippy`?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "#[expect(clippy::unwrap_used, reason = \"Ticket FW-142: Fehlerpfad fehlt\")]",
+          "pub fn baudrate(text: &str) -> u32 {",
+          "    text.parse().unwrap_or(9600)",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Registriert die Schuld mit Begründung direkt am Code" }
+        ]
+      },
+      "optionen": [
+        "Eine Warnung: Die Erwartung `unwrap_used` ist nicht mehr erfüllt",
+        "Nichts, `#[expect]` verhält sich wie `#[allow]`",
+        "Einen Fehler, weil `unwrap_or` ebenfalls verboten ist",
+        "Die Warnung `unwrap_used` für Zeile 3"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Clippy meldet `this lint expectation is unfulfilled` und zeigt den `reason`-Text an. Anders als `#[allow]` erinnert `#[expect]` daran, das Attribut zu entfernen, sobald die Schuld bezahlt ist. So bleibt das **Schuldenregister** im Code aktuell, statt zu verrotten.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau dieser Unterschied ist der Sinn von `#[expect]`.",
+        "`unwrap_or` hat einen Standardwert und kann nicht in Panik geraten. Der Lint betrifft es nicht.",
+        "Zeile 3 enthält kein `unwrap()` mehr."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die `Cargo.toml` so, dass neue Schulden im ganzen Crate als Warnung auffallen.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[{{?}}]",
+          "unwrap_used = \"warn\"",
+          "{{?}} = \"warn\""
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["lints.clippy"] },
+        { "loesungen": ["undocumented_unsafe_blocks"] }
+      ],
+      "auswahl": ["lints.clippy", "undocumented_unsafe_blocks", "profile.release", "dependencies", "unsafe_code_allowed"],
+      "erklaerung": "Die Tabelle `[lints]` in `Cargo.toml` (seit Rust 1.74) legt Lints für das ganze Paket fest und wird mit eingecheckt. `undocumented_unsafe_blocks` meldet jeden `unsafe`-Block ohne `// SAFETY:`-Kommentar davor. In der CI mit `cargo clippy -- -D warnings` wird daraus eine Sperre gegen *neue* Schulden, während alte mit `#[expect]` registriert bleiben."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Compiler als Sicherheitsnetz",
+      "text": "Ein grosser Vorteil von Rust beim Refactoring: Viele Änderungen kann der Compiler vollständig nachprüfen. Fügst du einem Enum eine Variante hinzu, meldet er jedes `match`, das sie nicht behandelt. Änderst du eine Signatur, findet er jeden Aufrufer. Man nennt das auch *compiler-driven refactoring*: ändern, Fehlerliste abarbeiten, bis alles grün ist.\n\nDas Netz hat aber Löcher, die man selbst baut: ein `_ =>` als Sammelarm, ein `as`-Cast, der still abschneidet, oder ein `unwrap`, das einen neuen Fehlerfall verschluckt.",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0004]: non-exhaustive patterns: `&Zustand::Fehler` not covered",
+          " --> src/lib.rs:8:11",
+          "  |",
+          "8 |     match z {",
+          "  |           ^ pattern `&Zustand::Fehler` not covered"
+        ]
+      }
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Ein Kollege hat `Zustand::Fehler` neu eingeführt. Der Code kompiliert ohne Meldung, aber die Fehler-LED bleibt dunkel. Welche Zeile hat das Sicherheitsnetz des Compilers ausgehebelt?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub enum Zustand {",
+          "    Bereit,",
+          "    Messen,",
+          "    Fehler,",
+          "}",
+          "",
+          "pub fn led(z: &Zustand) -> u8 {",
+          "    match z {",
+          "        Zustand::Bereit => 1,",
+          "        Zustand::Messen => 2,",
+          "        _ => 0,",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 11,
+      "erklaerung": "Der Sammelarm `_ => 0` fängt jede künftige Variante still ab. Ohne ihn hätte `cargo build` beim Hinzufügen von `Fehler` mit E0004 auf genau diese Funktion gezeigt. Bei eigenen Enums lohnt es sich deshalb, alle Varianten explizit aufzuzählen. Ein Wildcard-Arm ist eine kleine, unsichtbare Schuld."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne jeder Schuld den passenden Abbau zu.",
+      "paare": [
+        { "links": "`unwrap()` auf Daten von aussen", "rechts": "Eigenen Fehlertyp einführen und mit `?` weiterreichen" },
+        { "links": "`clone()`, nur damit der Borrow-Checker schweigt", "rechts": "Besitzverhältnisse klären, Daten ausleihen statt kopieren" },
+        { "links": "`unsafe` ohne Begründung", "rechts": "`// SAFETY:`-Kommentar, sichere Hülle und Test ergänzen" },
+        { "links": "`#[allow(dead_code)]` ohne Kommentar", "rechts": "Durch `#[expect(..., reason = \"…\")]` mit Ticket ersetzen" }
+      ],
+      "erklaerung": "Wichtig ist die Reihenfolge der Commits: zuerst der reine Umbau ohne Verhaltensänderung, dann die fachliche Änderung. Dann kann der Reviewer den Umbau schnell abhaken, und der Compiler und die Tests sichern jeden Schritt einzeln ab."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie begründest du gegenüber der Projektleitung eine Woche Abbau der `unwrap`-Schulden im Protokoll-Parser am überzeugendsten?",
+      "optionen": [
+        "„Drei der letzten fünf Feldausfälle waren Panics im Parser. Mit einer Woche Umbau wird aus jedem davon eine Fehlermeldung statt eines Neustarts.“",
+        "„`unwrap` gilt in der Rust-Community als schlechter Stil.“",
+        "„Clippy zeigt 23 Warnungen, die wir auf null bringen wollen.“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Projektleitung entscheidet über Zeit, Kosten und Risiko. Ein Argument in diesen Begriffen, belegt mit Daten aus Ticketsystem und Logs, macht aus einer Bitte eine Investitionsentscheidung. Die Zahl der Lints ist ein gutes internes Mass, aber kein Nutzen an sich.",
+      "begruendungen": [
+        "Richtig.",
+        "Stilfragen überzeugen Nicht-Techniker zu Recht nicht.",
+        "Eine Kennzahl ohne Bezug zu Kunden oder Kosten wirkt wie Selbstzweck."
+      ]
+    }
+  ],
+  "praxis": "In Rust-Projekten entstehen Schulden oft in der Prototyp-Phase: Jedes `unwrap` und jedes `clone` war damals vernünftig. Als Senior sorgst du dafür, dass sie nicht unsichtbar werden: Lints in `Cargo.toml`, `#[expect]` mit Ticketnummer statt stummem `#[allow]`, und eine CI, die neue Schulden ablehnt. Den Abbau planst du dort, wo sich Code oft ändert, und belegst ihn mit Feldausfällen statt mit Stilargumenten.",
+  "labor": {
+    "titel": "Das eigene Schuldenregister",
+    "anleitung": "Zähle in einem eigenen Rust-Projekt die typischen Schulden-Muster und kombiniere sie mit der Änderungshäufigkeit aus Git.",
+    "befehle": [
+      "grep -rc 'unwrap()' src/ | sort -t: -k2 -rn | head",
+      "grep -rn 'unsafe' src/ | grep -v 'SAFETY' | head",
+      "cargo clippy -- -W clippy::unwrap_used -W clippy::undocumented_unsafe_blocks 2>&1 | grep -c '^warning'",
+      "git log --since=1.year --name-only --format='' -- src/ | sort | uniq -c | sort -rn | head"
+    ],
+    "beobachtung": "Dateien, die in der ersten und der letzten Liste weit oben stehen, sind deine Hotspots. Trage die wichtigsten in die `[lints]`-Tabelle ein und registriere bestehende Fälle mit `#[expect(..., reason = \"…\")]`, damit die CI ab sofort nur neue Schulden ablehnt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Technische Schulden",
+      "englisch": "technical debt",
+      "erklaerung": "Abkürzungen im Code, die künftige Änderungen verteuern. Die Mehrkosten sind die „Zinsen“."
+    },
+    {
+      "begriff": "Hotspot",
+      "englisch": "hotspot",
+      "erklaerung": "Code, der häufig geändert wird und zugleich viele Mängel oder Fehler hat."
+    },
+    {
+      "begriff": "Lint-Erwartung",
+      "englisch": "lint expectation",
+      "erklaerung": "`#[expect(lint)]` unterdrückt eine Warnung wie `#[allow]`, meldet aber, sobald sie nicht mehr auftritt."
+    },
+    {
+      "begriff": "Compilergestütztes Refactoring",
+      "englisch": "compiler-driven refactoring",
+      "erklaerung": "Umbau, bei dem man eine Änderung macht und die Fehlerliste des Compilers abarbeitet, bis alles kompiliert."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Clippy Documentation",
+      "url": "https://doc.rust-lang.org/clippy/"
+    },
+    {
+      "titel": "The Cargo Book: The Manifest Format (Abschnitt [lints])",
+      "url": "https://doc.rust-lang.org/cargo/reference/manifest.html"
+    },
+    {
+      "titel": "Martin Fowler: Technical Debt Quadrant",
+      "url": "https://martinfowler.com/bliki/TechnicalDebtQuadrant.html"
+    }
+  ]
+}

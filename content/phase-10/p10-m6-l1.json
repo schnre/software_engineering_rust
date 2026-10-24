@@ -1,0 +1,188 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m6-l1",
+  "phase": 10,
+  "modul": "10.6 Starke Typen und Kapselung",
+  "titel": "Newtypes und starke Typen",
+  "lernziele": [
+    "Einheiten, Indizes und IDs mit Newtypes unterscheidbar machen",
+    "Zeigen, dass starke Typen keine Laufzeitkosten haben",
+    "Entscheiden, welche Traits ein Newtype implementieren soll"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "1999 ging die Raumsonde Mars Climate Orbiter verloren. Was war die Ursache?",
+      "optionen": [
+        "Eine Software lieferte Impulswerte in US-Einheiten (Pfund-Sekunden), die andere erwartete metrische Einheiten (Newton-Sekunden)",
+        "Ein Pufferüberlauf im Navigationsrechner",
+        "Ein Überlauf einer 16-Bit-Ganzzahl",
+        "Ein Fehler im Betriebssystem der Sonde"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beide Seiten tauschten einfach Gleitkommazahlen aus. Für den Compiler war ein `double` ein `double`, gleich welche Einheit gemeint war. Die Bahn wich über Monate ab, die Sonde trat zu tief in die Atmosphäre ein. Starke Typen hätten den Fehler bei der Übersetzung gemeldet.",
+      "begruendungen": [
+        "Richtig.",
+        "Das war nicht die Ursache.",
+        "Ein Integer-Überlauf war die Ursache bei Ariane 5 (1996), nicht hier.",
+        "Das Betriebssystem war nicht beteiligt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Starke Typen mit Newtypes",
+      "text": "Ein **starker Typ** (strong type) gibt einem Wert seine Bedeutung im Typsystem: `Meter(f64)` statt `f64`, `SensorId(u16)` statt `u16`. Verwechslungen werden zu Compilerfehlern.\n\nTypische Kandidaten:\n\n- **Einheiten**: Meter, Fuss, Millivolt, Millisekunden\n- **IDs**: Sensor-, Kanal-, Knoten-IDs, die alle `u16` sind\n- **Indizes**: Index in Tabelle A darf nicht für Tabelle B gelten\n\nFür physikalische Einheiten gibt es fertige Crates: `uom` (Units of Measurement) rechnet mit Dimensionen, `fugit` liefert Zeit- und Frequenztypen für Embedded."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert hier?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Clone, Copy, PartialEq, Eq, Debug)]",
+          "struct SensorId(u16);",
+          "#[derive(Clone, Copy, PartialEq, Eq, Debug)]",
+          "struct KanalId(u16);",
+          "",
+          "fn kalibrieren(sensor: SensorId, kanal: KanalId) { /* … */ }",
+          "",
+          "fn main() {",
+          "    let s = SensorId(3);",
+          "    let k = KanalId(7);",
+          "    kalibrieren(k, s);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, Sensor 7 wird auf Kanal 3 kalibriert",
+        "Fehler `E0308`: Beide Argumente haben den falschen Typ",
+        "Kompiliert mit einer Warnung über vertauschte Argumente",
+        "Panic zur Laufzeit"
+      ],
+      "korrekt": 1,
+      "erklaerung": "rustc meldet `arguments to this function are incorrect` und markiert beide Argumente: `expected SensorId, found KanalId` und umgekehrt. Mit zwei `u16` wäre der Fehler erst auf der Hardware aufgefallen, wenn überhaupt.",
+      "begruendungen": [
+        "Genau das verhindern die Newtypes.",
+        "Richtig.",
+        "Es ist ein harter Fehler.",
+        "Es entsteht gar kein Programm."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Programm gibt `size_of::<Meter>()` und `size_of::<f64>()` aus und rechnet `Fuss(1000.0)` in Meter um und addiert `Meter(1.0)`. Was zeigt die Ausgabe?",
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "8 8",
+          "305.8"
+        ]
+      },
+      "optionen": [
+        "Der Newtype ist genauso gross wie `f64`. Die Typsicherheit kostet keinen Speicher",
+        "Der Newtype braucht 16 Bytes, wird aber auf 8 gerundet ausgegeben",
+        "Die Umrechnung ist falsch, 1000 Fuss sind 1000 Meter",
+        "`Meter` wird intern als Zeiger auf ein `f64` gespeichert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "1000 Fuss sind 304,8 Meter, plus 1 Meter ergibt 305,8. Der Newtype verschwindet nach der Typprüfung vollständig, im Maschinencode rechnet die CPU mit gewöhnlichen `f64`. Das ist eine **Zero-Cost-Abstraktion**: Sicherheit zur Kompilierzeit, keine Kosten zur Laufzeit.",
+      "begruendungen": [
+        "Richtig.",
+        "`size_of` liefert die exakte Grösse in Bytes.",
+        "Ein Fuss sind 0,3048 Meter.",
+        "Das Feld liegt direkt im Struct."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze, damit sich Meter addieren lassen, aber nicht Meter und Fuss.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::ops::Add;",
+          "",
+          "impl Add for Meter {",
+          "    type {{?}} = Meter;",
+          "    fn add(self, r: {{?}}) -> Meter {",
+          "        Meter(self.0 + r.0)",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["Output"] },
+        { "loesungen": ["Meter"] }
+      ],
+      "auswahl": ["Output", "Result", "Meter", "Fuss", "f64"],
+      "erklaerung": "`impl Add for Meter` ist kurz für `impl Add<Meter> for Meter`. `Meter + Fuss` hat damit keine Implementierung und kompiliert nicht. Man implementiert bewusst nur die Operationen, die physikalisch sinnvoll sind: Meter plus Meter ja, Meter mal Meter ergibt Quadratmeter, also einen anderen Typ."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Newtype `SensorId(u16)` soll benutzbar sein. Welche Traits sind sinnvoll?",
+      "optionen": [
+        "`Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Debug`, damit er in Maps und Logs funktioniert",
+        "`Deref<Target = u16>`, damit alle Methoden von `u16` verfügbar sind",
+        "`Add` und `Mul`, damit man mit IDs rechnen kann",
+        "`Default`, damit jede Id einen Startwert hat"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine ID wird verglichen, gehasht und ausgegeben, aber nicht addiert. `Deref` auf den inneren Typ hebelt den Newtype aus, weil plötzlich wieder alle `u16`-Operationen gehen. Die Rust API Guidelines raten davon ab: `Deref` ist für Smart Pointer gedacht.",
+      "begruendungen": [
+        "Richtig.",
+        "Damit verwischt man die Grenze, die der Newtype ziehen soll.",
+        "Eine Summe von IDs ergibt fachlich keinen Sinn.",
+        "Eine Standard-ID 0 ist meist ein versteckter Fehler."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne Werkzeuge und Zweck zu.",
+      "paare": [
+        { "links": "`struct Millivolt(u16)`", "rechts": "Einheit eines ADC-Werts im Typ festhalten" },
+        { "links": "`#[repr(transparent)]`", "rechts": "Gleiches Speicherlayout wie der innere Typ garantieren, z. B. für FFI" },
+        { "links": "`uom`", "rechts": "Physikalische Grössen mit Dimensionsprüfung" },
+        { "links": "`fugit`", "rechts": "Zeit- und Frequenztypen für Embedded-Timer" }
+      ],
+      "erklaerung": "Ohne `#[repr(transparent)]` ist das Layout eines Newtypes in der Praxis gleich, aber nicht garantiert. Wo ein Newtype über eine C-Schnittstelle geht oder per `transmute` umgedeutet wird, braucht man die Garantie."
+    }
+  ],
+  "praxis": "Im Review lohnt der Blick auf Funktionen mit mehreren Parametern desselben primitiven Typs, etwa `fn verschieben(x: u32, y: u32, dauer: u32)`. Jede davon ist eine Verwechslungsgefahr. Newtypes kosten ein paar Zeilen, nichts zur Laufzeit, und ersparen Fehlersuchen auf der Hardware. In Embedded-HALs zeigt `fugit`, wie das aussieht: `Timer::start(100.millis())` statt `start(100)`.",
+  "labor": {
+    "titel": "Kosten null nachweisen",
+    "anleitung": "Schreibe zwei Funktionen: eine addiert zwei `f64`, die andere zwei `Meter`. Markiere beide mit `#[inline(never)]` und `pub`, und vergleiche den Assembler im Release-Build.",
+    "befehle": [
+      "cargo new --lib einheiten && cd einheiten",
+      "cargo rustc --release -- --emit=asm",
+      "grep -A6 'addiere' target/release/deps/einheiten-*.s"
+    ],
+    "beobachtung": "Beide Funktionen bestehen aus denselben Instruktionen (eine Gleitkomma-Addition und `ret`). Der Newtype existiert im Maschinencode nicht mehr."
+  },
+  "begriffe": [
+    {
+      "begriff": "Starker Typ",
+      "englisch": "strong type",
+      "erklaerung": "Eigener Typ für eine fachliche Bedeutung, sodass Verwechslungen vom Compiler erkannt werden."
+    },
+    {
+      "begriff": "Zero-Cost-Abstraktion",
+      "englisch": "zero-cost abstraction",
+      "erklaerung": "Abstraktion, die zur Laufzeit nichts kostet, verglichen mit dem handgeschriebenen Code."
+    },
+    {
+      "begriff": "repr(transparent)",
+      "englisch": "transparent representation",
+      "erklaerung": "Attribut, das für ein Struct mit einem Feld dasselbe Layout und ABI wie das Feld garantiert."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust API Guidelines: Type safety",
+      "url": "https://rust-lang.github.io/api-guidelines/type-safety.html"
+    },
+    {
+      "titel": "The Rust Reference",
+      "url": "https://doc.rust-lang.org/reference/"
+    }
+  ]
+}

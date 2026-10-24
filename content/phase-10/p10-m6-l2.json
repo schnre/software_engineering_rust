@@ -1,0 +1,207 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m6-l2",
+  "phase": 10,
+  "modul": "10.6 Starke Typen und Kapselung",
+  "titel": "Kapselung und Invarianten",
+  "lernziele": [
+    "Invarianten mit privaten Feldern und Smart-Konstruktoren schützen",
+    "`NonZeroU32` und Enums statt `bool`-Parametern gezielt einsetzen",
+    "Mit `#[must_use]` verhindern, dass wichtige Rückgabewerte ignoriert werden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "erklaerung",
+      "titel": "Invarianten im Typ",
+      "text": "Eine **Invariante** (invariant) ist eine Bedingung, die für jeden Wert eines Typs immer gilt, z. B. „ein Sollwert liegt zwischen 5 und 30 °C“. In Rust schützt man sie so:\n\n- Felder sind **privat** (ohne `pub`). Ausserhalb des Moduls kann niemand den Wert direkt bauen oder ändern.\n- Ein **Smart-Konstruktor** (smart constructor) prüft die Bedingung und liefert `Option` oder `Result`.\n- Lesende Methoden geben den Wert heraus, schreibende prüfen erneut.\n\nDanach muss kein anderer Code die Bedingung mehr prüfen. Das ist „Parse, don't validate“ aus Modul 10.1.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "mod regler {",
+          "    pub struct Sollwert { grad: f32 }",
+          "",
+          "    impl Sollwert {",
+          "        pub fn neu(grad: f32) -> Option<Sollwert> {",
+          "            (5.0..=30.0).contains(&grad).then_some(Sollwert { grad })",
+          "        }",
+          "        pub fn grad(&self) -> f32 { self.grad }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Der Typ ist öffentlich, das Feld nicht." },
+          { "zeile": 6, "text": "Nur gültige Werte werden zu einem `Sollwert`." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "In `main`, also ausserhalb des Moduls `regler`, steht: `let s = regler::Sollwert { grad: 95.0 };`. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let s = regler::Sollwert { grad: 95.0 };",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, der Sollwert ist 95 °C",
+        "Fehler `E0451`: Das Feld `grad` ist privat",
+        "Fehler `E0603`: Das Struct `Sollwert` ist privat",
+        "Kompiliert, aber `neu` wird automatisch aufgerufen und liefert `None`"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Ein Struct-Literal braucht Zugriff auf alle Felder. Weil `grad` privat ist, meldet rustc `field grad of struct Sollwert is private`. Der einzige Weg zu einem `Sollwert` führt über `Sollwert::neu`, und damit über die Prüfung.",
+      "begruendungen": [
+        "Genau das verhindert das private Feld.",
+        "Richtig.",
+        "Das Struct ist `pub`, nur das Feld nicht.",
+        "Rust ruft Konstruktoren nie implizit auf, es gibt keine."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Programm gibt der Reihe nach `size_of::<Option<u32>>()`, `size_of::<Option<NonZeroU32>>()` und `size_of::<NonZeroU32>()` aus. Was verraten die Zahlen?",
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "8 4 4"
+        ]
+      },
+      "optionen": [
+        "`NonZeroU32` kann nie 0 sein. Der Compiler nutzt die 0 für `None`, ein `Option` kostet keinen Platz zusätzlich",
+        "`NonZeroU32` ist ein Zeiger, darum ist es kleiner",
+        "`Option<u32>` enthält einen Fehler in der Standardbibliothek",
+        "`NonZeroU32` speichert nur 31 Bit"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das nennt man **Nischenoptimierung** (niche optimization): Ein ungültiges Bitmuster des inneren Typs kodiert `None`. Bei `Option<u32>` ist jedes Bitmuster gültig, also braucht der Compiler ein eigenes Diskriminanten-Feld, und mit Ausrichtung werden es 8 Bytes. `NonZeroU32::new(0)` liefert `None`, `NonZeroU32::new(5)` liefert `Some`. Dieselbe Optimierung macht `Option<&T>` und `Option<Box<T>>` so gross wie einen Zeiger.",
+      "begruendungen": [
+        "Richtig.",
+        "`NonZeroU32` ist ein `u32` mit einer Invariante, kein Zeiger.",
+        "Das ist korrektes Verhalten, kein Fehler.",
+        "Es nutzt alle 32 Bit, nur der Wert 0 ist ausgeschlossen."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile macht den Aufruf am schwersten lesbar und am fehleranfälligsten?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub enum Richtung { Vorwaerts, Rueckwaerts }",
+          "",
+          "pub fn motor_starten(richtung: Richtung, sanft: bool) { /* … */ }",
+          "pub fn motor_stoppen(bremsen: bool, protokoll: bool, notaus: bool) { /* … */ }",
+          "",
+          "fn main() {",
+          "    motor_starten(Richtung::Vorwaerts, true);",
+          "    motor_stoppen(true, false, true);",
+          "}"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "`motor_stoppen(true, false, true)` ist an der Aufrufstelle nicht lesbar und vertauschte Argumente fallen nicht auf. Besser: eigene Enums wie `Stopp::Bremsen`, `Protokoll::Aus` und `Notaus::Ja`, oder ein Struct mit benannten Feldern. Clippy (Gruppe `pedantic`) warnt mit `fn_params_excessive_bools` bei mehr als drei `bool`-Parametern. `motor_starten` in Zeile 7 zeigt mit `Richtung` bereits, wie es besser geht."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "#[must_use]",
+      "text": "Mit `#[must_use]` markiert man Funktionen oder Typen, deren Ergebnis man nicht ignorieren darf. Wer den Rückgabewert verwirft, bekommt die Warnung `unused_must_use`, optional mit eigenem Text.\n\nDie Standardbibliothek nutzt das ausgiebig: `Result` ist `#[must_use]`, Iterator-Adapter wie `map` ebenfalls (sie tun nichts, bis sie konsumiert werden), und Methoden wie `str::to_uppercase`, die einen neuen Wert liefern statt das Original zu ändern.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[must_use = \"der begrenzte Wert wird zurückgegeben, das Original bleibt gleich\"]",
+          "pub fn begrenzt(x: i32) -> i32 {",
+          "    x.clamp(0, 100)",
+          "}"
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Im Code steht `begrenzt(x);` als eigene Anweisung. Was meldet der Compiler?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: unused return value of `begrenzt` that must be used",
+          " --> src/main.rs:5:5",
+          "  |",
+          "5 |     begrenzt(x);",
+          "  |     ^^^^^^^^^^^",
+          "  |",
+          "  = note: der begrenzte Wert wird zurückgegeben, das Original bleibt gleich",
+          "  = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default",
+          "help: use `let _ = ...` to ignore the resulting value",
+          "  |",
+          "5 |     let _ = begrenzt(x);",
+          "  |     +++++++"
+        ]
+      },
+      "optionen": [
+        "Der Aufrufer glaubt wohl, `x` werde verändert. Der Hinweistext erklärt den Irrtum",
+        "Ein Fehler, das Programm wird nicht gebaut",
+        "`begrenzt` hat einen Fehler, `clamp` existiert nicht",
+        "Die Warnung erscheint nur in Release-Builds"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Es ist eine Warnung, kein Fehler. In der CI macht `RUSTFLAGS=\"-D warnings\"` oder `cargo clippy -- -D warnings` daraus einen Abbruch. Will man den Wert absichtlich verwerfen, schreibt man `let _ = …`, was im Review als bewusste Entscheidung sichtbar ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `-D warnings` baut das Programm trotzdem.",
+        "`clamp` gibt es seit Rust 1.50 für `Ord`-Typen.",
+        "Warnungen erscheinen unabhängig vom Profil."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Mittel schützt welche Invariante?",
+      "paare": [
+        { "links": "Privates Feld + `fn neu(…) -> Option<Self>`", "rechts": "Der Sollwert liegt immer im erlaubten Bereich" },
+        { "links": "`NonZeroU32`", "rechts": "Ein Teiler oder eine Anzahl ist nie 0" },
+        { "links": "`enum Paritaet { Keine, Gerade, Ungerade }`", "rechts": "Nur gültige Kombinationen statt zweier `bool`" },
+        { "links": "`#[must_use]`", "rechts": "Ein Fehler- oder Ergebniswert wird nicht stillschweigend ignoriert" }
+      ],
+      "erklaerung": "Gemeinsam ist allen: Die Regel steht an **einer** Stelle, im Typ, und nicht verstreut in vielen `if`-Abfragen. Der Compiler setzt sie überall durch."
+    }
+  ],
+  "praxis": "Kapselung in Rust endet an der Modulgrenze, nicht am Typ. Wenn im selben Modul Code direkt Felder setzt, ist die Invariante dort ungeschützt. Lege Typen mit wichtigen Invarianten daher in ein kleines eigenes Modul. Im Review lohnen sich drei Fragen: Sind die Felder privat? Gibt es einen Konstruktor, der prüft? Werden wichtige Ergebnisse mit `#[must_use]` markiert? Clippys `must_use_candidate` (pedantic) schlägt Kandidaten vor.",
+  "labor": {
+    "titel": "Invarianten und Lints",
+    "anleitung": "Baue `Sollwert` in einem Modul, versuche ein Struct-Literal von aussen und gib die Grössen von `Option<u32>` und `Option<NonZeroU32>` aus. Schreibe eine Funktion mit vier `bool`-Parametern und lass Clippy mit der Gruppe `pedantic` laufen.",
+    "befehle": [
+      "cargo new invarianten && cd invarianten",
+      "cargo run",
+      "cargo clippy -- -W clippy::pedantic"
+    ],
+    "beobachtung": "Das Struct-Literal scheitert mit `E0451`. Die Grössen sind 8 und 4. Clippy meldet `more than 3 bools in function parameters` und schlägt für reine Funktionen `#[must_use]` vor."
+  },
+  "begriffe": [
+    {
+      "begriff": "Invariante",
+      "englisch": "invariant",
+      "erklaerung": "Bedingung, die für jeden Wert eines Typs zu jeder Zeit gilt."
+    },
+    {
+      "begriff": "Smart-Konstruktor",
+      "englisch": "smart constructor",
+      "erklaerung": "Funktion, die einen Wert nur erzeugt, wenn die Invariante erfüllt ist, und sonst `None` oder `Err` liefert."
+    },
+    {
+      "begriff": "Nischenoptimierung",
+      "englisch": "niche optimization",
+      "erklaerung": "Der Compiler nutzt ungültige Bitmuster eines Typs, um die Diskriminante eines `enum` wie `Option` ohne Zusatzplatz zu speichern."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::num::NonZero",
+      "url": "https://doc.rust-lang.org/std/num/struct.NonZero.html"
+    },
+    {
+      "titel": "The Rust Reference: Diagnostic attributes (must_use)",
+      "url": "https://doc.rust-lang.org/reference/attributes/diagnostics.html"
+    }
+  ]
+}

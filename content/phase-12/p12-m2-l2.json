@@ -1,0 +1,268 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m2-l2",
+  "phase": 12,
+  "modul": "12.2 Sicher entwerfen",
+  "titel": "Verträge, Invarianten und gekapseltes unsafe",
+  "lernziele": [
+    "Vor- und Nachbedingungen mit `assert!` und `debug_assert!` bewusst formulieren",
+    "Invarianten in Typen ausdrücken, statt sie zur Laufzeit wiederholt zu prüfen",
+    "`unsafe` minimieren, kapseln und mit SAFETY-Kommentaren und Kani-Beweisen absichern"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "assert-vs-debug",
+      "frage": "Eine Funktion erwartet laut Spezifikation höchstens 1024 Messwerte. Wann ist `debug_assert!` statt `assert!` angemessen?",
+      "optionen": [
+        "Wenn die Prüfung nur Programmierfehler in der Entwicklung aufdecken soll und der Code auch ohne sie sicher bleibt, weil eine Verletzung anderweitig behandelt wird",
+        "Immer, weil `debug_assert!` schneller ist und sonst gleich wirkt",
+        "Wenn die Bedingung von Eingaben aus dem Feld abhängt, etwa von einem CAN-Telegramm",
+        "Nie, `debug_assert!` ist veraltet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`debug_assert!` wird nur mit `debug-assertions` übersetzt, im üblichen Release-Profil verschwindet die Prüfung. Ein **Vertrag** (*contract*) besteht aus Vorbedingung, Nachbedingung und Invariante. Externe Eingaben sind keine Vorbedingung, sondern Daten, die man mit `Result` validiert. `debug_assert!` passt für interne Annahmen, deren Verletzung ein Programmierfehler wäre und die Tests aufdecken sollen.",
+      "begruendungen": [
+        "Richtig.",
+        "Im Release fehlt die Prüfung ganz. Das ist kein gleiches Verhalten.",
+        "Daten von aussen müssen immer geprüft werden, auch im Release, und zwar mit Fehlerbehandlung statt Panic.",
+        "`debug_assert!` ist aktuell und wird in der Standardbibliothek selbst verwendet."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Typen statt Laufzeitprüfungen",
+      "text": "Statt an zehn Stellen `if wert <= 100` zu prüfen, prüft man **einmal** beim Erzeugen eines Typs. Danach garantiert der Typ die **Invariante** (*invariant*), und jede Funktion, die ihn annimmt, kann sich darauf verlassen. Das Muster heisst *Newtype* mit privatem Feld und prüfendem Konstruktor, oft als „parse, don't validate“ bezeichnet.\n\nFür Gutachter ist das wertvoll: Statt jede Aufrufstelle zu prüfen, reicht es, den Konstruktor zu verifizieren. Ähnlich wirken `NonZeroU16`, Enums statt Ganzzahl-Codes und Zustandsautomaten mit Typzuständen (*typestate*).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub mod einheit {",
+          "    #[derive(Clone, Copy, Debug)]",
+          "    pub struct Prozent(u8);",
+          "",
+          "    impl Prozent {",
+          "        pub fn neu(wert: u8) -> Option<Prozent> {",
+          "            if wert <= 100 { Some(Prozent(wert)) } else { None }",
+          "        }",
+          "        pub fn wert(self) -> u8 { self.0 }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 3,
+            "text": "Das Feld ist privat. Ausserhalb des Moduls kommt man nur über `neu` an einen `Prozent`."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "newtype-e0603",
+      "frage": "Ein Kollege umgeht den Konstruktor aus dem vorherigen Schritt. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn setze_pwm(p: einheit::Prozent) -> u8 {",
+          "    p.wert()",
+          "}",
+          "",
+          "pub fn test() -> u8 {",
+          "    setze_pwm(einheit::Prozent(150))",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Compilerfehler E0603: Der Tupel-Konstruktor `Prozent` ist privat",
+        "Kompiliert, `setze_pwm` erhält 150",
+        "Kompiliert, panikt aber zur Laufzeit",
+        "Compilerfehler E0308: falscher Typ"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc meldet `error[E0603]: tuple struct constructor `Prozent` is private` und schlägt sogar vor, das Feld `pub` zu machen. Genau diesen Vorschlag darf man hier **nicht** übernehmen, sonst ist die Invariante weg. Der Compiler erzwingt so, dass jeder `Prozent` durch die Prüfung gegangen ist, ohne Laufzeitkosten an den Aufrufstellen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ausserhalb des Moduls `einheit` ist der Konstruktor nicht sichtbar.",
+        "Es wird gar nicht erst übersetzt. Das ist der Vorteil gegenüber einer Laufzeitprüfung.",
+        "Die Typen passen, das Problem ist die Sichtbarkeit."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "vertragsmittel",
+      "frage": "Welches Mittel passt zu welchem Zweck?",
+      "paare": [
+        {
+          "links": "`assert!`",
+          "rechts": "Vertragsverletzung auch im Release erkennen, dann gezielt paniken"
+        },
+        {
+          "links": "`debug_assert!`",
+          "rechts": "Interne Annahme nur in Debug-Builds und Tests prüfen"
+        },
+        {
+          "links": "Newtype mit privatem Feld",
+          "rechts": "Invariante einmal prüfen, danach vom Typsystem garantiert"
+        },
+        {
+          "links": "`Result<T, E>`",
+          "rechts": "Erwartbare Fehler, etwa ungültige Eingaben, an den Aufrufer melden"
+        },
+        {
+          "links": "Kani-Harness",
+          "rechts": "Eigenschaft für alle Eingaben beweisen"
+        }
+      ],
+      "erklaerung": "Die Mittel ergänzen sich: Typen machen ungültige Zustände unmöglich, `Result` behandelt Fehler aus der Umwelt, Zusicherungen dokumentieren und prüfen Annahmen, und Kani beweist, dass diese Annahmen wirklich nie verletzt werden. Für Rust gibt es zudem Arbeiten an Vertragsattributen (`#[requires]`, `#[ensures]`), die Kani schon experimentell auswertet."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "unsafe minimieren und kapseln",
+      "text": "`unsafe` heisst: Der Compiler kann eine Bedingung nicht prüfen, der Mensch übernimmt (Phase 2.6). Im Safety-Kontext gilt:\n\n- So wenig wie möglich: `#![forbid(unsafe_code)]` in allen Crates, die es nicht brauchen\n- Kapseln: `unsafe` nur in kleinen Modulen mit **sicherer** Schnittstelle, deren Invarianten der Aufrufer nicht verletzen kann\n- Jeder Block bekommt einen `// SAFETY:`-Kommentar, der begründet, warum die Bedingung erfüllt ist; `clippy::undocumented_unsafe_blocks` erzwingt das\n- Die Begründung wird geprüft: im Review, mit Miri (Phase 4) und für kritische Stellen mit Kani\n\nSo schrumpft die Fläche, die ein Gutachter Zeile für Zeile prüfen muss, auf wenige Stellen."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "safety-kommentar",
+      "frage": "Der SAFETY-Kommentar behauptet etwas, das die Funktion nicht garantiert. In welcher Zeile liegt der Fehler, der zu undefiniertem Verhalten führen kann?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "/// Liefert den ersten Messwert.",
+          "pub fn erstes(werte: &[u16]) -> u16 {",
+          "    // SAFETY: werte hat mindestens ein Element",
+          "    unsafe { *werte.get_unchecked(0) }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Die Funktion ist `pub` und **sicher** aufrufbar, also darf jeder einen leeren Slice übergeben. Dann liest `get_unchecked(0)` ausserhalb des Speichers: undefiniertes Verhalten. Der Kommentar dokumentiert eine Annahme, die niemand prüft. Richtig ist `werte.first().copied()` mit Rückgabe `Option<u16>`, oder vor dem Block ein `assert!(!werte.is_empty())`. Eine unsichere Bedingung, die der Aufrufer erfüllen muss, gehört in eine `unsafe fn` mit `# Safety`-Abschnitt in der Doku."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "kani-unsafe",
+      "frage": "Wozu dient dieser Kani-Harness für einen Ringpuffer mit `unsafe`-Zugriff im Inneren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[cfg(kani)]",
+          "#[kani::proof]",
+          "#[kani::unwind(5)]",
+          "fn ring_lesen_bleibt_im_puffer() {",
+          "    let mut ring: Ring<u8, 4> = Ring::new();",
+          "    let n: usize = kani::any();",
+          "    kani::assume(n <= 4);",
+          "    for _ in 0..n {",
+          "        let _ = ring.push(kani::any());",
+          "    }",
+          "    let _ = ring.pop();",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 3,
+            "text": "Schleifen werden höchstens fünfmal ausgerollt, das begrenzt den Beweis."
+          },
+          {
+            "zeile": 7,
+            "text": "Schränkt den symbolischen Wert ein, wie eine Vorbedingung."
+          }
+        ]
+      },
+      "optionen": [
+        "Er beweist für alle Füllstände bis 4 und alle Werte, dass `push` und `pop` keinen Speicherfehler, Überlauf oder Panic auslösen, auch im `unsafe`-Teil",
+        "Er misst die Laufzeit von `push` und `pop`",
+        "Er testet den Ringpuffer mit fünf zufälligen Werten",
+        "Er ersetzt den SAFETY-Kommentar"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Kani prüft automatisch Speicherzugriffe ausserhalb gültiger Bereiche, Überläufe und Panics. Damit wird die Behauptung im SAFETY-Kommentar zu einem Nachweis, allerdings nur innerhalb der Grenzen (`unwind`, `assume`). Diese Grenzen gehören in die Begründung des Nachweises. Amazon nutzt Kani u. a., um Teile der Rust-Standardbibliothek zu verifizieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Kani analysiert Logik, keine Laufzeit.",
+        "`kani::any()` ist symbolisch, es werden alle Werte gleichzeitig betrachtet.",
+        "Der Kommentar bleibt: Er erklärt dem Leser, der Beweis bestätigt die Erklärung."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-unsafe",
+      "frage": "Ergänze.",
+      "text": "Crates ohne Bedarf an unsafe setzen `#![{{?}}(unsafe_code)]`. Jeder unsafe-Block bekommt einen `// {{?}}:`-Kommentar, den der Clippy-Lint `{{?}}` einfordert.",
+      "luecken": [
+        {
+          "loesungen": [
+            "forbid"
+          ]
+        },
+        {
+          "loesungen": [
+            "SAFETY"
+          ]
+        },
+        {
+          "loesungen": [
+            "undocumented_unsafe_blocks"
+          ]
+        }
+      ],
+      "auswahl": [
+        "forbid",
+        "SAFETY",
+        "undocumented_unsafe_blocks",
+        "allow",
+        "NOTE",
+        "unsafe_op_in_unsafe_fn"
+      ],
+      "erklaerung": "`forbid` lässt sich, anders als `deny`, weiter unten im Code nicht mehr mit `allow` aufheben. `unsafe_op_in_unsafe_fn` ist ebenfalls nützlich, verlangt aber einen `unsafe`-Block auch innerhalb einer `unsafe fn`."
+    }
+  ],
+  "praxis": "Ein guter Safety-Entwurf in Rust verschiebt Prüfungen nach vorne: Eingaben werden an der Systemgrenze einmal in Typen mit Invarianten überführt, danach arbeitet der Kern nur noch mit gültigen Werten. `unsafe` sitzt in wenigen, kleinen Modulen (Registerzugriff, DMA-Puffer, FFI), jeder Block hat eine Begründung, und die kritischsten haben einen Kani-Harness. Im Review fragst du dann nicht mehr „Kann hier etwas schiefgehen?“, sondern „Stimmt die Begründung?“.",
+  "labor": {
+    "titel": "Ungültige Werte unmöglich machen",
+    "anleitung": "Baue den Newtype `Prozent` nach, versuche ihn ausserhalb des Moduls direkt zu erzeugen und lies die Fehlermeldung. Füge danach eine Funktion mit `unsafe`-Block hinzu und aktiviere den Lint für fehlende SAFETY-Kommentare.",
+    "befehle": [
+      "cargo new --lib typen && cd typen",
+      "cargo build",
+      "cargo clippy -- -W clippy::undocumented_unsafe_blocks",
+      "rustc --explain E0603"
+    ],
+    "beobachtung": "`cargo build` meldet E0603 für den privaten Konstruktor. Clippy meldet `unsafe block missing a safety comment` für jeden unbegründeten `unsafe`-Block."
+  },
+  "begriffe": [
+    {
+      "begriff": "Vertrag",
+      "englisch": "contract",
+      "erklaerung": "Vereinbarung aus Vorbedingungen, Nachbedingungen und Invarianten zwischen Funktion und Aufrufer."
+    },
+    {
+      "begriff": "Invariante",
+      "englisch": "invariant",
+      "erklaerung": "Eigenschaft, die für einen Wert oder Zustand jederzeit gilt, z. B. „Prozent liegt zwischen 0 und 100“."
+    },
+    {
+      "begriff": "Newtype",
+      "englisch": "newtype",
+      "erklaerung": "Einfacher Wrapper-Typ um einen anderen Typ, der eigene Regeln und Bedeutung erzwingt."
+    },
+    {
+      "begriff": "SAFETY-Kommentar",
+      "englisch": "safety comment",
+      "erklaerung": "Begründung direkt vor einem `unsafe`-Block, warum dessen Bedingungen erfüllt sind."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rustonomicon",
+      "url": "https://doc.rust-lang.org/nomicon/"
+    },
+    {
+      "titel": "Rust API Guidelines",
+      "url": "https://rust-lang.github.io/api-guidelines/"
+    },
+    {
+      "titel": "The Kani Rust Verifier",
+      "url": "https://model-checking.github.io/kani/"
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m3-l1",
+  "phase": 6,
+  "modul": "6.3 Takt, GPIO und Timer",
+  "titel": "Takt und GPIO mit einem HAL",
+  "lernziele": [
+    "Takt und GPIO mit einem HAL-Crate konfigurieren",
+    "Erklären, wie Typestate falsch konfigurierte Pins zur Compilezeit verhindert",
+    "Generischen Code gegen `embedded_hal::digital::OutputPin` schreiben"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "takt-vergessen",
+      "frage": "Mit dem PAC schreibst du in `GPIOA.moder` und `GPIOA.bsrr`, aber die LED bleibt dunkel und `MODER` liest immer 0 zurück. Was ist die wahrscheinlichste Ursache?",
+      "optionen": [
+        "Der Takt für GPIOA ist im RCC nicht eingeschaltet, ohne Takt ignoriert die Peripherie Schreibzugriffe",
+        "`write` statt `modify` verwendet",
+        "Die LED ist kaputt",
+        "Das PAC unterstützt GPIOA nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Nach dem Reset sind fast alle Peripherie-Takte aus, um Strom zu sparen. Das **RCC** (*Reset and Clock Control*) schaltet sie pro Block ein, für GPIOA mit `AHB1ENR.GPIOAEN`. Ein HAL nimmt dir das ab: `dp.GPIOA.split(&mut rcc)` schaltet den Takt ein, bevor es die Pins herausgibt. Damit kann man es nicht mehr vergessen.",
+      "begruendungen": [
+        "Richtig.",
+        "Das würde andere Pins stören, aber `MODER` würde trotzdem den geschriebenen Wert zeigen.",
+        "Dann würde `MODER` den geschriebenen Wert zurückliefern.",
+        "GPIOA gibt es in jedem STM32F4-PAC."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein HAL in Aktion",
+      "text": "Ein **HAL-Crate** (*hardware abstraction layer*) wie `stm32f4xx-hal` baut auf dem PAC auf. Es übernimmt die Peripherie per Ownership und gibt dir Objekte, die nur sinnvolle Operationen erlauben.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use stm32f4xx_hal::{pac, prelude::*, rcc::Config};",
+          "",
+          "let dp = pac::Peripherals::take().unwrap();",
+          "let mut rcc = dp.RCC.freeze(Config::hse(25.MHz()).sysclk(100.MHz()));",
+          "let gpioa = dp.GPIOA.split(&mut rcc);",
+          "let mut led = gpioa.pa5.into_push_pull_output();",
+          "let taster = gpioa.pa0.into_pull_up_input();",
+          "if taster.is_low() { led.set_high(); }"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "`freeze` berechnet PLL-Einstellungen und Flash-Wartezyklen. Danach sind die Frequenzen fest." },
+          { "zeile": 5, "text": "Schaltet den GPIOA-Takt ein und zerlegt den Port in einzelne Pins." },
+          { "zeile": 6, "text": "Der Typ ändert sich: aus `PA5<Input>` wird `PA5<Output<PushPull>>`." }
+        ]
+      }
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Typestate",
+      "text": "Ein Pin ist im HAL ein Typ mit dem Modus als Typparameter, etwa `Pin<'A', 5, Output<PushPull>>`. Die Methode `into_push_pull_output(self)` **verbraucht** den Eingangs-Pin und gibt einen Ausgangs-Pin zurück. Dieses Muster heisst **Typestate**: Der Zustand steckt im Typ, ungültige Übergänge und Operationen sind Compilerfehler. Zur Laufzeit kostet es nichts, die Typparameter sind nullgross und verschwinden beim Kompilieren."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "typestate-move",
+      "frage": "Ein vereinfachtes Typestate-Modell. Was meldet der Compiler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl Pin<Input> {",
+          "    pub fn into_push_pull_output(self) -> Pin<Output> { Pin { _m: PhantomData } }",
+          "    pub fn is_high(&self) -> bool { true }",
+          "}",
+          "",
+          "fn main() {",
+          "    let taster: Pin<Input> = Pin { _m: PhantomData };",
+          "    let mut led = taster.into_push_pull_output();",
+          "    led.set_high();",
+          "    taster.is_high();",
+          "}"
+        ]
+      },
+      "optionen": [
+        "``error[E0382]: borrow of moved value: `taster` ``, weil `into_push_pull_output` den Pin per `self` übernommen hat",
+        "Es kompiliert, `taster` und `led` sind derselbe Pin",
+        "``error[E0599]: no method named `is_high` ``",
+        "Es kompiliert, liest aber einen falschen Wert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Nach der Umwandlung gibt es den Eingangs-Pin nicht mehr. Damit kann kein anderer Code-Teil versehentlich weiter mit dem alten Modus arbeiten. In C wäre derselbe Pin über zwei Variablen erreichbar, und niemand würde es merken. Die Notiz des Compilers lautet wörtlich: `` `Pin::<Input>::into_push_pull_output` takes ownership of the receiver `self`, which moves `taster` ``.",
+      "begruendungen": [
+        "Richtig.",
+        "Es ist derselbe Hardware-Pin, aber der alte Wert wurde verschoben.",
+        "`is_high` gibt es für `Pin<Input>`. Das Problem ist der Move, nicht die Methode.",
+        "Rust lehnt den Zugriff schon beim Kompilieren ab."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "set-high-auf-input",
+      "frage": "Was passiert bei `let mut taster = gpioa.pa0.into_pull_up_input(); taster.set_high();`?",
+      "optionen": [
+        "``error[E0599]: no method named `set_high` found``, weil `set_high` nur für Ausgangs-Pins implementiert ist",
+        "Der Pull-up wird aktiviert",
+        "Der Pin wird automatisch zum Ausgang umgeschaltet",
+        "Eine Panik zur Laufzeit"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Methode existiert für `Pin<…, Input>` schlicht nicht. Der Compiler meldet den Fehler und weist darauf hin, dass es die Methode für einen anderen Modus gibt (`the method was found for Pin<Output>`). Eine ganze Fehlerklasse aus C, „Pin falsch konfiguriert“, verschwindet so.",
+      "begruendungen": [
+        "Richtig.",
+        "Den Pull-up wählst du mit der Umwandlung `into_pull_up_input()`.",
+        "Rust wandelt nie implizit um, du musst `into_push_pull_output()` aufrufen.",
+        "Der Fehler tritt schon beim Kompilieren auf."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "generisch-outputpin",
+      "frage": "Ein Treiber für eine Status-LED soll mit jedem HAL funktionieren. Ergänze die Signatur mit dem Trait aus `embedded-hal` 1.0.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::digital::{{?}};",
+          "",
+          "pub fn signal<P: OutputPin>(led: &mut P, an: bool) -> Result<(), P::{{?}}> {",
+          "    if an { led.set_high() } else { led.{{?}}() }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["OutputPin"] }, { "loesungen": ["Error"] }, { "loesungen": ["set_low"] }],
+      "auswahl": ["OutputPin", "InputPin", "Error", "Output", "set_low", "clear"],
+      "erklaerung": "In `embedded-hal` 1.0 geben `set_high` und `set_low` ein `Result<(), Self::Error>` zurück, weil ein Pin z. B. an einem I²C-Port-Expander hängen kann, wo Schreiben fehlschlagen kann. Für die eingebauten Pins des STM32 ist der Fehlertyp `Infallible`. Der HAL bietet daneben eigene Methoden ohne `Result`, die du im Beispiel oben gesehen hast."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "must-use",
+      "frage": "Im generischen Treiber steht nur `led.set_high();`. Was bedeutet die Warnung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: unused `Result` that must be used",
+          "  --> src/lib.rs:10:5",
+          "   |",
+          "10 |     led.set_high();",
+          "   |     ^^^^^^^^^^^^^^",
+          "   |",
+          "   = note: this `Result` may be an `Err` variant, which should be handled",
+          "   = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default"
+        ]
+      },
+      "optionen": [
+        "Bei einem generischen `P: OutputPin` kann das Schalten fehlschlagen, und der Fehler wird gerade still verworfen",
+        "Die Warnung ist bedeutungslos, GPIO kann nie fehlschlagen",
+        "`set_high` ist veraltet",
+        "Der Pin wurde nicht als Ausgang konfiguriert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im generischen Code weisst du nicht, welcher Pin dahintersteckt. Gib den Fehler mit `?` weiter oder behandle ihn. Nur wenn du einen konkreten Typ mit `Error = Infallible` hast, ist `let _ = …` oder `.unwrap()` vertretbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Für Pins am Port-Expander oder an einem Schieberegister ist das falsch.",
+        "`set_high` ist die aktuelle API von `embedded-hal` 1.0.",
+        "Typestate garantiert das, sonst gäbe es `OutputPin` gar nicht."
+      ]
+    }
+  ],
+  "praxis": "Typestate begegnet dir in fast jedem HAL: Pins, Timer, die erst nach `start` laufen, Schnittstellen, die bestimmte Pins verlangen. Wenn ein Aufruf nicht kompiliert, lohnt sich ein Blick auf den Typ in der Fehlermeldung, er sagt dir, in welchem Zustand das Objekt gerade ist. Für eigene Treiber gilt: generisch über `embedded-hal`-Traits, damit sie auf jedem Chip laufen.",
+  "labor": {
+    "titel": "Typestate selbst bauen",
+    "anleitung": "Baue auf dem PC ein Mini-Modell: `struct Pin<MODE> { _m: PhantomData<MODE> }`, Marker-Typen `Input` und `Output`, `into_push_pull_output(self)` und `set_high` nur für `Pin<Output>`. Provoziere beide Fehler aus der Lektion. Prüfe danach die Grösse.",
+    "befehle": [
+      "cargo new typestate && cd typestate",
+      "cargo build",
+      "rustc --explain E0382"
+    ],
+    "beobachtung": "Du bekommst E0382 und E0599. `size_of::<Pin<Output>>()` ist 0, der Zustand existiert nur für den Compiler."
+  },
+  "begriffe": [
+    { "begriff": "HAL", "englisch": "hardware abstraction layer", "erklaerung": "Crate mit Treibern für die Peripherie eines Chips, implementiert die `embedded-hal`-Traits." },
+    { "begriff": "Typestate", "englisch": "typestate pattern", "erklaerung": "Der Zustand eines Objekts steckt in seinem Typ; Übergänge verbrauchen den alten Wert." },
+    { "begriff": "RCC", "englisch": "reset and clock control", "erklaerung": "STM32-Block, der Takte erzeugt und pro Peripherie einschaltet." },
+    { "begriff": "Push-Pull", "englisch": "push-pull output", "erklaerung": "Ausgang, der aktiv auf High und auf Low treibt." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-hal (docs.rs)", "url": "https://docs.rs/embedded-hal" },
+    { "titel": "stm32f4xx-hal (docs.rs)", "url": "https://docs.rs/stm32f4xx-hal" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

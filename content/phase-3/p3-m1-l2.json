@@ -1,0 +1,214 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m1-l2",
+  "phase": 3,
+  "modul": "3.1 Traits und Generics für Fortgeschrittene",
+  "titel": "impl Trait, PhantomData und Marker-Traits",
+  "lernziele": [
+    "`impl Trait` in Argument- und Rückgabeposition richtig einsetzen",
+    "Mit `PhantomData` Typinformation ohne Laufzeitkosten mitführen",
+    "Die Marker-Traits `Send`, `Sync`, `Sized` und `Unpin` sowie `?Sized` deuten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "impl-trait-zwei-typen",
+      "frage": "Die Funktion soll je nach Flag einen anderen Iterator liefern. Warum scheitert sie?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn quellen(gerade: bool) -> impl Iterator<Item = u32> {",
+          "    if gerade {",
+          "        (0..10).filter(|x| x % 2 == 0)",
+          "    } else {",
+          "        (0..10).map(|x| x * 3)",
+          "    }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0308]: `if` and `else` have incompatible types",
+          " --> src/main.rs:5:9",
+          "  |",
+          "5 |         (0..10).map(|x| x * 3)",
+          "  |         ^^^^^^^^^^^^^^^^^^^^^^ expected `Filter<Range<{integer}>, {closure@...}>`, found `Map<Range<{integer}>, {closure@...}>`",
+          "  |",
+          "help: you could change the return type to be a boxed trait object",
+          "  |",
+          "1 + fn quellen(gerade: bool) -> Box<dyn Iterator<Item = u32>> {"
+        ]
+      },
+      "optionen": [
+        "`impl Trait` als Rückgabetyp steht für **genau einen** konkreten Typ, den der Compiler kennt, nur der Aufrufer sieht ihn nicht",
+        "`impl Trait` ist in Rückgabeposition nur für Closures erlaubt",
+        "`filter` liefert `bool`, nicht einen Iterator",
+        "Es fehlt ein `.collect()` in beiden Zweigen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In Rückgabeposition ist `impl Trait` ein **opaker Typ** (*opaque type*): Die Funktion legt einen konkreten Typ fest, versteckt aber seinen Namen. Statische Dispatch, kein Heap. Zwei verschiedene Typen gehen nicht. Auswege: `Box<dyn Iterator<…>>` wie rustc vorschlägt, ein eigenes Enum mit zwei Varianten oder `either::Either`.",
+      "begruendungen": [
+        "Richtig.",
+        "`impl Trait` funktioniert für jeden Trait, z. B. `impl Iterator`, `impl Future`, `impl Display`.",
+        "`filter` liefert den Adapter `Filter<…>`, der selbst ein Iterator ist.",
+        "`collect` würde einen `Vec` erzeugen. Gefragt ist ein Iterator."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "impl Trait in zwei Rollen",
+      "text": "- **Argumentposition** `fn log(x: impl Display)`: Kurzform für `fn log<T: Display>(x: T)`. Der **Aufrufer** wählt den Typ, pro Typ entsteht eine monomorphisierte Kopie. Einziger Unterschied: `log::<i32>(5)` geht nicht, rustc meldet `E0107`.\n- **Rückgabeposition** `fn zahlen() -> impl Iterator<Item = u8>`: Die **Funktion** wählt den Typ. Unverzichtbar für Closures und Iterator-Ketten, deren Typen keinen schreibbaren Namen haben.\n\nTrait-Bounds sind Rusts Gegenstück zu C++-Concepts, mit einem wichtigen Unterschied: Rust prüft generische Funktionen **beim Definieren** gegen ihre Bounds, nicht erst beim Einsetzen. Fehlermeldungen zeigen daher auf die Signatur, nicht tief in den Rumpf.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn log(x: impl std::fmt::Display) { println!(\"{x}\"); }",
+          "fn gerade() -> impl Iterator<Item = u32> { (0..).step_by(2) }"
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "phantomdata-einheiten",
+      "frage": "Was passiert in Zeile 12?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::marker::PhantomData;",
+          "use std::ops::Add;",
+          "",
+          "struct Meter;",
+          "struct Fuss;",
+          "struct Laenge<E> { wert: f64, _e: PhantomData<E> }",
+          "",
+          "// impl<E> Laenge<E> { fn neu(w: f64) -> Self { … } }",
+          "// impl<E> Add for Laenge<E> { type Output = Self; … }",
+          "",
+          "let a: Laenge<Meter> = Laenge::neu(1.0);",
+          "let c = a + Laenge::<Fuss>::neu(3.0);"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "`E` wird nirgends gespeichert. `PhantomData<E>` belegt null Bytes." }
+        ]
+      },
+      "optionen": [
+        "`error[E0308]: mismatched types`: erwartet `Laenge<Meter>`, gefunden `Laenge<Fuss>`",
+        "Kompiliert, `c` ist 4.0",
+        "Kompiliert, aber `PhantomData` prüft die Einheit zur Laufzeit und paniciert",
+        "`error[E0392]`: Parameter `E` wird nie verwendet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**`PhantomData<E>`** verhält sich für den Compiler so, als würde die Struktur ein `E` enthalten, belegt aber keinen Speicher: `size_of::<Laenge<Meter>>()` ist 8. Ohne das Feld meldet rustc `E0392`, denn unbenutzte Typparameter sind verboten. So lassen sich Einheiten, Zustände oder Besitzverhältnisse (bei Rohzeigern) im Typsystem ausdrücken.",
+      "begruendungen": [
+        "Richtig. `Add` ist nur für zwei Werte mit gleichem `E` implementiert.",
+        "Genau diese Verwechslung soll der Typparameter verhindern.",
+        "`PhantomData` existiert nur zur Übersetzungszeit, es gibt keinen Laufzeitcheck.",
+        "Dank `PhantomData<E>` gilt `E` als verwendet."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "rc-send",
+      "frage": "Was verlangt `thread::spawn` hier, das `Rc` nicht erfüllt?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let daten = Rc::new(vec![1, 2, 3]);",
+          "let h = thread::spawn(move || println!(\"{:?}\", daten));"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: `Rc<Vec<i32>>` cannot be sent between threads safely",
+          " --> src/main.rs:5:27",
+          "  |",
+          "  = help: within `{closure@src/main.rs:5:27: 5:34}`, the trait `Send` is not implemented for `Rc<Vec<i32>>`",
+          "note: required by a bound in `spawn`"
+        ]
+      },
+      "optionen": [
+        "Den Marker-Trait `Send`: Der Wert darf in einen anderen Thread verschoben werden",
+        "Den Marker-Trait `Sync`: Der Wert darf von mehreren Threads gelesen werden",
+        "`Copy`, weil Closures nur kopierbare Werte einfangen dürfen",
+        "`'static`, weil `daten` zu kurz lebt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Marker-Traits** (*marker traits*) haben keine Methoden, sie behaupten nur eine Eigenschaft. `Send` und `Sync` sind **Auto-Traits**: Der Compiler leitet sie aus den Feldern ab. `Rc` zählt Referenzen ohne Atomics und ist darum ausdrücklich `!Send`. Mit `Arc` kompiliert der Code. Die Details zu Threads folgen in Phase 5.",
+      "begruendungen": [
+        "Richtig.",
+        "`Sync` betrifft geteilte Referenzen `&T`. Hier wird der Wert selbst verschoben.",
+        "`move` verschiebt beliebige Werte in die Closure, `Copy` ist nicht nötig.",
+        "Durch `move` gehört `daten` der Closure, die Lebensdauer ist kein Problem."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Marker-Traits zu.",
+      "paare": [
+        { "links": "`Send`", "rechts": "Darf in einen anderen Thread verschoben werden" },
+        { "links": "`Sync`", "rechts": "`&T` darf zwischen Threads geteilt werden" },
+        { "links": "`Sized`", "rechts": "Grösse ist zur Übersetzungszeit bekannt" },
+        { "links": "`Unpin`", "rechts": "Darf verschoben werden, auch wenn er gepinnt ist" },
+        { "links": "`Copy`", "rechts": "Bitweise Kopie statt Move bei Zuweisung" }
+      ],
+      "erklaerung": "`Send`, `Sync` und `Unpin` sind Auto-Traits, `Sized` wird implizit für jeden Typparameter verlangt. `Copy` ist ebenfalls ein Marker, muss aber mit `derive` angefordert werden. `Unpin` begegnet dir wieder bei `Pin` in Modul 3.5 und bei async in Modul 3.6."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "`laenge(\"Hallo\")` mit `s: &str` scheitert mit „the size for values of type `str` cannot be known at compilation time“. Ergänze die Lockerung.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn laenge<T: {{?}}>(x: &T) -> usize {",
+          "    std::mem::size_of_val(x)",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["?Sized"] }],
+      "auswahl": ["?Sized", "Sized", "!Sized", "Unpin"],
+      "erklaerung": "Jeder Typparameter hat den impliziten Bound `T: Sized`. **`?Sized`** hebt ihn auf, damit auch **dynamisch grosse Typen** (*dynamically sized types*) wie `str`, `[u8]` und `dyn Trait` passen. Solche Typen gibt es nur hinter einem Zeiger (`&T`, `Box<T>`), darum funktioniert das hier. rustc schlägt genau diese Änderung vor."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Treiber hält einen Rohzeiger `*mut u8` auf einen Hardware-Puffer. Was passiert mit `Send` für `struct Treiber { buf: *mut u8 }`?",
+      "optionen": [
+        "`Treiber` ist automatisch **nicht** `Send`, weil Rohzeiger `!Send` sind. Ist es sicher, kann man `unsafe impl Send for Treiber {}` schreiben",
+        "`Treiber` ist `Send`, weil jeder Struct `Send` ist",
+        "Man kann `Send` mit `#[derive(Send)]` ergänzen",
+        "`Send` ist nur für Typen auf dem Heap relevant"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auto-Traits werden aus den Feldern abgeleitet, Rohzeiger sind bewusst weder `Send` noch `Sync`. Eine manuelle Impl ist `unsafe`, weil der Autor die Thread-Sicherheit verspricht, die der Compiler nicht prüfen kann. In Embedded-HALs sieht man das bei Peripherie-Typen oft. Mehr zu `unsafe` in Phase 2, zu Threads in Phase 5.",
+      "begruendungen": [
+        "Richtig.",
+        "Nur Structs, deren Felder alle `Send` sind.",
+        "`Send` lässt sich nicht ableiten, nur `unsafe` implementieren.",
+        "`Send` gilt für jeden Wert, egal wo er liegt."
+      ]
+    }
+  ],
+  "praxis": "In Bibliotheken liest du ständig Signaturen wie `fn spawn<F>(f: F) where F: FnOnce() + Send + 'static` oder `fn read(&self) -> impl Future<Output = u8> + Send`. Wer die Marker-Traits versteht, versteht, warum ein Wert nicht in einen Thread oder eine async-Task darf. `PhantomData` ist das Werkzeug für typsichere Einheiten, Register-Zugriffsrechte und Zustände ohne Laufzeitkosten.",
+  "labor": {
+    "titel": "Marker-Traits prüfen",
+    "anleitung": "Schreibe eine Hilfsfunktion `fn ist_send<T: Send>() {}` und rufe sie für `Rc<u8>`, `Arc<u8>`, `*mut u8`, `Cell<u8>` und eine eigene Struktur mit `PhantomData<*const ()>` auf. Lies die Fehlermeldungen und vergleiche anschliessend mit `fn ist_sync<T: Sync>() {}`.",
+    "befehle": [
+      "cargo new marker && cd marker",
+      "cargo check",
+      "rustc --explain E0277"
+    ],
+    "beobachtung": "`Cell<u8>` ist `Send`, aber nicht `Sync`. `PhantomData<*const ()>` macht eine sonst leere Struktur `!Send` und `!Sync`, ein gängiger Trick, um Typen an einen Thread zu binden."
+  },
+  "begriffe": [
+    { "begriff": "impl Trait", "englisch": "impl Trait", "erklaerung": "In Argumentposition ein anonymer Typparameter, in Rückgabeposition ein opaker, vom Compiler festgelegter Typ." },
+    { "begriff": "PhantomData", "englisch": "PhantomData", "erklaerung": "Feld ohne Grösse, das einen Typparameter als verwendet markiert." },
+    { "begriff": "Marker-Trait", "englisch": "marker trait", "erklaerung": "Trait ohne Methoden, der eine Eigenschaft ausdrückt, z. B. `Send` oder `Copy`." },
+    { "begriff": "Auto-Trait", "englisch": "auto trait", "erklaerung": "Trait, den der Compiler automatisch aus den Feldern eines Typs ableitet (`Send`, `Sync`, `Unpin`)." },
+    { "begriff": "Dynamisch grosser Typ", "englisch": "dynamically sized type (DST)", "erklaerung": "Typ ohne feste Grösse wie `str`, `[T]` oder `dyn Trait`, nur hinter Zeigern verwendbar." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::marker (Dokumentation)", "url": "https://doc.rust-lang.org/std/marker/index.html" },
+    { "titel": "The Rustonomicon", "url": "https://doc.rust-lang.org/nomicon/" }
+  ]
+}

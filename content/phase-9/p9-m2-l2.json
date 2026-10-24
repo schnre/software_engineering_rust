@@ -1,0 +1,188 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m2-l2",
+  "phase": 9,
+  "modul": "9.2 Traits und öffentliche APIs als Verträge",
+  "titel": "SemVer und stabile APIs",
+  "lernziele": [
+    "Erkennen, welche Änderungen an einer Rust-API ein Breaking Change sind",
+    "`#[non_exhaustive]` und sealed Traits einsetzen, um künftige Erweiterungen offen zu halten",
+    "Breaking Changes mit cargo-semver-checks vor dem Release finden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Version 1.0.0 deines Crates hat `pub struct Konfig { pub baudrate: u32 }`. In 1.1.0 kommt das Feld `pub paritaet: bool` dazu. Ist das SemVer-kompatibel?",
+      "optionen": [
+        "Nein. Nutzer, die `Konfig { baudrate: 115200 }` schreiben, bekommen einen Compilerfehler, weil das neue Feld fehlt",
+        "Ja, ein Feld hinzuzufügen ist immer eine kompatible Erweiterung",
+        "Ja, solange das neue Feld einen Standardwert über `Default` hat",
+        "Nein, aber nur wegen des geänderten Speicherlayouts"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Struktur, deren Felder alle `pub` sind, kann jeder per Literal bauen und per Muster zerlegen. Ein neues Feld bricht beides. Nach SemVer wäre das in 1.x ein neuer Major-Release, also 2.0.0. Das Speicherlayout spielt dagegen keine Rolle, weil Cargo Abhängigkeiten aus Quelltext baut.",
+      "begruendungen": [
+        "Richtig. Ein Strukturliteral muss alle Felder nennen.",
+        "Das stimmt für private Felder, nicht für eine Struktur, die nur aus `pub`-Feldern besteht.",
+        "Ein `Default`-Impl hilft nur Nutzern, die `..Default::default()` schreiben. Alle anderen Literale brechen.",
+        "Rust-Abhängigkeiten werden aus Quelltext neu gebaut, das Layout ist hier kein Vertrag."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "SemVer in Cargo",
+      "text": "Cargo setzt auf **Semantic Versioning**: `MAJOR.MINOR.PATCH`. Ein Patch behebt Fehler, ein Minor-Release fügt kompatibel hinzu, ein Major-Release darf brechen. Bei `0.x` rückt alles eine Stelle nach rechts: `0.8 → 0.9` gilt als Major-Sprung.\n\nWeil Cargo bei `cargo update` kompatible Versionen automatisch nimmt, ist deine Versionsnummer ein **Versprechen**. Brichst du es in einem Minor-Release, scheitern fremde Builds, ohne dass dort jemand etwas geändert hat.\n\nIn Rust bricht dabei mehr, als man denkt: nicht nur entfernte Funktionen, sondern auch neue Felder, neue Enum-Varianten, neue Trait-Methoden und verlorene Auto-Traits wie `Send`."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was passiert bei Nutzern mit Code von Version 1.0, wenn die Änderung in 1.1 kommt?",
+      "paare": [
+        { "links": "Neue Variante `Fehler::Ueberlauf` in einem `pub enum`", "rechts": "Erschöpfende `match` ohne `_` kompilieren nicht mehr" },
+        { "links": "Neue Methode `fn name(&self) -> &str` ohne Default in `pub trait Sensor`", "rechts": "Fremde `impl Sensor` kompilieren nicht mehr (E0046)" },
+        { "links": "Ein privates Feld wird zu `Rc<Vec<u8>>`", "rechts": "Der Typ ist nicht mehr `Send`, `thread::spawn` scheitert" },
+        { "links": "Neue Methode mit Default-Implementierung im Trait", "rechts": "Meist kompatibel, ein Minor-Release genügt" }
+      ],
+      "erklaerung": "Auto-Traits wie `Send` und `Sync` leitet der Compiler aus den Feldern ab, auch aus privaten. Eine interne Änderung kann also still die öffentliche API brechen. Neue Trait-Methoden mit Default sind fast immer harmlos, nur in seltenen Fällen kollidieren sie mit gleichnamigen Methoden anderer Traits."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Das Crate `domain` markiert seinen Fehlertyp mit `#[non_exhaustive]`. Was passiert in einem anderen Crate?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "// crate domain",
+          "#[non_exhaustive]",
+          "#[derive(Debug)]",
+          "pub enum Fehler {",
+          "    Timeout,",
+          "    Crc,",
+          "}",
+          "",
+          "// crate app",
+          "fn text(f: domain::Fehler) -> &'static str {",
+          "    match f {",
+          "        domain::Fehler::Timeout => \"timeout\",",
+          "        domain::Fehler::Crc => \"crc\",",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler, alle Varianten sind abgedeckt",
+        "E0004: Muster `_` nicht abgedeckt. Ausserhalb von `domain` ist ein Wildcard-Zweig Pflicht",
+        "E0603: `Fehler` ist privat",
+        "Nur eine Warnung, weil `#[non_exhaustive]` ein Hinweis ist"
+      ],
+      "korrekt": 1,
+      "erklaerung": "`#[non_exhaustive]` zwingt Nutzer schon heute zu einem `_`-Zweig. Darum darf das Crate später Varianten hinzufügen, ohne jemanden zu brechen. Bei Strukturen verbietet das Attribut Literale und erschöpfende Muster ausserhalb des Crates (E0639), dann ist ein neues Feld kompatibel. Innerhalb des eigenen Crates gilt die Einschränkung nicht.",
+      "begruendungen": [
+        "rustc meldet ausdrücklich, dass `Fehler` als non-exhaustive markiert ist.",
+        "Richtig. Mit `_ => \"unbekannt\"` kompiliert es.",
+        "`Fehler` ist `pub`.",
+        "Es ist ein harter Fehler, damit das Versprechen auch durchgesetzt wird."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Sealed Traits",
+      "text": "Ein öffentliches Trait hat zwei Arten von Nutzern: Aufrufer und Implementierer. Eine neue Methode ohne Default bricht nur die Implementierer. Willst du diese Freiheit behalten, **versiegelst** du das Trait: Es setzt ein Supertrait voraus, das in einem privaten Modul liegt und das andere Crates darum nicht benennen können.\n\nAndere Crates können das Trait dann benutzen, aber nicht implementieren. rustc erklärt das im Fehler sogar selbst: `Kanal` sei ein „sealed trait“.",
+      "code": {
+        "sprache": "rust",
+        "datei": "domain/src/lib.rs",
+        "zeilen": [
+          "mod privat {",
+          "    pub trait Versiegelt {}",
+          "}",
+          "",
+          "pub trait Kanal: privat::Versiegelt {",
+          "    fn nummer(&self) -> u8;",
+          "}",
+          "",
+          "impl privat::Versiegelt for Uart1 {}",
+          "impl Kanal for Uart1 { fn nummer(&self) -> u8 { 1 } }"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Privates Modul: Von aussen ist `Versiegelt` nicht erreichbar." },
+          { "zeile": 5, "text": "Wer `Kanal` implementieren will, braucht auch `Versiegelt`, und das geht nur innerhalb dieses Crates." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Vor dem Release von 1.1.0 lässt du cargo-semver-checks gegen 1.0.0 laufen. Was folgt daraus?",
+      "terminal": {
+        "befehl": "cargo semver-checks --baseline-root ../v1",
+        "ausgabe": [
+          "    Checking sensorik v1.0.0 -> v1.1.0 (minor change)",
+          "     Checked [   0.171s] 202 checks: 198 pass, 4 fail, 0 warn, 58 skip",
+          "",
+          "--- failure auto_trait_impl_removed: auto trait no longer implemented ---",
+          "  type Puffer is no longer Send, in src/lib.rs:17",
+          "  type Puffer is no longer Sync, in src/lib.rs:17",
+          "--- failure constructible_struct_adds_field: struct exhaustively constructible through public API adds field ---",
+          "  field Konfig.paritaet in src/lib.rs:3",
+          "--- failure enum_variant_added: enum variant added on exhaustive enum ---",
+          "  variant Fehler:Ueberlauf in src/lib.rs:9",
+          "--- failure trait_method_added: pub trait method added ---",
+          "  trait method sensorik::Sensor::name in file src/lib.rs:14",
+          "",
+          "     Summary semver requires new major version: 4 major and 0 minor checks failed"
+        ]
+      },
+      "optionen": [
+        "So ist das kein Minor-Release. Entweder 2.0.0 veröffentlichen oder die Änderungen kompatibel umbauen, etwa mit Default-Methode, `#[non_exhaustive]` ab dem nächsten Major und `Arc` statt `Rc`",
+        "Vier Warnungen, die man für ein Minor-Release ignorieren kann",
+        "Das Werkzeug irrt, weil `Puffer` nur private Felder hat",
+        "Es reicht, die Patch-Nummer zu erhöhen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "cargo-semver-checks vergleicht die rustdoc-Daten zweier Versionen und prüft sie gegen eine Liste bekannter Brüche. Es ersetzt kein Nachdenken, fängt aber genau die überraschenden Fälle wie den verlorenen `Send`. In der Release-Pipeline vor `cargo publish` ist es ein bewährtes Quality Gate.",
+      "begruendungen": [
+        "Richtig. Die Zusammenfassung sagt es: neue Major-Version nötig.",
+        "Es sind Fehler (`failure`), die beim Nutzer zu Compilerfehlern führen.",
+        "Auto-Traits hängen auch von privaten Feldern ab. `Rc` ist nicht `Send`.",
+        "Ein Patch verspricht noch mehr Kompatibilität als ein Minor-Release."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Du startest eine neue Treiber-Bibliothek. Welche Entscheidung hält dir für spätere Minor-Releases am meisten Spielraum?",
+      "optionen": [
+        "Konfigurations- und Fehlertypen von Anfang an mit `#[non_exhaustive]` oder privaten Feldern plus Konstruktor bzw. Builder anbieten",
+        "Alle Felder `pub` machen, das ist für Nutzer am bequemsten",
+        "Gleich mit 1.0.0 starten, dann sind spätere Änderungen erlaubt",
+        "Keine Traits verwenden, damit niemand etwas implementieren kann"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Was du heute öffentlich machst, kannst du später nur mit einem Major-Release zurücknehmen. Private Felder, Konstruktoren und `#[non_exhaustive]` kosten jetzt wenig und erlauben später Erweiterungen. Der Preis ist ein Wildcard-Zweig bzw. ein Konstruktor beim Nutzer, darum bewusst wählen und nicht blind überall setzen.",
+      "begruendungen": [
+        "Richtig.",
+        "Bequem heute, aber jedes neue Feld wird zum Breaking Change.",
+        "1.0.0 verspricht mehr Stabilität, nicht weniger.",
+        "Traits sind ein wertvolles Mittel für Verträge. Versiegeln löst das Problem gezielter."
+      ]
+    }
+  ],
+  "praxis": "Sobald andere Teams oder Projekte dein Crate über eine Version einbinden, ist die öffentliche API ein Vertrag. Plane Erweiterbarkeit von Anfang an (`#[non_exhaustive]`, private Felder, versiegelte Traits), prüfe im Review jedes neue `pub` und lass cargo-semver-checks in der CI vor jedem Release laufen. Das gilt auch für interne Registries: Ein gebrochenes Minor-Release legt dort genauso Builds lahm.",
+  "labor": {
+    "titel": "Einen Breaking Change finden lassen",
+    "anleitung": "Lege zwei Kopien eines kleinen Bibliotheks-Crates an (Version 1.0.0 und 1.1.0). Füge in der neuen Version ein `pub`-Feld, eine Enum-Variante und eine Trait-Methode ohne Default hinzu und ersetze ein privates `Vec` durch `Rc<Vec<_>>`. Vergleiche dann beide Versionen.",
+    "befehle": [
+      "cargo install cargo-semver-checks --locked",
+      "cd v2 && cargo semver-checks --baseline-root ../v1"
+    ],
+    "beobachtung": "Das Werkzeug meldet vier Brüche, darunter den verlorenen `Send`, obwohl sich nur ein privates Feld geändert hat. Setze dann `#[non_exhaustive]` in beiden Versionen, gib der Trait-Methode einen Default und ersetze `Rc` durch `Arc`: Die Prüfung wird grün."
+  },
+  "begriffe": [
+    { "begriff": "Semantic Versioning", "englisch": "semantic versioning", "erklaerung": "Versionsschema `MAJOR.MINOR.PATCH`, bei dem die Nummer verspricht, ob Nutzer-Code weiter kompiliert." },
+    { "begriff": "Breaking Change", "englisch": "breaking change", "erklaerung": "Änderung, nach der bestehender Nutzer-Code nicht mehr kompiliert oder sich anders verhält." },
+    { "begriff": "Sealed Trait", "englisch": "sealed trait", "erklaerung": "Öffentliches Trait, das andere Crates benutzen, aber nicht implementieren können." },
+    { "begriff": "Auto-Trait", "englisch": "auto trait", "erklaerung": "Trait wie `Send` oder `Sync`, das der Compiler automatisch aus den Feldern eines Typs ableitet." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Cargo Book: SemVer Compatibility", "url": "https://doc.rust-lang.org/cargo/reference/semver.html" },
+    { "titel": "Rust API Guidelines: Future proofing", "url": "https://rust-lang.github.io/api-guidelines/future-proofing.html" },
+    { "titel": "cargo-semver-checks auf GitHub", "url": "https://github.com/obi1kenobi/cargo-semver-checks" }
+  ]
+}

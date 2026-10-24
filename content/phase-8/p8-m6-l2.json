@@ -1,0 +1,174 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m6-l2",
+  "phase": 8,
+  "modul": "8.6 Git im Team",
+  "titel": "Rebase, Merge und Konflikte in Cargo.lock",
+  "lernziele": [
+    "Merge, Rebase, Squash und Fast-Forward unterscheiden",
+    "Einen Branch mit interaktivem Rebase aufräumen und sicher pushen",
+    "Konflikte in `Cargo.lock` richtig lösen und Commits signieren"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was macht `git rebase main` auf deinem Feature-Branch?",
+      "optionen": [
+        "Es setzt deine Commits neu auf den aktuellen Stand von `main` auf. Dabei entstehen neue Commits mit neuen Hashes",
+        "Es führt `main` per Merge-Commit in deinen Branch zusammen",
+        "Es löscht deinen Branch und erstellt ihn aus `main` neu"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rebase spielt deine Änderungen eine nach der anderen auf einer neuen Basis ab. Das Ergebnis ist eine gerade Historie ohne Merge-Commit. Weil sich die Basis ändert, ändern sich auch die Hashes. Das ist wichtig, sobald andere auf deinem Branch aufbauen.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre `git merge main`.",
+        "Deine Commits bleiben erhalten, nur neu angeordnet."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne zu.",
+      "paare": [
+        { "links": "Merge", "rechts": "Verbindet zwei Verläufe mit einem Merge-Commit, nichts wird umgeschrieben" },
+        { "links": "Rebase", "rechts": "Setzt eigene Commits neu auf eine andere Basis, mit neuen Hashes" },
+        { "links": "Squash-Merge", "rechts": "Fasst alle Commits eines Pull Requests zu einem zusammen" },
+        { "links": "Fast-Forward", "rechts": "Rückt nur den Branch-Zeiger vor, ohne neuen Commit" }
+      ],
+      "erklaerung": "Die goldene Regel: **Niemals Commits umschreiben, auf denen andere aufbauen.** Den eigenen, noch nicht geteilten Branch darfst du jederzeit aufräumen. Welche Merge-Art ein Team nutzt, ist Konvention. Wichtig ist Einheitlichkeit."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Du hast in Commit `3f9c2ab` einen Clippy-Fehler übersehen und willst die Korrektur vor dem Pull Request dort einfliessen lassen. Ergänze.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "cargo clippy --fix --allow-dirty",
+          "git commit -a --{{?}}=3f9c2ab",
+          "git rebase -i --{{?}} main",
+          "git push --{{?}}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["fixup"] },
+        { "loesungen": ["autosquash"] },
+        { "loesungen": ["force-with-lease"] }
+      ],
+      "auswahl": ["fixup", "amend", "autosquash", "squash", "force-with-lease", "force"],
+      "erklaerung": "`--fixup` erzeugt einen Commit mit dem Betreff `fixup! …`. `--autosquash` ordnet ihn beim interaktiven Rebase hinter den Ziel-Commit ein und verschmilzt beide. So bleibt jeder Commit für sich korrekt. Weil sich die Hashes geändert haben, braucht der Push Gewalt: `--force-with-lease` überschreibt nur, wenn niemand anderes inzwischen auf den Branch gepusht hat. `--force` würde dessen Arbeit still löschen."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Konflikte in Cargo.lock",
+      "text": "Zwei Branches fügen je eine Abhängigkeit hinzu: einer `heapless`, der andere `crc`. Beim Mergen kollidieren beide in `Cargo.toml` und in `Cargo.lock`.\n\n`Cargo.toml` löst du von Hand, beide Zeilen gehören hinein. `Cargo.lock` aber ist eine **generierte Datei**. Die Konfliktmarkierungen von Hand zu entwirren ist fehleranfällig, und mit Markierungen kann Cargo sie gar nicht lesen. Besser: eine Seite übernehmen und Cargo den Rest ergänzen lassen.",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: failed to parse lock file at: /home/user/projekt/Cargo.lock",
+          "",
+          "Caused by:",
+          "  TOML parse error at line 6, column 9",
+          "    |",
+          "  6 | <<<<<<< HEAD",
+          "    |         ^",
+          "  key with no value, expected `=`"
+        ]
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Schritte zum Lösen des Konflikts in `Cargo.toml` und `Cargo.lock` in die richtige Reihenfolge.",
+      "elemente": [
+        "`Cargo.toml` von Hand zusammenführen: beide Abhängigkeiten behalten",
+        "`git checkout --ours Cargo.lock`: die Version des Zielbranches übernehmen",
+        "`cargo build` ausführen: Cargo ergänzt die fehlenden Einträge im Lockfile",
+        "`cargo test` ausführen und mit `cargo tree` prüfen, dass beide Crates aufgelöst sind",
+        "`git add Cargo.toml Cargo.lock` und den Merge abschliessen"
+      ],
+      "erklaerung": "Wichtig ist, eine Seite zu übernehmen statt neu zu generieren: Cargo ergänzt dann nur, was fehlt, und lässt alle anderen festgelegten Versionen unverändert. Ein gelöschtes Lockfile würde dagegen jede Abhängigkeit auf die neueste passende Version heben, ein riesiger, ungeprüfter Nebeneffekt im Merge. Bei einem Rebase sind übrigens `--ours` und `--theirs` vertauscht: `ours` ist dort die Basis, auf die du gerade aufsetzt."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Nach dem Lösen des Konflikts läuft lokal alles. In der CI scheitert dieser Schritt. Was bedeutet das?",
+      "terminal": {
+        "befehl": "cargo build --locked",
+        "ausgabe": [
+          "    Updating crates.io index",
+          "error: cannot update the lock file /home/user/projekt/Cargo.lock because --locked was passed to prevent this"
+        ]
+      },
+      "optionen": [
+        "Das committete `Cargo.lock` passt nicht zu `Cargo.toml`. Wahrscheinlich wurde nach dem `cargo build` das aktualisierte Lockfile nicht mit `git add` übernommen",
+        "Der CI-Runner hat keinen Zugriff auf crates.io",
+        "`--locked` darf in der CI nicht verwendet werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Genau dafür steht `--locked` in der CI: Cargo müsste das Lockfile ändern, darf es aber nicht. Ohne die Option würde die CI stillschweigend andere Versionen bauen als die, die im Repository stehen. Lösung: lokal `cargo build`, dann das geänderte `Cargo.lock` committen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Meldung sagt ausdrücklich, dass das Lockfile geändert werden müsste.",
+        "`--locked` ist in der CI empfohlen, genau wegen solcher Fälle."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum verlangen manche Teams **signierte Commits** (`git commit -S`) und aktivieren auf GitHub „Require signed commits“?",
+      "optionen": [
+        "Name und E-Mail eines Commits kann jeder frei setzen. Eine Signatur mit GPG- oder SSH-Schlüssel belegt, dass der Commit wirklich von dieser Person stammt",
+        "Signierte Commits werden schneller gemergt",
+        "Ohne Signatur kann `cargo publish` das Paket nicht hochladen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`git config user.email` lässt sich auf jede Adresse setzen. Ohne Signatur kann sich also jeder mit Schreibrechten als jemand anderes ausgeben. Mit `git config gpg.format ssh` und `user.signingkey` lässt sich auch ein vorhandener SSH-Schlüssel verwenden. GitHub zeigt geprüfte Commits als *Verified* an. Für sicherheitskritische Firmware ist das oft Teil der Nachweiskette (mehr in Phase 12).",
+      "begruendungen": [
+        "Richtig.",
+        "Die Signatur ändert nichts am Merge.",
+        "`cargo publish` prüft keine Commit-Signaturen."
+      ]
+    }
+  ],
+  "praxis": "Eine saubere Historie macht `git bisect`, `git blame` und Cherry-Picks auf Release-Branches erst brauchbar. Räume deinen Branch vor dem Pull Request mit `--fixup` und `--autosquash` auf, pushe mit `--force-with-lease`. Bei `Cargo.lock`-Konflikten nie von Hand Markierungen entwirren und nie das Lockfile löschen, sondern eine Seite übernehmen und Cargo ergänzen lassen.",
+  "labor": {
+    "titel": "Einen Cargo.lock-Konflikt lösen",
+    "anleitung": "Lege ein Crate in einem Git-Repository an. Füge auf einem Branch `heapless`, auf `main` `crc` hinzu, und merge dann den Branch.",
+    "befehle": [
+      "git switch -c a && cargo add heapless@0.8 && git commit -am heapless",
+      "git switch main && cargo add crc@3 && git commit -am crc && git merge a",
+      "git checkout --ours Cargo.lock && cargo build && cargo tree --depth 1"
+    ],
+    "beobachtung": "Git meldet Konflikte in `Cargo.toml` und `Cargo.lock`. Nachdem `Cargo.toml` von Hand beide Einträge enthält, ergänzt `cargo build` das Lockfile, und `cargo tree --depth 1` zeigt `crc` und `heapless`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Rebase",
+      "englisch": "rebase",
+      "erklaerung": "Eigene Commits auf eine neue Basis setzen; ergibt eine gerade Historie mit neuen Commit-Hashes."
+    },
+    {
+      "begriff": "Interaktives Rebase",
+      "englisch": "interactive rebase",
+      "erklaerung": "`git rebase -i`: Commits umordnen, zusammenfassen, umbenennen oder entfernen, bevor sie geteilt werden."
+    },
+    {
+      "begriff": "force-with-lease",
+      "englisch": "force with lease",
+      "erklaerung": "Erzwungener Push, der abbricht, wenn jemand anderes inzwischen auf den Branch gepusht hat."
+    },
+    {
+      "begriff": "Signierter Commit",
+      "englisch": "signed commit",
+      "erklaerung": "Commit mit kryptografischer Signatur, die belegt, wer ihn erstellt hat."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Pro Git: Rebasing",
+      "url": "https://git-scm.com/book/en/v2/Git-Branching-Rebasing"
+    },
+    {
+      "titel": "The Cargo Book: Cargo.toml vs Cargo.lock",
+      "url": "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+    }
+  ]
+}

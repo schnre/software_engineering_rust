@@ -1,0 +1,202 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m3-l1",
+  "phase": 3,
+  "modul": "3.3 Wertsemantik und Operatoren",
+  "titel": "Vergleichen und Hashen",
+  "lernziele": [
+    "`PartialEq`/`Eq` und `PartialOrd`/`Ord` unterscheiden und korrekt ableiten",
+    "Erklären, warum `f64` weder `Eq` noch `Ord` ist, und Gleitkommazahlen trotzdem sortieren",
+    "`Hash` konsistent zu `Eq` implementieren"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "f64-sort",
+      "frage": "Warum lässt sich ein `Vec<f64>` nicht mit `sort()` sortieren?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut v = vec![2.5, f64::NAN, 1.0];",
+          "v.sort();"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: the trait bound `f64: Ord` is not satisfied",
+          " --> src/main.rs:3:7",
+          "  |",
+          "3 |     v.sort();",
+          "  |       ^^^^ the trait `Ord` is not implemented for `f64`",
+          "  |",
+          "note: required by a bound in `slice::<impl [T]>::sort`"
+        ]
+      },
+      "optionen": [
+        "`NaN` ist mit nichts vergleichbar, nicht einmal mit sich selbst. Eine **totale Ordnung** (`Ord`) gibt es für `f64` daher nicht",
+        "Gleitkommazahlen sind in Rust grundsätzlich nicht vergleichbar",
+        "`sort()` funktioniert nur mit ganzzahligen Typen",
+        "Der Vektor muss vorher mit `dedup()` bereinigt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`f64` implementiert nur `PartialEq` und `PartialOrd`. `1.0.partial_cmp(&f64::NAN)` liefert `None`, und `NaN == NaN` ist `false` (rustc warnt sogar vor diesem Vergleich). `sort` braucht aber für jedes Paar eine Antwort. Ausweg: `v.sort_by(|a, b| a.total_cmp(b))`. `total_cmp` folgt der IEEE-754-Totalordnung: `-0.0` vor `0.0`, `NaN` am Rand.",
+      "begruendungen": [
+        "Richtig.",
+        "`<`, `>` und `==` funktionieren über `PartialOrd`/`PartialEq`. Es fehlt nur die totale Ordnung.",
+        "`sort` funktioniert mit jedem `Ord`-Typ, auch mit Strings oder eigenen Structs.",
+        "`dedup` entfernt aufeinanderfolgende Duplikate und ändert nichts an fehlenden Traits."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vier Traits, zwei Stufen",
+      "text": "- **`PartialEq`**: `==` und `!=`. Darf Werte haben, die sich selbst nicht gleich sind (`NaN`).\n- **`Eq`**: Marker ohne Methoden. Verspricht zusätzlich `a == a` für alle Werte.\n- **`PartialOrd`**: `<`, `>` usw. über `partial_cmp`, das `Option<Ordering>` liefert.\n- **`Ord`**: `cmp` liefert immer ein `Ordering` (`Less`, `Equal`, `Greater`). Nötig für `sort`, `BTreeMap`, `max`.\n\nMit `derive` vergleicht Rust Structs **feldweise in Deklarationsreihenfolge** (lexikografisch) und Enums nach der **Reihenfolge der Varianten**. In C++ entspricht das einem `= default` für `operator<=>`.",
+      "tabelle": {
+        "kopf": ["Typ", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash"],
+        "zeilen": [
+          ["`i32`, `u8`, `char`, `bool`", "ja", "ja", "ja", "ja", "ja"],
+          ["`f32`, `f64`", "ja", "nein", "ja", "nein", "nein"],
+          ["`String`, `&str`", "ja", "ja", "ja", "ja", "ja"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "derive-reihenfolge",
+      "frage": "Was gibt `println!(\"{}\", a > b)` aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]",
+          "enum Prio { Niedrig, Hoch, Kritisch }",
+          "",
+          "#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]",
+          "struct Auftrag { prio: Prio, id: u32 }",
+          "",
+          "let a = Auftrag { prio: Prio::Hoch, id: 1 };",
+          "let b = Auftrag { prio: Prio::Niedrig, id: 9 };"
+        ]
+      },
+      "optionen": ["`true`", "`false`", "Compilerfehler: Enums sind nicht vergleichbar"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Abgeleitetes `Ord` vergleicht zuerst `prio`. `Hoch` steht nach `Niedrig`, also ist `a` grösser, `id` wird gar nicht mehr betrachtet. Die Reihenfolge der Felder ist damit Teil der Semantik: Wer `id` nach oben verschiebt, ändert stillschweigend jede Sortierung und jede `BinaryHeap`-Priorität.",
+      "begruendungen": [
+        "Richtig.",
+        "`id` würde nur bei gleicher `prio` entscheiden.",
+        "Mit `derive(PartialOrd, Ord)` sind Enums nach Variantenreihenfolge vergleichbar."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "derive-hash-f32",
+      "frage": "Was passiert beim Übersetzen?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(PartialEq, Eq, Hash)]",
+          "struct Messung { wert: f32 }"
+        ]
+      },
+      "optionen": [
+        "Zwei Fehler `E0277`: `f32` implementiert weder `Eq` noch `Hash`",
+        "Kompiliert, `derive` überspringt Felder, die den Trait nicht haben",
+        "Kompiliert, aber jeder Hash ist 0",
+        "Nur eine Warnung, weil `f32` ungenau ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`derive` verlangt den Trait für **jedes** Feld. Ein `HashMap<f64, _>` geht aus demselben Grund nicht: `insert` meldet „trait bounds were not satisfied: `f64: Eq`, `f64: Hash`“. Wer Messwerte als Schlüssel braucht, wandelt sie in eine Festkommazahl um (`(wert * 100.0).round() as i32`) oder nutzt `wert.to_bits()` bewusst als Schlüssel.",
+      "begruendungen": [
+        "Richtig.",
+        "`derive` überspringt nichts, sonst wären Vergleiche heimlich unvollständig.",
+        "Der Code übersetzt gar nicht.",
+        "Es sind harte Fehler, keine Warnungen."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "hash-eq-inkonsistent",
+      "frage": "Gerätenamen sollen ohne Rücksicht auf Gross-/Kleinschreibung gleich sein. In einer `HashSet<Name>` tauchen trotzdem „Pumpe“ und „PUMPE“ doppelt auf. Welche Zeile ist schuld?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Debug, Hash)]",
+          "struct Name(String);",
+          "",
+          "impl PartialEq for Name {",
+          "    fn eq(&self, other: &Self) -> bool {",
+          "        self.0.eq_ignore_ascii_case(&other.0)",
+          "    }",
+          "}",
+          "impl Eq for Name {}"
+        ]
+      },
+      "fehlerZeile": 1,
+      "erklaerung": "Die Grundregel lautet: **Aus `a == b` muss `hash(a) == hash(b)` folgen.** Das abgeleitete `Hash` hasht den String Byte für Byte, „Pumpe“ und „PUMPE“ landen in verschiedenen Buckets und werden nie verglichen. Das ist kein undefiniertes Verhalten, aber ein Logikfehler. Lösung: `Hash` von Hand implementieren und dabei dieselbe Normalisierung verwenden, etwa jedes Byte mit `to_ascii_lowercase()` hashen. Clippy erkennt genau dieses Muster: `derived_hash_with_manual_eq` ist standardmässig ein Fehler (`deny`)."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die manuelle Ordnung, die Aufträge nach absteigender Priorität sortiert.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl Ord for Auftrag {",
+          "    fn cmp(&self, other: &Self) -> std::cmp::{{?}} {",
+          "        other.prio.cmp(&self.prio)",
+          "            .then_with(|| self.id.cmp(&other.id))",
+          "    }",
+          "}",
+          "impl PartialOrd for Auftrag {",
+          "    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {",
+          "        {{?}}(self.cmp(other))",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["Ordering"] }, { "loesungen": ["Some"] }],
+      "auswahl": ["Ordering", "Some", "bool", "Ok", "Option"],
+      "erklaerung": "Vertauschte Operanden (`other` vor `self`) kehren die Reihenfolge um, alternativ `.reverse()`. `then_with` entscheidet bei Gleichstand. Wer `Ord` von Hand schreibt, sollte `partial_cmp` immer auf `cmp` zurückführen, sonst können sich `<` und `sort` widersprechen. Für einfache Fälle genügt `std::cmp::Reverse` als Wrapper."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Typen kannst du als Schlüssel in einer `BTreeMap` verwenden?",
+      "optionen": [
+        "Typen mit `Ord`, z. B. `u32`, `String` oder ein Struct mit `#[derive(PartialEq, Eq, PartialOrd, Ord)]`",
+        "Typen mit `Hash` und `Eq`",
+        "Jeder Typ mit `PartialOrd`, also auch `f64`",
+        "Nur primitive Ganzzahltypen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`BTreeMap` ist ein sortierter Baum und braucht eine totale Ordnung. `HashMap` dagegen braucht `Hash + Eq`. Im Embedded-Bereich gibt es beide ohne Heap in `heapless` (`FnvIndexMap`, `LinearMap`) mit denselben Bounds.",
+      "begruendungen": [
+        "Richtig.",
+        "Das sind die Bedingungen für `HashMap`/`HashSet`.",
+        "`PartialOrd` reicht nicht, `f64` als Schlüssel geht also nicht direkt.",
+        "Jeder Typ mit `Ord` geht, auch Strings, Tupel und eigene Typen."
+      ]
+    }
+  ],
+  "praxis": "Im Alltag leitest du `PartialEq, Eq, Hash` und `PartialOrd, Ord` fast immer ab. Bewusst nachdenken musst du bei drei Fällen: Gleitkommazahlen in Schlüsseln oder Sortierungen, manuellen Vergleichen (die müssen zu `Hash` passen) und der Feldreihenfolge in Structs mit abgeleitetem `Ord`. Die API-Richtlinien empfehlen, für öffentliche Typen die üblichen Traits eifrig abzuleiten, damit Nutzer sie in Sammlungen verwenden können.",
+  "labor": {
+    "titel": "Messwerte sortieren",
+    "anleitung": "Erzeuge einen `Vec<f64>` mit `NaN`, `-0.0`, `0.0`, `f64::INFINITY` und normalen Werten. Sortiere ihn einmal mit `sort_by(|a, b| a.partial_cmp(b).unwrap())` und einmal mit `total_cmp`. Baue danach den `Name`-Typ aus der Übung nach und füge „Pumpe“ und „PUMPE“ in ein `HashSet` ein.",
+    "befehle": [
+      "cargo new vergleiche && cd vergleiche",
+      "cargo run",
+      "cargo clippy"
+    ],
+    "beobachtung": "Die Variante mit `unwrap` paniciert beim ersten `NaN`. `total_cmp` sortiert ohne Panic: `[-0.0, 0.0, 1.0, NaN]`. `cargo clippy` lehnt den `Name`-Typ mit `derived_hash_with_manual_eq` ab. Das `HashSet` enthält mit abgeleitetem `Hash` zwei Einträge, mit dem korrigierten `Hash` einen."
+  },
+  "begriffe": [
+    { "begriff": "Partielle Ordnung", "englisch": "partial order", "erklaerung": "Ordnung, in der nicht jedes Paar vergleichbar sein muss (`PartialOrd`)." },
+    { "begriff": "Totale Ordnung", "englisch": "total order", "erklaerung": "Ordnung, in der jedes Paar vergleichbar ist (`Ord`), Voraussetzung für `sort` und `BTreeMap`." },
+    { "begriff": "Ordering", "englisch": "Ordering", "erklaerung": "Ergebnis eines Vergleichs: `Less`, `Equal` oder `Greater`." },
+    { "begriff": "Hash-Konsistenz", "englisch": "Hash/Eq consistency", "erklaerung": "Gleiche Werte müssen den gleichen Hash haben, sonst funktionieren Hash-Sammlungen nicht." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::cmp (Dokumentation)", "url": "https://doc.rust-lang.org/std/cmp/index.html" },
+    { "titel": "Rust API Guidelines: Interoperability", "url": "https://rust-lang.github.io/api-guidelines/interoperability.html" }
+  ]
+}

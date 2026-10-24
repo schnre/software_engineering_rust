@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m5-l2",
+  "phase": 8,
+  "modul": "8.5 GitHub Actions im Vergleich",
+  "titel": "Die Pipeline dieser App",
+  "lernziele": [
+    "Die echte Pipeline der Rust Engineering Academy Schritt für Schritt nachvollziehen",
+    "Erklären, wie sie ungültige Lektionen vom Deployment fernhält",
+    "Die Konzepte auf eine Rust-Pipeline übertragen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Diese App hat zwei Workflows: `validate.yml` und `deploy.yml`. Warum zwei statt einem?",
+      "optionen": [
+        "Validate läuft bei jedem Push und Pull Request. Deploy läuft nur, wenn Validate auf `main` nach einem Push erfolgreich war. So kann eine ungültige Lektion nie veröffentlicht werden",
+        "Weil GitHub nur einen Job pro Workflow-Datei erlaubt",
+        "Damit Deploy schneller ist als Validate"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist ein **Quality Gate** in Reinform: Prüfen ist für alle Änderungen Pflicht, Veröffentlichen nur für geprüfte Stände auf `main`. Die Trennung macht ausserdem die Rechte klar: Nur Deploy darf auf GitHub Pages schreiben.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Datei kann beliebig viele Jobs enthalten.",
+        "Um Geschwindigkeit geht es nicht, sondern um die Bedingung."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ehrlich gesagt: kein Rust",
+      "text": "Die App, mit der du Rust lernst, ist selbst eine **TypeScript-Web-App**, gebaut mit Node.js und Vite. Die Lektionen sind JSON-Dateien. Ihre Pipeline ruft deshalb `npm` auf, nicht `cargo`.\n\nDas ist kein Nachteil: Die Bausteine sind dieselben wie in jeder Rust-Pipeline dieser Phase. Lockfile, Formatprüfung, Typprüfung, Tests, Build, Artefakt, Gate vor dem Deployment. Achte beim Lesen darauf, was welchem `cargo`-Befehl entspricht.",
+      "tabelle": {
+        "kopf": ["Diese App", "Rust-Gegenstück"],
+        "zeilen": [
+          ["`npm ci`", "`cargo build --locked` (exakt nach Lockfile)"],
+          ["`npm run validate`", "eigenes Prüfwerkzeug, vergleichbar mit `cargo deny check`"],
+          ["`npm run typecheck`", "`cargo check`"],
+          ["`npm test`", "`cargo test`"],
+          ["`npx vite build`", "`cargo build --release`"]
+        ]
+      }
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Validate-Workflow",
+      "code": {
+        "sprache": "yaml",
+        "datei": ".github/workflows/validate.yml (gekürzt)",
+        "zeilen": [
+          "on:",
+          "  push:",
+          "  pull_request:",
+          "  workflow_dispatch:",
+          "permissions:",
+          "  contents: read",
+          "concurrency:",
+          "  group: validate-${{ github.ref }}",
+          "  cancel-in-progress: true",
+          "jobs:",
+          "  validate:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "      - uses: actions/setup-node@v4",
+          "        with: { node-version: 22, cache: npm }",
+          "      - run: npm ci",
+          "      - run: npm run validate",
+          "      - run: npm run typecheck",
+          "      - run: npm test",
+          "      - run: npx vite build",
+          "      - uses: actions/upload-artifact@v4",
+          "        with: { name: dist, path: dist, retention-days: 7 }"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Erlaubt zusätzlich einen manuellen Start in der Oberfläche." },
+          { "zeile": 6, "text": "Minimale Rechte: Dieser Workflow darf nur lesen." },
+          { "zeile": 9, "text": "Ein neuer Push auf denselben Branch bricht den veralteten Lauf ab." },
+          { "zeile": 18, "text": "Alle Lektionen gegen das JSON-Schema und inhaltliche Regeln prüfen." },
+          { "zeile": 20, "text": "Logik-Tests; dabei wird jede Übung mit ihrer Lösung beantwortet." }
+        ]
+      },
+      "text": "Jeder Schritt muss erfolgreich sein, sonst ist der Workflow rot."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Jemand öffnet einen Pull Request mit einer Lektion, in der `korrekt` auf eine Option zeigt, die es nicht gibt. Was passiert?",
+      "code": {
+        "sprache": "yaml",
+        "datei": ".github/workflows/deploy.yml (Ausschnitt)",
+        "zeilen": [
+          "on:",
+          "  workflow_run:",
+          "    workflows: [Validate]",
+          "    types: [completed]",
+          "    branches: [main]",
+          "jobs:",
+          "  deploy:",
+          "    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'"
+        ]
+      },
+      "optionen": [
+        "Validate wird rot. Deploy läuft nicht, weil der Lauf weder auf `main` per Push stattfand noch erfolgreich war",
+        "Validate wird rot, Deploy veröffentlicht trotzdem",
+        "Die App stürzt für alle Nutzer ab"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Validator meldet, dass `korrekt` ausserhalb der Optionen liegt, und endet mit Exit-Code 1. Mit Branch Protection lässt sich der Pull Request dann gar nicht mergen. Selbst wenn ein Fehler direkt auf `main` landete, würde Deploy wegen `conclusion == 'success'` nicht laufen. Die veröffentlichte App bleibt auf dem letzten guten Stand.",
+      "begruendungen": [
+        "Richtig. Zwei Sicherungen hintereinander.",
+        "Die Bedingung `conclusion == 'success'` verhindert das.",
+        "Ungeprüfte Stände erreichen die veröffentlichte App nie."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Deploy checkt mit `ref: ${{ github.event.workflow_run.head_sha }}` aus und baut mit `npm run build` neu. Warum genau dieser Commit?",
+      "optionen": [
+        "Es ist der Commit, den Validate geprüft hat. Inzwischen könnte `main` schon weitergerückt sein, und dieser neue Stand ist noch ungeprüft",
+        "Weil `workflow_run` sonst gar keinen Code auschecken kann",
+        "Damit der Build schneller ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `ref` würde ein `workflow_run`-Workflow den neuesten Stand des Standardbranches nehmen, nicht zwingend den geprüften. So wird genau das veröffentlicht, was grün war. Eine Unschärfe bleibt ehrlich gesagt: Deploy baut neu, statt das `dist`-Artefakt aus Validate zu übernehmen. „Einmal bauen, mehrfach befördern“ wäre strenger. Weil `npm ci` exakt nach Lockfile installiert und `npm run build` die Inhalte vorher nochmals validiert, ist das Risiko hier klein.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `ref` checkt `actions/checkout` den Standardbranch aus.",
+        "Die Wahl des Commits hat keinen Einfluss auf die Dauer."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "In welcher Reihenfolge laufen die Schritte von Validate?",
+      "elemente": [
+        "Repository auschecken",
+        "Node.js einrichten",
+        "Abhängigkeiten mit `npm ci` installieren",
+        "Lektionen gegen das Schema prüfen",
+        "Typprüfung und Tests",
+        "App bauen und `dist` als Artefakt hochladen"
+      ],
+      "erklaerung": "Auch hier gilt *fail fast*: Die Inhaltsprüfung dauert eine Sekunde und kommt vor Typprüfung und Tests. Die meisten Fehler in Pull Requests mit neuen Lektionen fallen schon dort auf."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Datei übernimmt welche Aufgabe?",
+      "paare": [
+        { "links": "`schema/lesson.schema.json`", "rechts": "Beschreibt das Format jeder Lektion" },
+        { "links": "`scripts/validate-content.mjs`", "rechts": "Prüft Schema und inhaltliche Regeln wie gültige Indizes" },
+        { "links": "`tests/inhalte.test.ts`", "rechts": "Beantwortet jede Übung mit der hinterlegten Lösung" },
+        { "links": "`.github/workflows/deploy.yml`", "rechts": "Veröffentlicht nur geprüfte Commits auf GitHub Pages" }
+      ],
+      "erklaerung": "Jede Ebene fängt andere Fehler: Das Schema prüft die Form, der Validator den Zusammenhang, der Test die tatsächliche Lösbarkeit. In Rust wäre das vergleichbar mit Typsystem, Clippy und Tests."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Bedingung, mit der Deploy nur nach einem erfolgreichen Validate-Lauf startet.",
+      "code": {
+        "sprache": "yaml",
+        "zeilen": [
+          "if: github.event.workflow_run.{{?}} == 'success'"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["conclusion"] }
+      ],
+      "auswahl": ["conclusion", "status", "result", "outcome"],
+      "erklaerung": "`status` sagt nur, ob der Lauf fertig ist (`completed`), nicht ob er erfolgreich war. Das Ergebnis steht in `conclusion`: `success`, `failure`, `cancelled` …"
+    }
+  ],
+  "praxis": "Diese App ist ein kleines, vollständiges Beispiel für Phase 8: CI bei jedem Push, Quality Gates, Veröffentlichung nur geprüfter Stände von `main`, reproduzierbare Abhängigkeiten, minimale Rechte. Für ein Rust-Projekt tauschst du `setup-node` gegen `dtolnay/rust-toolchain`, `npm ci` gegen `--locked` und die npm-Skripte gegen `fmt`, `clippy`, `test` und `cargo deny`. Das Gerüst mit `workflow_run` und `conclusion` bleibt gleich.",
+  "labor": {
+    "titel": "Die Pipeline brechen",
+    "anleitung": "Klone das Repository dieser App, ändere in einer Lektion `korrekt` auf einen ungültigen Wert und führe die Prüfungen lokal aus.",
+    "befehle": [
+      "npm ci",
+      "npm run validate; echo \"Exit: $?\"",
+      "npm test"
+    ],
+    "beobachtung": "`npm run validate` meldet Datei, Schritt und Problem und beendet sich mit Exit-Code 1. Genau dieser Exit-Code lässt in der CI den Workflow scheitern, und Deploy bleibt aus."
+  },
+  "begriffe": [
+    {
+      "begriff": "workflow_run",
+      "englisch": "workflow_run trigger",
+      "erklaerung": "Auslöser in GitHub Actions: Ein Workflow startet, wenn ein anderer abgeschlossen ist."
+    },
+    {
+      "begriff": "Branch Protection",
+      "englisch": "branch protection",
+      "erklaerung": "Regeln für einen Branch, z. B. dass bestimmte Prüfungen grün sein müssen, bevor gemergt werden darf."
+    },
+    {
+      "begriff": "Concurrency-Gruppe",
+      "englisch": "concurrency group",
+      "erklaerung": "Läufe derselben Gruppe laufen nicht gleichzeitig; ältere können abgebrochen werden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "GitHub Docs: Events that trigger workflows",
+      "url": "https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#workflow_run"
+    },
+    {
+      "titel": "The Cargo Book: Continuous Integration",
+      "url": "https://doc.rust-lang.org/cargo/guide/continuous-integration.html"
+    }
+  ]
+}

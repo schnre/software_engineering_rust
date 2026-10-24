@@ -1,0 +1,248 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m6-l1",
+  "phase": 2,
+  "modul": "2.6 unsafe und Undefined Behavior",
+  "titel": "Was unsafe erlaubt und was nicht",
+  "lernziele": [
+    "Die fünf Fähigkeiten aufzählen, die `unsafe` freischaltet",
+    "Erklären, warum safe Rust kein Undefined Behavior haben kann und was das für unsafe-Code bedeutet",
+    "unsafe-Blöcke mit `// SAFETY:`-Kommentaren begründen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Der Code liegt komplett in einem `unsafe`-Block. Was meldet rustc?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let mut v = vec![1u32, 2, 3];",
+          "    unsafe {",
+          "        let r = &v[0];",
+          "        v.push(4);",
+          "        println!(\"{r}\");",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0502: `v` ist schon unveränderlich ausgeliehen. `unsafe` schaltet den Borrow-Checker nicht ab",
+        "Kompiliert, in `unsafe` gelten die Ausleihregeln nicht",
+        "Kompiliert, gibt aber zur Laufzeit Unsinn aus"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein häufiger Irrtum: `unsafe` ist kein „Compiler, halt dich raus“. Typprüfung, Borrow-Checker und Lifetimes laufen genauso wie sonst. rustc warnt hier sogar zusätzlich *unnecessary `unsafe` block*, weil nichts darin `unsafe` braucht. `unsafe` erlaubt nur einige wenige zusätzliche Operationen.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Ausleihregeln gelten überall. Sie lassen sich nur mit Raw Pointern umgehen.",
+        "Der Code kommt gar nicht bis zur Laufzeit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die fünf Superkräfte",
+      "text": "In einem `unsafe`-Block (oder einer `unsafe fn`) darfst du genau fünf Dinge zusätzlich tun:\n\n1. einen **Raw Pointer** (`*const T`, `*mut T`) dereferenzieren\n2. eine `unsafe fn` aufrufen, auch Funktionen aus `extern`-Blöcken (FFI)\n3. auf ein `static mut` zugreifen\n4. einen `unsafe trait` implementieren (`unsafe impl Send for …`)\n5. ein Feld einer `union` lesen\n\nAlles andere bleibt verboten. Einen Raw Pointer **erzeugen** ist übrigens safe, nur das Dereferenzieren nicht. `unsafe` heisst also: Hier muss der Mensch Regeln einhalten, die der Compiler nicht prüfen kann."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Zeile braucht welche Superkraft?",
+      "paare": [
+        {
+          "links": "`let x = *p;` mit `p: *const u32`",
+          "rechts": "Raw Pointer dereferenzieren"
+        },
+        {
+          "links": "`let n = abs(-3);` aus `unsafe extern \"C\" { fn abs(x: i32) -> i32; }`",
+          "rechts": "unsafe-Funktion aufrufen"
+        },
+        {
+          "links": "`ZAEHLER += 1;` mit `static mut ZAEHLER: u32`",
+          "rechts": "Auf `static mut` zugreifen"
+        },
+        {
+          "links": "`unsafe impl Send for Roh {}`",
+          "rechts": "unsafe Trait implementieren"
+        },
+        {
+          "links": "`let b = w.bytes;` mit `w: Wort` (eine `union`)",
+          "rechts": "Feld einer `union` lesen"
+        }
+      ],
+      "erklaerung": "Alle fünf haben gemeinsam, dass der Compiler eine Voraussetzung nicht prüfen kann: dass der Pointer gültig ist, dass die C-Funktion ihren Vertrag einhält, dass kein anderer Thread gleichzeitig zugreift, dass der Typ wirklich threadsicher ist, dass das gelesene Feld zuletzt geschrieben wurde. Fehlt `unsafe`, meldet rustc jeweils E0133."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was sagt dir diese Ausgabe in Edition 2024?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static mut LOG: Vec<u32> = Vec::new();",
+          "",
+          "fn main() {",
+          "    unsafe { LOG.push(1); }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: creating a mutable reference to mutable static",
+          " --> src/main.rs:4:14",
+          "  |",
+          "4 |     unsafe { LOG.push(1); }",
+          "  |              ^^^^^^^^^^^ mutable reference to mutable static",
+          "  |",
+          "  = note: `#[deny(static_mut_refs)]` (part of `#[deny(rust_2024_compatibility)]`) on by default"
+        ]
+      },
+      "optionen": [
+        "Referenzen auf `static mut` sind so fehleranfällig, dass der Lint sie in Edition 2024 standardmässig verbietet, obwohl der Code in `unsafe` steht",
+        "Es fehlt ein zweiter, äusserer `unsafe`-Block",
+        "`Vec` darf nie in einem `static` stehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`LOG.push(1)` erzeugt implizit `&mut LOG`. Existiert gleichzeitig irgendeine andere Referenz auf `LOG` (anderer Thread, Interrupt, verschachtelter Aufruf), ist das sofort UB. Der Lint `static_mut_refs` ist deshalb seit Edition 2024 ein Fehler. Besser: ein `static` mit `Mutex`, Atomic oder, auf Mikrocontrollern, `critical_section::Mutex`. Wenn es wirklich sein muss, arbeitet man mit `&raw mut LOG` und Raw Pointern.",
+      "begruendungen": [
+        "Richtig.",
+        "Der `unsafe`-Block ist da. Der Lint greift trotzdem.",
+        "`Vec::new()` ist `const`, ein `static Mutex<Vec<u32>>` wäre in Ordnung."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was garantiert Rust für ein Programm, das **kein einziges** `unsafe` enthält (auch nicht in seinen Abhängigkeiten)?",
+      "optionen": [
+        "Es hat kein Undefined Behavior: keine Datenrennen, keine Use-after-free, keine ungültigen Werte. Panics, Deadlocks und Speicherlecks sind aber möglich",
+        "Es kann weder abstürzen noch hängen bleiben",
+        "Es hat keine Logikfehler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist das zentrale Versprechen: **Safe Rust hat kein UB.** Weil fast jedes echte Programm über die Standardbibliothek doch auf unsafe-Code steht, gilt genauer: Wenn alle unsafe-Stellen korrekt sind, kann safe Code kein UB auslösen. Ein Panic ist dagegen wohldefiniert, und Deadlocks oder Lecks (z. B. `mem::forget`, Rc-Zyklen) gelten bewusst als safe.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Panic beendet das Programm geordnet, und ein Deadlock ist kein UB. Beides kann safe Rust.",
+        "Kein Typsystem verhindert falsche Logik."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Soundness und SAFETY-Kommentare",
+      "text": "Eine Funktion mit `unsafe` im Inneren, aber safe Signatur, ist **sound**, wenn kein Aufrufer mit safe Code damit UB auslösen kann, egal mit welchen Argumenten. Kann er es, ist sie **unsound**, ein Fehler, auch wenn heute niemand den kritischen Fall trifft.\n\nDeshalb schreibt man über jeden `unsafe`-Block einen `// SAFETY:`-Kommentar, der begründet, warum die Voraussetzungen hier gelten. Über eine `unsafe fn` gehört ein Abschnitt `# Safety` in die Doku, der dem Aufrufer sagt, was **er** sicherstellen muss. Clippy prüft das mit `clippy::undocumented_unsafe_blocks`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn erstes(v: &[u32]) -> u32 {",
+          "    assert!(!v.is_empty());",
+          "    // SAFETY: Das assert oben garantiert len >= 1, Index 0 ist gültig.",
+          "    unsafe { *v.get_unchecked(0) }",
+          "}"
+        ]
+      }
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese safe Funktion ist **unsound**: Ein Aufrufer kann mit safe Code UB auslösen. Welche Zeile ist schuld?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "/// Gibt das Element an Position `i` zurück.",
+          "pub fn hole(v: &[u8], i: usize) -> u8 {",
+          "    debug_assert!(i < v.len());",
+          "    // SAFETY: i ist laut Doku immer gültig.",
+          "    unsafe { *v.get_unchecked(i) }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "`debug_assert!` verschwindet im Release-Build. Dann liest `get_unchecked` mit `hole(&[1], 5)` ausserhalb des Slices, also UB aus safe Code. Auch der SAFETY-Kommentar ist falsch: Die Doku verlangt nichts, und eine safe Funktion darf sich ohnehin nicht darauf verlassen. Korrekt wäre `assert!`, ein normales `v[i]` oder eine `unsafe fn` mit `# Safety`-Abschnitt."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze eine unsafe-Funktion nach den Konventionen.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "/// Liest einen Wert über einen Raw Pointer.",
+          "///",
+          "/// # {{?}}",
+          "/// `p` muss gültig, ausgerichtet und initialisiert sein.",
+          "pub {{?}} fn lies(p: *const u32) -> u32 {",
+          "    // SAFETY: Der Aufrufer garantiert die Bedingungen oben.",
+          "    {{?}} { *p }",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Safety"
+          ]
+        },
+        {
+          "loesungen": [
+            "unsafe"
+          ]
+        },
+        {
+          "loesungen": [
+            "unsafe"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Safety",
+        "Panics",
+        "unsafe",
+        "unsafe",
+        "extern"
+      ],
+      "erklaerung": "Seit Edition 2024 ist der Körper einer `unsafe fn` nicht mehr automatisch ein unsafe-Block (Lint `unsafe_op_in_unsafe_fn` warnt sonst). Damit trennt Rust zwei Dinge: `unsafe fn` legt dem **Aufrufer** Pflichten auf, `unsafe { }` markiert die Stelle, an der **du** eine Pflicht erfüllst."
+    }
+  ],
+  "praxis": "In echten Projekten ist `unsafe` selten, aber konzentriert: FFI zu C-Bibliotheken, Registerzugriffe in PACs, eigene Datenstrukturen, `static` für Interrupt-Handler. Gute Teams kapseln es in kleinen Modulen mit safe API, verlangen `// SAFETY:` (z. B. mit `#![deny(clippy::undocumented_unsafe_blocks)]`) und lassen jede unsafe-Änderung von einer zweiten Person reviewen. Ein Senior fragt im Review nicht „ist das unsafe?“, sondern „ist die umgebende safe API sound?“.",
+  "labor": {
+    "titel": "Superkräfte und Lints ausprobieren",
+    "anleitung": "Schreibe für jede der fünf Superkräfte ein Beispiel ohne `unsafe` und lies die Fehlermeldungen. Ergänze dann die Blöcke und lass Clippy nach fehlenden SAFETY-Kommentaren suchen.",
+    "befehle": [
+      "cargo new usafe && cd usafe",
+      "cargo build 2>&1 | grep -A4 E0133",
+      "cargo clippy -- -W clippy::undocumented_unsafe_blocks",
+      "rustc --explain E0133"
+    ],
+    "beobachtung": "Jede der fünf Operationen ohne `unsafe` liefert E0133 mit einer eigenen Begründung (*dereference of raw pointer*, *use of mutable static*, *access to union field* …). Clippy meldet *unsafe block missing a safety comment* für jeden unkommentierten Block."
+  },
+  "begriffe": [
+    {
+      "begriff": "unsafe-Block",
+      "englisch": "unsafe block",
+      "erklaerung": "Bereich, in dem die fünf zusätzlichen Operationen erlaubt sind. Alle anderen Prüfungen bleiben aktiv."
+    },
+    {
+      "begriff": "Raw Pointer",
+      "englisch": "raw pointer",
+      "erklaerung": "`*const T` oder `*mut T`: Zeiger ohne Lifetime und ohne Ausleihregeln. Erzeugen ist safe, Dereferenzieren nicht."
+    },
+    {
+      "begriff": "Soundness",
+      "englisch": "soundness",
+      "erklaerung": "Eine safe API ist sound, wenn kein safe Aufrufer damit Undefined Behavior auslösen kann."
+    },
+    {
+      "begriff": "SAFETY-Kommentar",
+      "englisch": "safety comment",
+      "erklaerung": "Kommentar `// SAFETY:` über einem unsafe-Block, der begründet, warum die Voraussetzungen erfüllt sind."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Unsafe Rust",
+      "url": "https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html"
+    },
+    {
+      "titel": "The Rustonomicon",
+      "url": "https://doc.rust-lang.org/nomicon/"
+    }
+  ]
+}

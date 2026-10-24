@@ -1,0 +1,172 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m4-l1",
+  "phase": 6,
+  "modul": "6.4 Interrupts",
+  "titel": "Interrupts in Rust",
+  "lernziele": [
+    "Den Ablauf eines Interrupts auf Cortex-M vom Ereignis bis zur Rückkehr beschreiben",
+    "Handler mit `#[interrupt]` und `#[exception]` schreiben und im NVIC freischalten",
+    "Prioritäten und Latenz einschätzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "warum-irq",
+      "frage": "Ein Taster soll sofort eine Aktion auslösen, auch wenn die Hauptschleife gerade 50 ms mit einer Berechnung beschäftigt ist. Was brauchst du?",
+      "optionen": [
+        "Einen Interrupt: Die Hardware unterbricht das laufende Programm und springt in einen Handler",
+        "Die Hauptschleife öfter nach dem Taster fragen lassen",
+        "Einen zweiten Thread mit `std::thread::spawn`",
+        "Eine höhere Taktfrequenz"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Interrupt** ist ein Hardware-Signal, das die CPU zwischen zwei Befehlen unterbricht. Sie sichert einige Register auf dem Stack und springt in eine **Interrupt Service Routine** (ISR). Danach geht es an der unterbrochenen Stelle weiter. Auf Cortex-M dauert der Eintritt typischerweise 12 Takte.",
+      "begruendungen": [
+        "Richtig.",
+        "Während der 50 ms Berechnung fragt niemand. Das wäre Polling mit schlechter Latenz.",
+        "`std::thread` gibt es ohne Betriebssystem nicht.",
+        "Das verkürzt die Berechnung, löst aber das Grundproblem nicht."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Exceptions und Interrupts",
+      "text": "ARM unterscheidet **Exceptions** des Kerns (Reset, HardFault, SysTick, PendSV …) von **Interrupts** der Hersteller-Peripherie (TIM2, USART1, EXTI0 …). Die Adressen aller Handler stehen in der **Vektortabelle** am Anfang des Flash. Der **NVIC** (*Nested Vectored Interrupt Controller*) entscheidet, welcher Interrupt freigeschaltet ist und welcher Vorrang hat.\n\nIn Rust baut `cortex-m-rt` die Vektortabelle. Die Interrupts liefert das PAC mit seiner Funktion `rt`. Du markierst Handler mit `#[exception]` bzw. `#[interrupt]`. Nicht definierte Handler zeigen auf `DefaultHandler`."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Ein Timer-Interrupt",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use stm32f4xx_hal::pac::{self, interrupt, Interrupt};",
+          "use cortex_m_rt::exception;",
+          "",
+          "#[interrupt]",
+          "fn TIM2() {",
+          "    // Update-Flag löschen, sonst springt der Kern sofort wieder hierher",
+          "}",
+          "",
+          "#[exception]",
+          "fn SysTick() {",
+          "    static mut TICKS: u32 = 0;",
+          "    *TICKS += 1;",
+          "}",
+          "",
+          "// in main:",
+          "unsafe { cortex_m::peripheral::NVIC::unmask(Interrupt::TIM2) };"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Der Name muss exakt einem Interrupt des PACs entsprechen, sonst Compilerfehler." },
+          { "zeile": 11, "text": "Sonderfall der Makros: Ein `static mut` im Handler wird zu `&mut u32`, sicher, weil nur dieser Handler es sieht." },
+          { "zeile": 16, "text": "`unmask` ist `unsafe`, weil ein Handler sonst mitten in einen kritischen Abschnitt fallen könnte, der nur mit Maskierung arbeitet." }
+        ]
+      },
+      "text": "Der Handler ist eine normale Rust-Funktion ohne Parameter und ohne Rückgabewert. Freischalten geschieht im NVIC und zusätzlich in der Peripherie selbst (z. B. `timer.listen(Event::Update)`)."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "exception-namen",
+      "frage": "Was ist hier schiefgelaufen?",
+      "terminal": {
+        "befehl": "cargo check",
+        "ausgabe": [
+          "error: This is not a valid exception name",
+          " --> src/lib.rs:4:4",
+          "  |",
+          "4 | fn SysTik() {}",
+          "  |    ^^^^^^",
+          "",
+          "error: `#[exception]` handlers other than `DefaultHandler` and `HardFault` must have signature `[unsafe] fn() [-> !]`",
+          "  --> src/lib.rs:11:1",
+          "   |",
+          "11 | fn PendSV(x: u32) {}",
+          "   | ^^"
+        ]
+      },
+      "optionen": [
+        "Ein Tippfehler im Namen und ein Handler mit Parameter. Die Makros prüfen beides zur Compilezeit",
+        "Die Vektortabelle ist voll",
+        "Der NVIC ist nicht freigeschaltet",
+        "`PendSV` gibt es nur auf Cortex-M7"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In C würde `void SysTik_Handler(void)` still kompilieren, und der echte SysTick landete beim Default-Handler. Die Makros von `cortex-m-rt` kennen alle gültigen Namen und prüfen die Signatur. Die Funktionen bekommen beim Linken die Namen, die das Linker-Skript in die Vektortabelle einträgt.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Grösse ist fest, und die Meldungen sagen etwas anderes.",
+        "Das wäre ein Laufzeitproblem, kein Compilerfehler.",
+        "`PendSV` gibt es auf allen Cortex-M."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "ablauf-irq",
+      "frage": "Bringe den Ablauf eines Timer-Interrupts in die richtige Reihenfolge.",
+      "elemente": [
+        "Der Timer läuft über und setzt sein Update-Flag",
+        "Der NVIC sieht den anstehenden, freigeschalteten Interrupt mit genügend hoher Priorität",
+        "Der Kern sichert r0–r3, r12, lr, pc und xPSR auf dem Stack",
+        "Der Kern lädt die Handler-Adresse aus der Vektortabelle und springt hinein",
+        "Der Handler löscht das Flag und erledigt seine Arbeit",
+        "Beim Rücksprung stellt der Kern die Register wieder her und setzt das Programm fort"
+      ],
+      "erklaerung": "Weil der Kern die vom Aufrufer zu sichernden Register selbst rettet, kann ein Handler eine ganz normale Funktion sein, ohne besonderes Attribut für den Compiler. Vergisst der Handler, das Flag zu löschen, steht der Interrupt sofort wieder an und das Hauptprogramm kommt nie mehr dran."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "prioritaet",
+      "frage": "Auf Cortex-M: TIM2 hat Priorität 0x20, USART1 hat 0x80. Gerade läuft der USART1-Handler, und TIM2 löst aus. Was passiert?",
+      "optionen": [
+        "TIM2 unterbricht den USART1-Handler, weil bei Cortex-M eine kleinere Zahl eine höhere Priorität bedeutet",
+        "TIM2 wartet, bis USART1 fertig ist, weil 0x80 grösser ist",
+        "Beide laufen gleichzeitig",
+        "Der Interrupt von TIM2 geht verloren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Zahl ist ein Rang: 0 ist am dringendsten. Interrupts mit höherer Priorität dürfen laufende Handler unterbrechen (*nesting*), daher das „Nested“ im NVIC. Viele Chips nutzen nur die oberen 4 Bits, darum Werte in 16er-Schritten. In Rust setzt du sie mit `unsafe { nvic.set_priority(Interrupt::TIM2, 0x20) }`. Unsafe, weil Prioritäten Annahmen von kritischen Abschnitten brechen können.",
+      "begruendungen": [
+        "Richtig.",
+        "Umgekehrt: Bei Cortex-M ist 0x80 die niedrigere Priorität.",
+        "Ein Kern führt immer nur einen Befehlsstrom aus.",
+        "Er wartet höchstens, bis er dran ist. Das Pending-Bit bleibt gesetzt."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "latenz",
+      "frage": "Was trägt zur **Interrupt-Latenz** bei, also zur Zeit vom Ereignis bis zum ersten Befehl des Handlers?",
+      "paare": [
+        { "links": "Hardware-Eintritt", "rechts": "Register sichern und Vektor laden, rund 12 Takte" },
+        { "links": "Kritischer Abschnitt im Hauptprogramm", "rechts": "Interrupts sind kurz gesperrt, der Handler muss warten" },
+        { "links": "Laufender Handler mit höherer Priorität", "rechts": "Muss erst fertig werden" },
+        { "links": "Flash-Wartezyklen", "rechts": "Langsamer Code- und Vektorabruf bei hohen Taktraten" }
+      ],
+      "erklaerung": "Die schlimmste Latenz bestimmt der längste kritische Abschnitt und die längste ISR mit höherer Priorität. Darum gilt: ISRs kurz halten, nur Daten abholen und das Hauptprogramm benachrichtigen (nächste Lektion). Frameworks wie RTIC bauen genau darauf auf (Phase 7)."
+    }
+  ],
+  "praxis": "Bei „mein Interrupt kommt nicht“ prüfst du der Reihe nach: Ist die Peripherie so konfiguriert, dass sie einen Interrupt anfordert? Ist er im NVIC freigeschaltet (`unmask`)? Heisst der Handler exakt so wie im PAC? Ist das `rt`-Feature des PACs aktiv? Und kommt er zu oft: Wird das Flag im Handler gelöscht?",
+  "labor": {
+    "titel": "Die Makros testen",
+    "anleitung": "Die Makros von `cortex-m-rt` prüfen ihre Eingaben auch auf dem PC. Lege eine Bibliothek an und schreibe absichtlich falsche Handler.",
+    "befehle": [
+      "cargo new --lib irq && cd irq",
+      "cargo add cortex-m cortex-m-rt",
+      "cargo check"
+    ],
+    "beobachtung": "Ein falscher Exception-Name und eine falsche Signatur führen zu klaren Compilerfehlern, ohne dass du ein Embedded-Target installiert haben musst."
+  },
+  "begriffe": [
+    { "begriff": "Interrupt", "englisch": "interrupt", "erklaerung": "Hardware-Ereignis, das das laufende Programm unterbricht und einen Handler startet." },
+    { "begriff": "NVIC", "englisch": "nested vectored interrupt controller", "erklaerung": "Interrupt-Controller der Cortex-M mit Prioritäten und Verschachtelung." },
+    { "begriff": "Vektortabelle", "englisch": "vector table", "erklaerung": "Tabelle mit Stack-Startwert und Handler-Adressen am Anfang des Flash." },
+    { "begriff": "Interrupt-Latenz", "englisch": "interrupt latency", "erklaerung": "Zeit vom Ereignis bis zum ersten Befehl des Handlers." }
+  ],
+  "weiterlesen": [
+    { "titel": "cortex-m-rt (docs.rs)", "url": "https://docs.rs/cortex-m-rt" },
+    { "titel": "cortex-m (docs.rs)", "url": "https://docs.rs/cortex-m" },
+    { "titel": "The Embedded Rust Book", "url": "https://docs.rust-embedded.org/book/" }
+  ]
+}

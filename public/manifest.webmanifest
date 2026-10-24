@@ -1,0 +1,19 @@
+{
+  "name": "Rust Engineering Academy",
+  "short_name": "Rust Academy",
+  "description": "Software Engineering für Rust- und Embedded-Entwickler in kurzen, spielerischen Lektionen.",
+  "lang": "de-CH",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

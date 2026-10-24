@@ -1,0 +1,232 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m4-l1",
+  "phase": 1,
+  "modul": "1.4 Speicherlayout des Binaries",
+  "titel": "Sektionen und Grösse eines Rust-Binaries",
+  "lernziele": [
+    "`static`, `static mut` und `const` den Sektionen `.text`, `.rodata`, `.data` und `.bss` zuordnen",
+    "Erklären, warum ein Rust-Binary mit `std` gross wirkt und woher die Bytes kommen",
+    "Ein Cargo-Profil auf kleine Binaries trimmen (`opt-level`, `panic`, `strip`, `lto`)"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "`lib.rs` definiert `TABELLE` (`static`), `ZUSTAND` (`static mut … = 7`), `NULLEN` (`static mut … = [0; 64]`), `const GRENZE: u32 = 100` und die Funktion `summe`. Warum taucht `GRENZE` nicht auf?",
+      "terminal": {
+        "befehl": "rustc --crate-type=lib -O --emit=obj lib.rs && nm -C lib.o",
+        "ausgabe": [
+          "0000000000000000 B lib::NULLEN",
+          "0000000000000000 R lib::TABELLE",
+          "0000000000000000 D lib::ZUSTAND",
+          "                 U core::panicking::panic_bounds_check",
+          "0000000000000000 T summe"
+        ]
+      },
+      "optionen": [
+        "Ein `const` ist ein Wert, kein Speicherort: Er wird an jeder Verwendungsstelle eingesetzt und bekommt kein eigenes Symbol",
+        "`nm` zeigt nur Symbole, die mit `pub` exportiert sind",
+        "Der Optimierer hat `GRENZE` entfernt, ohne `-O` wäre es als `R` sichtbar"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`const` wird bei jeder Verwendung eingesetzt, wie ein typisierter Makro-Wert. Ein `static` dagegen ist genau **ein** Speicherort mit fester Adresse. Die Buchstaben von `nm`: `T` = `.text`, `R` = `.rodata`, `D` = `.data`, `B` = `.bss`, `U` = undefiniert (kommt aus einem anderen Crate).",
+      "begruendungen": [
+        "Richtig. Ein `const` hat keine Adresse, ein `static` schon.",
+        "`GRENZE` ist ebenfalls `pub`. Ausserdem listet `nm` auch nicht exportierte Symbole.",
+        "Auch ohne Optimierung bekommt ein `const` kein Symbol. Er ist schlicht kein Objekt im Speicher."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vier Sektionen, vier Rechte",
+      "text": "Ein Rust-Binary hat dieselben Sektionen wie eines aus C. Welche ein Item bekommt, hängt von Veränderbarkeit und Startwert ab. Ein `static` mit innerer Mutabilität (z. B. `AtomicU32`) landet trotz fehlendem `mut` in `.data`, weil es zur Laufzeit beschreibbar sein muss.",
+      "tabelle": {
+        "kopf": ["Sektion", "Inhalt in Rust", "Rechte", "Auf dem Mikrocontroller"],
+        "zeilen": [
+          ["`.text`", "Funktionen, Monomorphisierungen", "R E", "Flash"],
+          ["`.rodata`", "`static` ohne Mutabilität, String-Literale", "R", "Flash"],
+          ["`.data`", "`static mut` / Atomics mit Startwert ≠ 0", "RW", "RAM, Startwert im Flash"],
+          ["`.bss`", "`static mut` / Atomics mit Startwert 0", "RW", "RAM, beim Start genullt"]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "In welche Sektion kommt was?",
+      "paare": [
+        { "links": "`static TABELLE: [u32; 4] = [1, 2, 3, 4];`", "rechts": "`.rodata`" },
+        { "links": "`static mut ZUSTAND: u32 = 7;`", "rechts": "`.data`" },
+        { "links": "`static mut PUFFER: [u8; 4096] = [0; 4096];`", "rechts": "`.bss`" },
+        { "links": "`fn summe(i: usize) -> u32 { … }`", "rechts": "`.text`" }
+      ],
+      "erklaerung": "`PUFFER` kostet in der Datei keinen einzigen Byte, obwohl er 4 KiB gross ist: `.bss` speichert nur die Grösse, der Startup-Code oder Loader füllt den Bereich mit Nullen. Wäre auch nur ein Element ungleich 0, würden alle 4096 Bytes als `.data` in Datei bzw. Flash wandern."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert mit diesem Programm in Edition 2024?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "static mut ZAEHLER: u32 = 5;",
+          "",
+          "fn main() {",
+          "    unsafe {",
+          "        ZAEHLER += 1;",
+          "        println!(\"{}\", ZAEHLER);",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert und gibt `6` aus, der `unsafe`-Block genügt",
+        "Fehler in Zeile 6: `creating a shared reference to mutable static`",
+        "Fehler in Zeile 1: `static mut` ist in Edition 2024 verboten",
+        "Linkerfehler, weil `ZAEHLER` zweimal definiert ist"
+      ],
+      "korrekt": 1,
+      "fest": true,
+      "erklaerung": "`println!` nimmt seine Argumente per Referenz. Eine Referenz auf ein `static mut` ist sofort Undefined Behavior, falls irgendwo gleichzeitig geschrieben wird. Seit Edition 2024 ist der Lint `static_mut_refs` deshalb `deny`. Besser: `AtomicU32` oder ein Mutex. Mehr zu `static mut` und Interrupts in Phase 6.",
+      "begruendungen": [
+        "In Edition 2021 wäre es nur eine Warnung. In 2024 bricht der Build ab.",
+        "Richtig. Das ist der echte Fehler von rustc 1.97.",
+        "`static mut` selbst ist erlaubt. Verboten sind Referenzen darauf.",
+        "Es gibt nur eine Definition. Der Fehler entsteht beim Kompilieren, nicht beim Linken."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Warum ist „Hallo Welt“ so gross?",
+      "text": "Ein Rust-Programm mit `println!` bringt `std` statisch mit: Formatierung (`core::fmt`), die Panik-Maschinerie mit Unwinding und einen Backtrace-Symbolisierer, der DWARF lesen kann. Dazu kommen im `dev`-Profil Debug-Informationen. `size` zählt nur, was geladen wird. Die Dateigrösse enthält auch Symbole und `.debug_*`.",
+      "terminal": {
+        "befehl": "ls -l target/debug/hallo target/release/hallo && size target/release/hallo",
+        "ausgabe": [
+          "-rwxr-xr-x 2 dev dev 4375936 Oct 23 15:06 target/debug/hallo",
+          "-rwxr-xr-x 2 dev dev  445688 Oct 23 15:06 target/release/hallo",
+          "   text\t   data\t    bss\t    dec\t    hex\tfilename",
+          " 327159\t  12336\t   6554\t 346049\t  547c1\ttarget/release/hallo"
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`cargo-bloat` schlüsselt `.text` nach Crates auf. Was folgt daraus?",
+      "terminal": {
+        "befehl": "cargo bloat --release --crates -n 5",
+        "ausgabe": [
+          "File  .text     Size Crate",
+          "5.7%  98.5% 241.6KiB std",
+          "0.0%   0.1%     201B hallo",
+          "0.0%   0.0%      77B [Unknown]",
+          "0.0%   0.0%      21B __rustc",
+          "5.8% 100.0% 245.2KiB .text section size, the file size is 4.2MiB"
+        ]
+      },
+      "optionen": [
+        "Fast der ganze Code stammt aus `std`. Der eigene Code ist winzig, die Grösse ist ein Fixkostenblock",
+        "Der eigene Code ist schlecht optimiert und muss umgeschrieben werden",
+        "`std` wird dynamisch gelinkt, deshalb taucht es hier auf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Grundbedarf von `std` fällt einmal an und wächst kaum mit dem eigenen Code. Mit `cargo bloat -n 10` (ohne `--crates`) sieht man die grössten Funktionen. Hier sind es Teile des Backtrace-Symbolisierers (`gimli`, `addr2line`). Die „file size“ ist hier grösser als sonst, weil `cargo bloat` für seine Analyse Symbole und Debug-Infos mitbaut. Auf Mikrocontrollern mit `#![no_std]` fällt all das weg (Phase 6).",
+      "begruendungen": [
+        "Richtig. 201 Byte eigener Code gegen 241 KiB aus `std`.",
+        "Der eigene Anteil ist mit 0,1 Prozent vernachlässigbar.",
+        "Rust linkt `std` standardmässig statisch. Gerade deshalb steht es im eigenen `.text`."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze ein eigenes Profil `klein`, das auf minimale Grösse optimiert.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.klein]",
+          "inherits = \"release\"",
+          "opt-level = {{?}}",
+          "lto = true",
+          "codegen-units = 1",
+          "panic = {{?}}",
+          "strip = {{?}}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["\"z\""] },
+        { "loesungen": ["\"abort\""] },
+        { "loesungen": ["true"] }
+      ],
+      "auswahl": ["\"z\"", "\"abort\"", "true", "\"3\"", "\"unwind\"", "false"],
+      "erklaerung": "`opt-level = \"z\"` optimiert auf Grösse und verzichtet sogar auf Schleifen-Vektorisierung. `panic = \"abort\"` entfernt die Unwinding-Tabellen und Landing Pads. `strip = true` entfernt Symbole und Debug-Informationen. Gebaut wird mit `cargo build --profile klein`. Im Beispiel schrumpft die Datei von 445 688 auf 289 368 Byte.",
+      "hinweis": "Werte, die Wörter sind, stehen in TOML in Anführungszeichen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Aussagen zu `panic = \"abort\"` stimmen?",
+      "optionen": [
+        "Das Binary wird kleiner, weil Unwinding-Code und -Tabellen entfallen",
+        "`Drop` wird bei einem Panic nicht mehr ausgeführt, der Prozess endet sofort",
+        "`std::panic::catch_unwind` kann einen Panic danach nicht mehr abfangen",
+        "Panics werden zur Compilezeit erkannt und verhindert"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Mit `abort` gibt es kein Aufräumen des Stacks mehr. Für Embedded ist das ohnehin Standard, für Server-Programme kann es gewünscht sein (schneller Neustart statt halbkaputtem Zustand). Wer sich auf `catch_unwind` verlässt, z. B. in Thread-Pools oder an FFI-Grenzen, darf es nicht setzen.",
+      "begruendungen": [
+        "Richtig. Das ist meist der grösste Einzelposten nach den Debug-Infos.",
+        "Richtig. Kein Unwinding heisst: keine Destruktoren auf dem Weg nach oben.",
+        "Richtig. Es gibt nichts mehr, das abgefangen werden könnte.",
+        "Die Panic-Strategie ändert nur, was **zur Laufzeit** beim Panic passiert."
+      ]
+    }
+  ],
+  "praxis": "Bevor du ein Binary „zu gross“ nennst, misst du: `size` für den geladenen Teil, `cargo bloat` für die Verursacher. Oft genügt ein Release-Profil mit `strip = true` für ausgelieferte Programme, während die Debug-Infos separat archiviert werden. Auf Mikrocontrollern zählt jedes Kilobyte Flash. Dort gehören `opt-level = \"s\"` oder `\"z\"`, `lto` und `panic = \"abort\"` zur Grundausstattung (mehr in Phase 7).",
+  "labor": {
+    "titel": "Ein Rust-Binary vermessen",
+    "anleitung": "Lege mit `cargo new hallo` ein Projekt an, füge ein `static`, ein `static mut`-Array mit Nullen und ein `const` hinzu und vermiss die Builds.",
+    "befehle": [
+      "cargo build && cargo build --release",
+      "size -A target/release/hallo | grep -E '^\\.(text|rodata|data|bss)'",
+      "nm -C -S target/release/hallo | grep -i hallo::",
+      "cargo install cargo-bloat && cargo bloat --release -n 10",
+      "cargo build --profile klein && ls -l target/release/hallo target/klein/hallo"
+    ],
+    "beobachtung": "`nm -S` zeigt die Grösse jedes Statics: Das Null-Array erscheint mit `b` (`.bss`). Das `const` fehlt. Das Profil `klein` spart vor allem durch `strip`, `lto` und `panic = \"abort\"`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Sektion",
+      "englisch": "section",
+      "erklaerung": "Benannter Bereich einer Objekt- oder ELF-Datei mit gleichartigem Inhalt, z. B. `.text` für Code oder `.bss` für genullte Variablen."
+    },
+    {
+      "begriff": "static",
+      "englisch": "static item",
+      "erklaerung": "Globales Item mit genau einer festen Adresse für die ganze Laufzeit. Im Gegensatz zu `const`, das an jeder Verwendungsstelle eingesetzt wird."
+    },
+    {
+      "begriff": "Panic-Strategie",
+      "englisch": "panic strategy",
+      "erklaerung": "`unwind` räumt den Stack mit `Drop` auf, `abort` beendet sofort. Einstellbar pro Profil mit `panic = …`."
+    },
+    {
+      "begriff": "Strippen",
+      "englisch": "stripping",
+      "erklaerung": "Entfernen von Symboltabelle und Debug-Informationen aus einem Binary. Ändert den Maschinencode nicht."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Profiles",
+      "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+    },
+    {
+      "titel": "The Rust Reference: Static items",
+      "url": "https://doc.rust-lang.org/reference/items/static-items.html"
+    },
+    {
+      "titel": "Edition Guide: static mut references",
+      "url": "https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html"
+    }
+  ]
+}

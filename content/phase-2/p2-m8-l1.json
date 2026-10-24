@@ -1,0 +1,241 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m8-l1",
+  "phase": 2,
+  "modul": "2.8 Eine fremde Codebase lesen",
+  "titel": "Orientierung in einem Rust-Projekt",
+  "lernziele": [
+    "Aus `Cargo.toml`, Workspace und Crate-Wurzeln die Struktur eines Projekts ableiten",
+    "Den Modulbaum von `lib.rs`/`main.rs` aus nachvollziehen",
+    "Mit `cargo tree`, `cargo doc` und rust-analyzer Abhängigkeiten, Features und Definitionen finden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du klonst ein unbekanntes Rust-Repository. Welche Datei liest du zuerst, um seine Struktur zu verstehen?",
+      "optionen": [
+        "Die `Cargo.toml` im Wurzelverzeichnis: Sie zeigt, ob es ein Workspace ist, welche Crates dazugehören und welche Abhängigkeiten und Features es gibt",
+        "Die grösste `.rs`-Datei, dort steckt die meiste Logik",
+        "`Cargo.lock`, weil dort alle Versionen stehen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Manifest-Datei ist die Landkarte. Ein Abschnitt `[workspace]` mit `members` heisst: Hier liegen mehrere Crates, jede mit eigener `Cargo.toml`. `[lib]`/`[[bin]]` bzw. die Konvention `src/lib.rs`/`src/main.rs` sagen dir, wo jede Crate beginnt. `Cargo.lock` ist nützlich, aber eine flache Liste ohne Struktur.",
+      "begruendungen": [
+        "Richtig.",
+        "Grösse sagt nichts über Relevanz für deine Aufgabe.",
+        "`Cargo.lock` zeigt aufgelöste Versionen, aber nicht, wie das Projekt aufgebaut ist."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Crate-Wurzeln und Modulbaum",
+      "text": "Jede Crate hat eine **Crate-Wurzel** (crate root): `src/lib.rs` für eine Bibliothek, `src/main.rs` für ein Programm, dazu eventuell `src/bin/*.rs`, `examples/` und `tests/`. Von der Wurzel aus bildet `mod name;` einen Baum: rustc sucht das Modul in `name.rs` oder `name/mod.rs`. Dateien, die nirgends mit `mod` eingebunden sind, werden **nicht** kompiliert, auch wenn sie im Ordner liegen.\n\n`pub use` in `lib.rs` zeigt dir, was die Crate nach aussen anbietet. Das ist oft eine viel kürzere Liste als der interne Modulbaum.",
+      "code": {
+        "sprache": "rust",
+        "datei": "sensor-core/src/lib.rs",
+        "zeilen": [
+          "#![cfg_attr(not(test), no_std)]",
+          "",
+          "mod filter;",
+          "pub mod treiber;",
+          "",
+          "pub use filter::Mittelwert;",
+          "pub use treiber::{Sensor, SensorFehler};"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "Die Crate ist `no_std`, ausser in Tests. Gut zu wissen, bevor du `Vec` verwenden willst."
+          },
+          {
+            "zeile": 3,
+            "text": "Privates Modul aus `src/filter.rs`."
+          },
+          {
+            "zeile": 6,
+            "text": "Öffentliche API: `sensor_core::Mittelwert`, obwohl der Typ intern in `filter` liegt."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Datei bzw. welches Verzeichnis spielt welche Rolle?",
+      "paare": [
+        {
+          "links": "`src/lib.rs`",
+          "rechts": "Wurzel der Bibliotheks-Crate"
+        },
+        {
+          "links": "`src/bin/flash.rs`",
+          "rechts": "Zusätzliches Programm `flash` im selben Paket"
+        },
+        {
+          "links": "`tests/integration.rs`",
+          "rechts": "Integrationstest, sieht nur die öffentliche API"
+        },
+        {
+          "links": "`examples/blinky.rs`",
+          "rechts": "Beispielprogramm, mit `cargo run --example blinky` startbar"
+        },
+        {
+          "links": "`build.rs`",
+          "rechts": "Build-Skript, läuft vor dem Kompilieren der Crate"
+        }
+      ],
+      "erklaerung": "Diese Konventionen gelten in fast jedem Rust-Projekt, deshalb findest du dich schnell zurecht. Gerade `examples/` und `tests/` sind beim Einlesen Gold wert: Sie zeigen, wie die Autoren ihre API selbst benutzen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Workspace mit `sensor-cli` und `sensor-core`. Was lässt sich aus `cargo tree` ablesen?",
+      "terminal": {
+        "befehl": "cargo tree",
+        "ausgabe": [
+          "sensor-cli v0.1.0 (/home/user/projekt/sensor-cli)",
+          "├── anyhow v1.0.104",
+          "└── sensor-core v0.1.0 (/home/user/projekt/sensor-core)",
+          "    ├── heapless v0.9.3",
+          "    │   ├── hash32 v0.3.1",
+          "    │   │   └── byteorder v1.5.0",
+          "    │   └── stable_deref_trait v1.2.1",
+          "    └── serde v1.0.229",
+          "        ├── serde_core v1.0.229",
+          "        └── serde_derive v1.0.229 (proc-macro)",
+          "",
+          "sensor-core v0.1.0 (/home/user/projekt/sensor-core) (*)"
+        ]
+      },
+      "optionen": [
+        "`sensor-cli` hängt von der lokalen Crate `sensor-core` ab, die `heapless` und `serde` nutzt. `byteorder` kommt nur indirekt über `hash32` hinein",
+        "`byteorder` ist eine direkte Abhängigkeit von `sensor-cli`",
+        "`sensor-core` wird zweimal kompiliert, weil es zweimal in der Liste steht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Einrückung zeigt, wer wen braucht. Pfade in Klammern sind lokale Crates des Workspaces. `(*)` heisst: Dieser Teilbaum wurde schon oben gezeigt. Wer eine Abhängigkeit hereinzieht, findest du umgekehrt mit `cargo tree -i byteorder`.",
+      "begruendungen": [
+        "Richtig.",
+        "`byteorder` steht drei Ebenen tief, es ist eine transitive Abhängigkeit.",
+        "`(*)` ist nur eine Abkürzung in der Anzeige, kompiliert wird die Crate einmal."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`serde` ist in `sensor-core` eine optionale Abhängigkeit. Wer schaltet sie ein?",
+      "terminal": {
+        "befehl": "cargo tree -e features -i serde",
+        "ausgabe": [
+          "serde v1.0.229",
+          "├── serde feature \"default\"",
+          "│   └── sensor-core v0.1.0 (/home/user/projekt/sensor-core)",
+          "│       ├── sensor-core feature \"default\" (command-line)",
+          "│       │   └── sensor-cli v0.1.0 (/home/user/projekt/sensor-cli)",
+          "│       │       └── sensor-cli feature \"default\" (command-line)",
+          "│       └── sensor-core feature \"serde\"",
+          "│           └── sensor-cli v0.1.0 (/home/user/projekt/sensor-cli) (*)",
+          "├── serde feature \"derive\""
+        ]
+      },
+      "optionen": [
+        "`sensor-cli` aktiviert das Feature `serde` von `sensor-core`, das wiederum die optionale Abhängigkeit `serde` einschaltet",
+        "`serde` ist immer aktiv, weil es im Feature `default` steht",
+        "Der Benutzer hat `--features serde` auf der Kommandozeile angegeben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Features werden in der `Cargo.toml` des Abnehmers geschaltet, hier mit `sensor-core = { path = \"../sensor-core\", features = [\"serde\"] }`. Die Kette `serde` ← `sensor-core feature \"serde\"` ← `sensor-cli` zeigt genau das. Weil Features additiv sind, reicht ein einziger Abnehmer im Build, damit sie für alle aktiv sind. `-e features -i` ist die schnellste Antwort auf „warum ist das eingeschaltet?“.",
+      "begruendungen": [
+        "Richtig.",
+        "`serde feature \"default\"` ist das Default-Feature von `serde` selbst, nicht von `sensor-core`.",
+        "`(command-line)` steht nur bei den Default-Features der Workspace-Crates, nicht bei `serde`."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug beantwortet welche Frage am schnellsten?",
+      "paare": [
+        {
+          "links": "rust-analyzer: *Go to Definition*",
+          "rechts": "Wo ist dieser Typ oder diese Methode definiert, auch in einer Abhängigkeit?"
+        },
+        {
+          "links": "rust-analyzer: *Expand Macro Recursively*",
+          "rechts": "Welchen Code erzeugt dieses `#[derive]` oder `macro_rules!`?"
+        },
+        {
+          "links": "`cargo doc --open`",
+          "rechts": "Welche öffentliche API bietet die Crate samt aller Abhängigkeiten?"
+        },
+        {
+          "links": "`cargo tree -i <crate>`",
+          "rechts": "Warum ist diese Abhängigkeit überhaupt im Build?"
+        },
+        {
+          "links": "`rg 'cfg\\(feature' src/`",
+          "rechts": "Welcher Code hängt von einem Feature ab?"
+        }
+      ],
+      "erklaerung": "`cargo doc` erzeugt dieselbe Dokumentation wie docs.rs, aber genau für die Versionen und Features deines Builds, inklusive privater Abhängigkeiten. Mit `--document-private-items` siehst du auch interne Module."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe ein sinnvolles Vorgehen für den ersten Tag in einem unbekannten Rust-Projekt in Reihenfolge.",
+      "elemente": [
+        "README und Wurzel-`Cargo.toml` lesen: Workspace, Crates, Toolchain (`rust-toolchain.toml`)",
+        "`cargo build` und `cargo test` laufen lassen, um zu sehen, ob alles baut",
+        "`cargo tree` und `cargo doc --open`, um Abhängigkeiten und öffentliche API zu überblicken",
+        "Von `main.rs` bzw. `lib.rs` aus dem Modulbaum zu dem Teil folgen, der dich betrifft",
+        "Mit rust-analyzer die konkreten Typen und Aufrufe der Aufgabe nachverfolgen"
+      ],
+      "erklaerung": "Erst bauen, dann lesen: Ein Projekt, das bei dir nicht baut, kannst du auch nicht verlässlich verstehen, und rust-analyzer braucht einen funktionierenden Build für korrekte Sprünge. Danach geht man vom Groben (Crates) ins Feine (Module, Funktionen)."
+    }
+  ],
+  "praxis": "In den ersten Tagen in einem neuen Rust-Team brauchst du genau diese Werkzeuge: rust-analyzer im Editor, `cargo tree -e features -i` bei Fragen zu Features, `cargo doc --open` als lokale API-Übersicht. Halte deine Erkenntnisse in einer kurzen Notiz fest („Crate X macht Y, Einstieg in Z“). Daraus entsteht später eine `ARCHITECTURE.md` für die nächste Person.",
+  "labor": {
+    "titel": "Eine echte Crate erkunden",
+    "anleitung": "Lege ein Projekt mit `heapless` an und erkunde die Crate: Abhängigkeiten, Features, Modulbaum und öffentliche API.",
+    "befehle": [
+      "cargo new erkunden && cd erkunden && cargo add heapless",
+      "cargo tree",
+      "cargo tree -e features -i heapless",
+      "cargo doc --open",
+      "rg -n '^pub mod|^mod |^pub use' ~/.cargo/registry/src/*/heapless-*/src/lib.rs"
+    ],
+    "beobachtung": "`lib.rs` von `heapless` besteht fast nur aus `mod`- und `pub use`-Zeilen und Attributen wie `#![cfg_attr(not(test), no_std)]`. Die eigentliche Logik steckt in den Modulen, die öffentliche API aber in wenigen `pub use`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Crate-Wurzel",
+      "englisch": "crate root",
+      "erklaerung": "Datei, mit der rustc eine Crate beginnt, meist `src/lib.rs` oder `src/main.rs`. Von dort aus entsteht der Modulbaum."
+    },
+    {
+      "begriff": "Workspace",
+      "englisch": "workspace",
+      "erklaerung": "Mehrere Crates, die eine gemeinsame `Cargo.lock` und ein gemeinsames `target/`-Verzeichnis nutzen."
+    },
+    {
+      "begriff": "Feature",
+      "englisch": "feature",
+      "erklaerung": "Benannter Schalter in `Cargo.toml`, der optionale Abhängigkeiten oder Code mit `#[cfg(feature = \"…\")]` aktiviert."
+    },
+    {
+      "begriff": "rust-analyzer",
+      "englisch": "rust-analyzer",
+      "erklaerung": "Language Server für Rust: Sprung zur Definition, Typanzeige, Makro-Expansion im Editor."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Defining Modules to Control Scope and Privacy",
+      "url": "https://doc.rust-lang.org/book/ch07-02-defining-modules-to-control-scope-and-privacy.html"
+    },
+    {
+      "titel": "The Cargo Book: cargo tree",
+      "url": "https://doc.rust-lang.org/cargo/commands/cargo-tree.html"
+    },
+    {
+      "titel": "The Cargo Book: Workspaces",
+      "url": "https://doc.rust-lang.org/cargo/reference/workspaces.html"
+    }
+  ]
+}

@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m1-l2",
+  "phase": 5,
+  "modul": "5.1 Threads und Data Races",
+  "titel": "Send und Sync",
+  "lernziele": [
+    "Die Bedeutung der Marker-Traits `Send` und `Sync` erklären",
+    "Begründen, warum `Rc` und `RefCell` nicht zwischen Threads dürfen und `Arc` schon",
+    "Die Fehlermeldung „cannot be sent between threads safely“ lesen und beheben"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "rc-nicht-send",
+      "frage": "Du willst einen `Rc<i32>` an einen Thread übergeben. Was sagt dir der Compiler?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0277]: `Rc<i32>` cannot be sent between threads safely",
+          " --> src/main.rs:6:27",
+          "  |",
+          "6 |       let h = thread::spawn(move || {",
+          "  |               ------------- ^------",
+          "  |               |             |",
+          "  |  _____________|_____________within this `{closure@src/main.rs:6:27: 6:34}`",
+          "  | |             |",
+          "  | |             required by a bound introduced by this call",
+          "7 | |         println!(\"{}\", kopie);",
+          "8 | |     });",
+          "  | |_____^ `Rc<i32>` cannot be sent between threads safely",
+          "  |",
+          "  = help: within `{closure@src/main.rs:6:27: 6:34}`, the trait `Send` is not implemented for `Rc<i32>`",
+          "note: required because it's used within this closure",
+          "note: required by a bound in `spawn`"
+        ]
+      },
+      "optionen": [
+        "`spawn` verlangt, dass die Closure `Send` ist. Sie enthält einen `Rc`, und `Rc` ist nicht `Send`",
+        "Der `Rc` lebt nicht lange genug, es fehlt `'static`",
+        "`kopie` wurde vorher schon verschoben",
+        "`println!` darf in Threads keine `Rc`-Werte ausgeben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Meldung liest man von unten nach oben: `spawn` hat eine Schranke (*bound*) `F: Send`. Die Closure ist nur `Send`, wenn alles, was sie enthält, `Send` ist. Sie enthält einen `Rc<i32>`, und für `Rc` gibt es kein `Send`. Abhilfe: `Arc` statt `Rc`.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein `Rc<i32>` besitzt seine Daten und ist `'static`. Das Problem ist ein anderes Trait.",
+        "Das wäre E0382 („use of moved value“), nicht E0277.",
+        "`println!` ist harmlos. Schon das Übergeben des `Rc` an den Thread scheitert."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zwei Marker-Traits",
+      "text": "- **`Send`**: Ein Wert vom Typ `T` darf in einen anderen Thread *verschoben* werden.\n- **`Sync`**: Ein `&T` darf von mehreren Threads gleichzeitig benutzt werden. Genauer: `T` ist `Sync`, wenn `&T` `Send` ist.\n\nBeide sind **Marker-Traits** (*marker traits*): Sie haben keine Methoden, sie tragen nur eine Eigenschaft. Und sie sind **Auto-Traits** (*auto traits*): Der Compiler leitet sie selbst her. Ein `struct` ist `Send`, wenn alle seine Felder `Send` sind.\n\nNicht `Send` sind z. B. `Rc` (nicht-atomarer Referenzzähler), Rohzeiger (`*mut T`) und `MutexGuard` (muss im sperrenden Thread freigegeben werden). Nicht `Sync` sind `Cell` und `RefCell`, weil sie Veränderung über `&` ohne Synchronisation erlauben."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "warum-rc",
+      "frage": "Warum ist `Rc` nicht `Send`, `Arc` aber schon?",
+      "optionen": [
+        "`Rc` erhöht und senkt seinen Zähler mit gewöhnlichen Befehlen. Zwei Threads könnten gleichzeitig zählen und den Zähler verfälschen",
+        "`Rc` liegt auf dem Stack, `Arc` auf dem Heap",
+        "`Arc` kopiert die Daten für jeden Thread",
+        "`Rc` ist älter und wurde nie für Threads angepasst"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zwei Klone desselben `Rc` in zwei Threads würden denselben Zähler ohne Synchronisation verändern. Ein verlorenes Inkrement, und der Wert wird zu früh freigegeben: Use-after-free. `Arc` (*atomically reference counted*) zählt mit atomaren Operationen. Das kostet etwas mehr, deshalb gibt es beide.",
+      "begruendungen": [
+        "Richtig.",
+        "Beide legen Zähler und Wert auf den Heap.",
+        "`Arc` teilt genau einen Wert. Kopiert wird nur der Zeiger.",
+        "Der Unterschied ist Absicht: `Rc` ist die billigere Variante für einen Thread."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "typen-send-sync",
+      "frage": "Ordne jedem Typ seine Eigenschaft zu (für `T = i32`).",
+      "paare": [
+        { "links": "`Arc<Mutex<T>>`", "rechts": "`Send` und `Sync`" },
+        { "links": "`Rc<T>`", "rechts": "weder `Send` noch `Sync`" },
+        { "links": "`RefCell<T>`", "rechts": "`Send`, aber nicht `Sync`" },
+        { "links": "`MutexGuard<'_, T>`", "rechts": "`Sync`, aber nicht `Send`" }
+      ],
+      "erklaerung": "`RefCell` darf man in einen anderen Thread verschieben, denn dann benutzt ihn weiterhin nur einer. Teilen ist verboten, weil der Ausleihzähler nicht atomar ist. Beim `MutexGuard` ist es umgekehrt: Lesen über `&` darf jeder, aber freigeben muss ihn der Thread, der gesperrt hat, denn manche Betriebssysteme verlangen das."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "arc-refcell",
+      "frage": "Statt `Rc` nimmst du jetzt `Arc`. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let werte = Arc::new(RefCell::new(Vec::new()));",
+          "let w = Arc::clone(&werte);",
+          "thread::spawn(move || w.borrow_mut().push(1))",
+          "    .join()",
+          "    .unwrap();"
+        ]
+      },
+      "optionen": [
+        "Fehler E0277: `RefCell<Vec<i32>>` cannot be shared between threads safely",
+        "Kompiliert, denn `Arc` macht jeden Inhalt thread-sicher",
+        "Kompiliert, panict aber zur Laufzeit mit „already borrowed“"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Arc<T>` ist nur `Send`, wenn `T` `Send` **und** `Sync` ist, denn mehrere Threads greifen über ihre Klone gleichzeitig auf dasselbe `T` zu. `RefCell` ist nicht `Sync`. Der Compiler schlägt in der Meldung selbst `RwLock` vor, alternativ `Mutex`: `Arc<Mutex<Vec<i32>>>`.",
+      "begruendungen": [
+        "Richtig.",
+        "`Arc` teilt nur den Besitz, es synchronisiert keine Zugriffe auf den Inhalt.",
+        "So weit kommt es nicht. Der Fehler wird beim Kompilieren erkannt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "unsafe impl Send",
+      "text": "Ein eigener Typ mit Rohzeiger, etwa ein Treiber mit `*mut u32` auf ein Hardware-Register, ist automatisch nicht `Send`. Weiss man, dass der Zugriff trotzdem sicher ist, kann man es zusichern:\n\n```rust\nunsafe impl Send for Treiber {}\n```\n\n`unsafe` heisst hier: Der Compiler kann es nicht prüfen, die Verantwortung liegt bei dir. Ein falsches `unsafe impl Sync` hebelt die ganze Data-Race-Freiheit aus. Im Review gehört jede solche Zeile begründet (`// SAFETY: …`)."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-arc-mutex",
+      "frage": "Ergänze: Vier Threads hängen Messwerte an einen gemeinsamen Vektor an.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let werte = {{?}}::new({{?}}::new(Vec::new()));",
+          "let mut handles = Vec::new();",
+          "for i in 0..4 {",
+          "    let w = Arc::{{?}}(&werte);",
+          "    handles.push(thread::spawn(move || {",
+          "        w.lock().unwrap().push(i);",
+          "    }));",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["Arc"] },
+        { "loesungen": ["Mutex"] },
+        { "loesungen": ["clone"] }
+      ],
+      "auswahl": ["Arc", "Mutex", "clone", "Rc", "RefCell", "new"],
+      "erklaerung": "`Arc` teilt den Besitz über Threads, `Mutex` macht die Veränderung sicher. `Arc::clone(&werte)` erzeugt nur einen neuen Zeiger und erhöht den Zähler. Die Schreibweise `Arc::clone(&x)` statt `x.clone()` ist Konvention, damit man beim Lesen sieht, dass hier nicht die Daten kopiert werden."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "auto-trait-struct",
+      "frage": "`struct Paket { id: u32, nutzlast: Vec<u8>, notiz: Rc<str> }` – ist `Paket` `Send`?",
+      "optionen": [
+        "Nein, ein einziges Feld, das nicht `Send` ist, reicht",
+        "Ja, weil die meisten Felder `Send` sind",
+        "Nur wenn man `#[derive(Send)]` dazuschreibt",
+        "Ja, solange man den `Rc` nicht klont"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Auto-Traits werden strukturell hergeleitet: Alle Felder müssen sie haben. Das macht sie robust, ein neues Feld kann die Eigenschaft aber still entfernen. Bei öffentlichen Typen einer Bibliothek ist das eine inkompatible Änderung. Manche Projekte sichern sich mit einem Test wie `fn pruefe<T: Send>() {}` und `pruefe::<Paket>();` ab.",
+      "begruendungen": [
+        "Richtig.",
+        "Es gibt keine Mehrheitsregel. Ein Feld genügt.",
+        "`Send` lässt sich nicht ableiten. Der Compiler bestimmt es automatisch.",
+        "Die Prüfung erfolgt am Typ, nicht an der Verwendung."
+      ]
+    }
+  ],
+  "praxis": "Wenn eine Bibliothek „thread-safe“ verspricht, siehst du in Rust direkt in der Dokumentation nach: Unter *Auto Trait Implementations* steht für jeden Typ, ob er `Send` und `Sync` ist. Für eigene öffentliche Typen lohnt sich ein kleiner Test, der genau das festhält, damit ein neues Feld nicht unbemerkt die API bricht.",
+  "labor": {
+    "titel": "Fehlermeldungen provozieren",
+    "anleitung": "Übergib nacheinander einen `Rc<i32>`, einen `Arc<RefCell<i32>>` und einen `Arc<Mutex<i32>>` an `thread::spawn`. Lies jede Fehlermeldung vollständig und lies die Erklärung zum Fehlercode.",
+    "befehle": [
+      "cargo new sendsync && cd sendsync",
+      "cargo build",
+      "rustc --explain E0277"
+    ],
+    "beobachtung": "Die Meldung für `RefCell` sagt „cannot be **shared**“ (fehlendes `Sync`), die für `Rc` „cannot be **sent**“ (fehlendes `Send`). Bei `RefCell` und `Cell` schlägt der Compiler sogar die passende Alternative vor (`RwLock` bzw. ein Atomic)."
+  },
+  "begriffe": [
+    {
+      "begriff": "Send",
+      "englisch": "Send",
+      "erklaerung": "Marker-Trait: Ein Wert dieses Typs darf in einen anderen Thread verschoben werden."
+    },
+    {
+      "begriff": "Sync",
+      "englisch": "Sync",
+      "erklaerung": "Marker-Trait: Eine geteilte Referenz `&T` darf gleichzeitig in mehreren Threads benutzt werden."
+    },
+    {
+      "begriff": "Auto-Trait",
+      "englisch": "auto trait",
+      "erklaerung": "Trait, das der Compiler automatisch implementiert, wenn alle Bestandteile eines Typs es haben."
+    },
+    {
+      "begriff": "Arc",
+      "englisch": "atomically reference counted",
+      "erklaerung": "Smart Pointer mit atomarem Referenzzähler. Gemeinsamer Besitz über Threadgrenzen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Extensible Concurrency with Send and Sync",
+      "url": "https://doc.rust-lang.org/book/ch16-04-extensible-concurrency-sync-and-send.html"
+    },
+    {
+      "titel": "The Rustonomicon: Send and Sync",
+      "url": "https://doc.rust-lang.org/nomicon/send-and-sync.html"
+    }
+  ]
+}

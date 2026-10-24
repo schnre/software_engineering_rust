@@ -1,0 +1,195 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m6-l3",
+  "phase": 1,
+  "modul": "1.6 Build-Systeme",
+  "titel": "build.rs und Codegenerierung",
+  "lernziele": [
+    "Ein Build-Skript schreiben, das Code nach `OUT_DIR` generiert und mit `include!` einbindet",
+    "Mit `cargo::`-Anweisungen Neubau, Linken und Warnungen steuern",
+    "build.rs und Proc-Macros abgrenzen und die Risiken von Build-Skripten einschätzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Projekt soll aus einer Datei `daten/farben.txt` beim Bauen Rust-Konstanten erzeugen. Wann und wo läuft ein Build-Skript `build.rs`?",
+      "optionen": [
+        "Vor dem Übersetzen des Pakets, als eigenes Programm auf dem Build-Rechner",
+        "Zur Laufzeit beim Start des fertigen Programms",
+        "Auf dem Mikrocontroller, bevor `main` startet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo übersetzt `build.rs` zuerst zu einem Programm für den **Host**, führt es aus und übersetzt danach das eigentliche Paket. Das gilt auch beim Cross-Kompilieren: Das Build-Skript läuft auf deinem PC, auch wenn die Firmware für einen Cortex-M gebaut wird.",
+      "begruendungen": [
+        "Richtig. Es ist ein ganz normales Rust-Programm mit `fn main`.",
+        "Im fertigen Programm ist vom Build-Skript nichts mehr vorhanden, nur seine Erzeugnisse.",
+        "Das Build-Skript läuft nie auf dem Zielgerät."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Code in OUT_DIR erzeugen",
+      "text": "Ein Build-Skript darf nur nach `OUT_DIR` schreiben, ein Verzeichnis, das Cargo pro Paket unter `target/` anlegt. Über `println!(\"cargo::…\")` gibt es Anweisungen an Cargo zurück.",
+      "code": {
+        "sprache": "rust",
+        "datei": "build.rs",
+        "zeilen": [
+          "use std::{env, fs, path::Path};",
+          "",
+          "fn main() {",
+          "    let ein = fs::read_to_string(\"daten/farben.txt\").unwrap();",
+          "    let mut code = String::new();",
+          "    for zeile in ein.lines() {",
+          "        let (name, wert) = zeile.split_once('=').unwrap();",
+          "        code += &format!(\"pub const {name}: u8 = {wert};\\n\");",
+          "    }",
+          "    let out = env::var(\"OUT_DIR\").unwrap();",
+          "    fs::write(Path::new(&out).join(\"farben.rs\"), code).unwrap();",
+          "    println!(\"cargo::rerun-if-changed=daten/farben.txt\");",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Relative Pfade beziehen sich auf das Paketverzeichnis." },
+          { "zeile": 10, "text": "`OUT_DIR` setzt Cargo als Umgebungsvariable." },
+          { "zeile": 12, "text": "Nur neu ausführen, wenn sich diese Datei ändert." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze `src/main.rs`, um die erzeugte Datei einzubinden.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "mod farben {",
+          "    {{?}}(concat!({{?}}(\"OUT_DIR\"), \"/farben.rs\"));",
+          "}",
+          "",
+          "fn main() {",
+          "    println!(\"{}\", farben::ROT | farben::BLAU);",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["include!"] },
+        { "loesungen": ["env!"] }
+      ],
+      "auswahl": ["include!", "env!", "std::env::var", "include_str!"],
+      "erklaerung": "`env!` liest die Umgebungsvariable **zur Compilezeit**, `std::env::var` erst zur Laufzeit, wo es kein `OUT_DIR` mehr gibt. `include!` fügt den Inhalt der Datei als Rust-Code ein, `include_str!` nur als `&'static str`. Mit `ROT=1` und `BLAU=4` gibt das Programm `5` aus."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was passiert, wenn du in `build.rs` die Zeile `cargo::rerun-if-changed=daten/farben.txt` weglässt?",
+      "optionen": [
+        "Cargo führt das Skript erneut aus, sobald sich irgendeine Datei im Paket ändert. Das funktioniert, ist aber oft unnötig langsam",
+        "Das Skript läuft nie wieder, Änderungen an `farben.txt` werden ignoriert",
+        "Cargo verweigert den Build"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `rerun-if-changed` geht Cargo auf Nummer sicher und überwacht das ganze Paketverzeichnis. Sobald das Skript aber mindestens eine `rerun-if-changed`-Zeile ausgibt, gelten **nur** noch die genannten Pfade. Dann muss jede gelesene Eingabe aufgezählt sein, sonst fehlen Neubauten.",
+      "begruendungen": [
+        "Richtig. Sicher, aber grob.",
+        "Das passiert erst, wenn man `rerun-if-changed` setzt und dabei eine Eingabe vergisst.",
+        "Die Zeile ist optional."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Build-Skript gibt zusätzlich `cargo::warning=Farben erzeugt` und `cargo::rustc-link-lib=sensorik` aus. Was ist schiefgelaufen?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling gen v0.1.0 (/home/user/gen)",
+          "warning: gen@0.1.0: Farben erzeugt",
+          "error: linking with `cc` failed: exit status: 1",
+          "  |",
+          "  = note: rust-lld: error: unable to find library -lsensorik",
+          "          collect2: error: ld returned 1 exit status"
+        ]
+      },
+      "optionen": [
+        "Das Build-Skript hat den Linker angewiesen, `libsensorik` zu linken, aber nicht gesagt, wo sie liegt. Es fehlt `cargo::rustc-link-search=…`",
+        "Das Build-Skript selbst ist abgestürzt",
+        "`cargo::warning` hat den Build abgebrochen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`rustc-link-lib` fügt `-lsensorik` hinzu, `rustc-link-search` den Suchpfad (`-L`). Typischerweise baut das Build-Skript die C-Bibliothek vorher mit dem `cc`-Crate, das beides automatisch ausgibt (Modul 1.3). Die Warnung zeigt nebenbei: Ausgaben von `cargo::warning` sieht man im normalen Build, andere Ausgaben des Skripts nur mit `-vv`.",
+      "begruendungen": [
+        "Richtig. Kompilieren ging, das Linken scheitert.",
+        "Das Skript lief durch, sonst gäbe es `failed to run custom build command`.",
+        "Eine Warnung bricht nichts ab."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was erledigt welche Anweisung?",
+      "paare": [
+        { "links": "`cargo::rerun-if-changed=PFAD`", "rechts": "Skript nur neu ausführen, wenn sich die Datei ändert" },
+        { "links": "`cargo::rerun-if-env-changed=VAR`", "rechts": "Skript neu ausführen, wenn sich eine Umgebungsvariable ändert" },
+        { "links": "`cargo::rustc-cfg=has_fpu`", "rechts": "Ermöglicht `#[cfg(has_fpu)]` im Code" },
+        { "links": "`cargo::rustc-link-search=DIR`", "rechts": "Fügt einen Suchpfad für Bibliotheken hinzu" }
+      ],
+      "erklaerung": "`cortex-m-rt` nutzt genau diese Mechanismen: Sein Build-Skript setzt je nach Target `cfg`s wie `armv7em` oder `has_fpu` und legt `link.x` mit `rustc-link-search` in den Suchpfad. Die Schreibweise `cargo::` (zwei Doppelpunkte) gibt es seit Rust 1.77, ältere Skripte nutzen `cargo:`."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Aussagen zu build.rs und Proc-Macros stimmen?",
+      "optionen": [
+        "Beide führen beliebigen Code auf dem Rechner aus, der baut, auch beim blossen `cargo check` oder beim Öffnen in einer IDE",
+        "Ein Proc-Macro arbeitet auf Token des Quellcodes, ein Build-Skript eher mit Dateien und der Umgebung",
+        "Build-Skripte laufen in einer Sandbox ohne Netz- und Dateizugriff",
+        "Aufwändige Build-Skripte verlängern jeden sauberen Build und können parallele Builds bremsen"
+      ],
+      "korrekt": [0, 1, 3],
+      "erklaerung": "Ein Proc-Macro wie `#[derive(Serialize)]` bekommt Token und liefert Token zurück. Ein Build-Skript eignet sich für Codegenerierung aus Dateien (Protobuf, SVD, Tabellen), Bindings mit `bindgen` und C-Code mit `cc`. Beide laufen mit deinen Rechten, ohne Sandbox. Eine neue Abhängigkeit mit Build-Skript ist also Code, dem du beim Bauen vertraust (Phase 12: Supply-Chain).",
+      "begruendungen": [
+        "Richtig. rust-analyzer führt sie beim Öffnen eines Projekts aus.",
+        "Richtig. Das ist die übliche Arbeitsteilung.",
+        "Es gibt keine Sandbox. Das Skript kann lesen, schreiben und ins Netz.",
+        "Richtig. Das Skript muss erst gebaut und ausgeführt werden, bevor das Paket übersetzt wird."
+      ]
+    }
+  ],
+  "praxis": "In Embedded-Projekten trifft man Build-Skripte ständig: `cortex-m-rt` legt `link.x` ab, PAC-Crates wurden aus SVD-Dateien generiert, Protokolle aus `.proto`-Dateien. Beim Schreiben eigener Skripte zählst du alle Eingaben mit `rerun-if-changed` auf und schreibst nur nach `OUT_DIR`. Beim Hinzufügen einer Abhängigkeit schaust du nach, ob sie ein `build.rs` hat und was es tut.",
+  "labor": {
+    "titel": "Konstanten aus einer Textdatei erzeugen",
+    "anleitung": "Baue das Beispiel der Lektion nach und beobachte, wann das Build-Skript neu läuft.",
+    "befehle": [
+      "cargo new gen && cd gen && mkdir daten && printf 'ROT=1\\nGRUEN=2\\nBLAU=4\\n' > daten/farben.txt",
+      "cargo run",
+      "find target/debug/build -name farben.rs -exec cat {} \\;",
+      "cat target/debug/build/gen-*/output",
+      "touch src/main.rs && cargo build -v 2>&1 | grep build-script"
+    ],
+    "beobachtung": "In `target/debug/build/gen-*/out/` liegt die erzeugte Datei, in `output` stehen die `cargo::`-Anweisungen. Nach `touch src/main.rs` läuft das Skript nicht erneut, nach einer Änderung an `farben.txt` schon."
+  },
+  "begriffe": [
+    {
+      "begriff": "Build-Skript",
+      "englisch": "build script",
+      "erklaerung": "`build.rs` im Paketverzeichnis: Rust-Programm, das Cargo vor dem Übersetzen des Pakets auf dem Host ausführt."
+    },
+    {
+      "begriff": "OUT_DIR",
+      "englisch": "output directory",
+      "erklaerung": "Von Cargo vorgegebenes Verzeichnis, in das ein Build-Skript seine Erzeugnisse schreibt."
+    },
+    {
+      "begriff": "Prozedurales Makro",
+      "englisch": "procedural macro",
+      "erklaerung": "Rust-Code in einem eigenen `proc-macro`-Crate, der zur Compilezeit Token umwandelt, z. B. `#[derive(Debug)]`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Build Scripts",
+      "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html"
+    },
+    {
+      "titel": "The Cargo Book: Build Script Examples",
+      "url": "https://doc.rust-lang.org/cargo/reference/build-script-examples.html"
+    }
+  ]
+}

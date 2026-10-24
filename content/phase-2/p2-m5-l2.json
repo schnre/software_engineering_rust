@@ -1,0 +1,292 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m5-l2",
+  "phase": 2,
+  "modul": "2.5 Generics, inline und const im Binary",
+  "titel": "const, static, const fn und const generics",
+  "lernziele": [
+    "`const` und `static` unterscheiden und vorhersagen, in welcher Sektion ein `static` landet",
+    "Erklären, was in einem const-Kontext erlaubt ist und wann rustc zur Compilezeit rechnet",
+    "Puffer mit fester Grösse über const generics (`[T; N]`) typsicher machen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Warum bricht der Build ab, obwohl `GROESSE` nirgends zur Laufzeit berechnet wird?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "const GROESSE: u8 = 200 + 100;",
+          "fn main() { println!(\"{GROESSE}\"); }"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0080]: attempt to compute `200_u8 + 100_u8`, which would overflow",
+          " --> src/main.rs:1:21",
+          "  |",
+          "1 | const GROESSE: u8 = 200 + 100;",
+          "  |                     ^^^^^^^^^ evaluation of `GROESSE` failed here"
+        ]
+      },
+      "optionen": [
+        "Konstanten werden zur Compilezeit ausgewertet. Ein Überlauf dabei ist ein Compilerfehler, kein Laufzeitverhalten",
+        "Im Debug-Profil prüft cargo alle Additionen schon beim Bauen",
+        "`u8` darf in `const` grundsätzlich nicht verwendet werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc wertet jede `const` mit einem eingebauten Interpreter aus (*const evaluation*). Was dabei schiefgeht, z. B. Überlauf, Division durch null oder ein Index ausserhalb des Arrays, wird als Fehler E0080 gemeldet. Das ist strenger als in C++: Dort kann ein Überlauf in einer normalen Konstante still durchrutschen, nur `constexpr`-Kontexte melden UB.",
+      "begruendungen": [
+        "Richtig.",
+        "Additionen in normalen Funktionen werden erst zur Laufzeit geprüft. Hier geht es um den const-Kontext.",
+        "Alle Ganzzahltypen sind in Konstanten erlaubt, nur der Wert passt nicht in `u8`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "const und static",
+      "text": "Beide brauchen einen Typ und einen zur Compilezeit bekannten Wert, verhalten sich aber verschieden:",
+      "tabelle": {
+        "kopf": [
+          "",
+          "`const`",
+          "`static`"
+        ],
+        "zeilen": [
+          [
+            "Was es ist",
+            "ein Wert, der an jeder Verwendungsstelle eingesetzt wird",
+            "genau ein Objekt mit fester Adresse für die ganze Laufzeit"
+          ],
+          [
+            "Adresse",
+            "keine feste, jede Verwendung kann eine Kopie sein",
+            "immer dieselbe (`'static`)"
+          ],
+          [
+            "Veränderbar",
+            "nie",
+            "über innere Mutabilität (Atomics, `Mutex`) oder `static mut` (unsafe)"
+          ],
+          [
+            "Typisch für",
+            "Zahlen, Grenzen, Tabellen für Berechnungen",
+            "Zähler, Puffer, globale Zustände, Symbole für den Linker"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`TABELLE` ist ein `static [u32; 4]`, `ZAEHLER` ein `static AtomicU32::new(0)` und `PUFFER_START` ein `static AtomicU32::new(7)`. Welche Zuordnung zeigt `objdump`?",
+      "terminal": {
+        "befehl": "objdump -t target/release/konst | grep -E 'TABELLE|ZAEHLER|PUFFER'",
+        "ausgabe": [
+          "0000000000055ef0 g     O .data\t0000000000000004              PUFFER_START",
+          "0000000000007650 g     O .rodata\t0000000000000010              TABELLE",
+          "00000000000568b4 g     O .bss\t0000000000000004              ZAEHLER"
+        ]
+      },
+      "optionen": [
+        "Unveränderliches `static` liegt in `.rodata`, veränderbares mit Startwert 0 in `.bss`, veränderbares mit anderem Startwert in `.data`",
+        "Alle `static` liegen in `.data`, `objdump` zeigt nur Abkürzungen",
+        "`ZAEHLER` liegt in `.bss`, weil Atomics keinen Startwert haben dürfen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `static` ohne innere Mutabilität kann nie geändert werden und landet im schreibgeschützten `.rodata` (auf einem Mikrocontroller also im Flash). Typen mit innerer Mutabilität wie `AtomicU32` brauchen beschreibbaren Speicher: Ist der Startwert null, reicht `.bss`, das der Startup-Code nur nullt. Sonst kommt der Wert nach `.data` und wird beim Start aus dem Flash ins RAM kopiert. Die Sektionen kennst du aus Phase 1.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Spalte nach `O` ist die echte Sektion, und die unterscheiden sich hier.",
+        "Atomics haben einen Startwert. `.bss` wird gewählt, weil er null ist."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was meldet rustc?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::cell::Cell;",
+          "",
+          "static ZAEHLER: Cell<u32> = Cell::new(0);",
+          "",
+          "fn main() {",
+          "    ZAEHLER.set(1);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0277: `Cell<u32>` ist nicht `Sync` und darf nicht in einem geteilten `static` stehen",
+        "Kompiliert, `Cell` erlaubt Mutation ohne `unsafe`",
+        "Fehler: `Cell::new` ist keine `const fn`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `static` ist für alle Threads sichtbar, deshalb muss sein Typ `Sync` sein. `Cell` erlaubt Mutation über `&self` ohne Synchronisation und ist daher nicht `Sync`. rustc schlägt selbst vor, `AtomicU32` oder ein Lock zu nehmen. Auf einem Mikrocontroller ohne Threads nimmt man z. B. `critical_section::Mutex<Cell<u32>>` (Phase 6).",
+      "begruendungen": [
+        "Richtig. Genau so lautet die Meldung: *`Cell<u32>` cannot be shared between threads safely*.",
+        "Für lokale Variablen stimmt das, in einem `static` fehlt aber `Sync`.",
+        "`Cell::new` ist `const`, daran liegt es nicht."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Welche Zeile lässt den Build mit E0015 scheitern?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "const fn quadrat(x: u32) -> u32 { x * x }",
+          "fn laufzeit() -> u32 { 7 }",
+          "",
+          "const A: u32 = quadrat(4);",
+          "const B: u32 = quadrat(laufzeit());",
+          "",
+          "fn main() {",
+          "    let c = quadrat(laufzeit());",
+          "    println!(\"{A} {B} {c}\");",
+          "}"
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "In einem **const-Kontext** (Initialisierer von `const` und `static`, Array-Längen, `const { … }`-Blöcke) darf man nur `const fn` aufrufen. `laufzeit` ist keine, also meldet rustc *cannot call non-const function `laufzeit` in constants*. Zeile 8 ist dagegen erlaubt: Eine `const fn` ist auch eine ganz normale Funktion und darf zur Laufzeit mit beliebigen Werten aufgerufen werden."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "const generics",
+      "text": "Mit **const generics** wird eine Zahl Teil des Typs. So lassen sich Puffer fester Grösse ohne Heap bauen, genau das, was `heapless::Vec<T, N>` im Embedded-Bereich macht. `Puffer<16>` und `Puffer<32>` sind verschiedene Typen, eine Verwechslung ist ein Typfehler (E0308).",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Puffer<const N: usize> {",
+          "    daten: [u8; N],",
+          "    len: usize,",
+          "}",
+          "",
+          "impl<const N: usize> Puffer<N> {",
+          "    const fn neu() -> Self {",
+          "        const { assert!(N > 0, \"N muss > 0 sein\") };",
+          "        Puffer { daten: [0; N], len: 0 }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "`N` ist ein Wert vom Typ `usize`, der zur Compilezeit feststeht."
+          },
+          {
+            "zeile": 8,
+            "text": "Inline-`const`-Block: wird pro `N` zur Compilezeit geprüft. `Puffer::<0>::neu()` scheitert mit E0080 beim Bauen."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze einen Ringpuffer, dessen Kapazität im Typ steht.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub struct Ring<T: Copy + Default, {{?}} N: usize> {",
+          "    daten: [T; {{?}}],",
+          "    kopf: usize,",
+          "}",
+          "",
+          "static MESSWERTE: Ring<u16, 64> = Ring { daten: [0; 64], kopf: 0 };"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "const"
+          ]
+        },
+        {
+          "loesungen": [
+            "N"
+          ]
+        }
+      ],
+      "auswahl": [
+        "const",
+        "static",
+        "N",
+        "usize",
+        "64"
+      ],
+      "erklaerung": "`const N: usize` deklariert den Wert-Parameter, `[T; N]` benutzt ihn als Array-Länge. Das `static` belegt 64 × 2 Byte plus 8 Byte für `kopf`, also 136 Byte, und liegt in `.rodata`, weil es unveränderlich ist. Die Grösse ist zur Compilezeit bekannt, und es gibt keine Allokation."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wo wird ausgewertet bzw. wo landet es?",
+      "paare": [
+        {
+          "links": "`const MAX: usize = 4 * 1024;`",
+          "rechts": "Zur Compilezeit ausgerechnet, an jeder Verwendung als Zahl eingesetzt"
+        },
+        {
+          "links": "`static CRC_TABELLE: [u8; 256] = berechne();`",
+          "rechts": "Ein Objekt in `.rodata` mit fester Adresse"
+        },
+        {
+          "links": "`static TICKS: AtomicU64 = AtomicU64::new(0);`",
+          "rechts": "Ein Objekt in `.bss`, beim Start genullt"
+        },
+        {
+          "links": "`quadrat(x)` mit `const fn quadrat` und `x` aus einer Datei",
+          "rechts": "Ganz normal zur Laufzeit"
+        }
+      ],
+      "erklaerung": "`const fn` heisst nur, dass die Funktion zur Compilezeit aufgerufen werden **kann**. Ob sie es wird, entscheidet der Kontext: Nur in einem const-Kontext ist es garantiert. In normalem Code kann LLVM konstante Argumente trotzdem vorab ausrechnen, das ist dann aber eine Optimierung, keine Zusage."
+    }
+  ],
+  "praxis": "In Embedded-Rust ist das Alltag: Registeradressen und Taktfrequenzen als `const`, Lookup-Tabellen als `static` im Flash, Zähler als `static AtomicU32`, Puffer mit `heapless::Vec<u8, 64>` und Prüfungen wie `const { assert!(N.is_power_of_two()) }`, damit falsche Konfigurationen gar nicht erst bauen. Im Review fragst du bei jedem `static mut`, ob nicht ein Atomic oder eine Critical Section reicht (mehr dazu in Modul 2.6).",
+  "labor": {
+    "titel": "Sektionen nachprüfen",
+    "anleitung": "Lege drei `static` an (eine Tabelle, ein Atomic mit 0, ein Atomic mit 7) und markiere sie mit `#[unsafe(no_mangle)]`, damit ihre Namen im Binary lesbar bleiben. Prüfe dann die Sektionen.",
+    "befehle": [
+      "cargo new konst && cd konst",
+      "cargo build --release",
+      "objdump -t target/release/konst | grep -E 'TABELLE|ZAEHLER|PUFFER'",
+      "nm target/release/konst | grep -E 'TABELLE|ZAEHLER|PUFFER'"
+    ],
+    "beobachtung": "`nm` zeigt dieselbe Einteilung mit Buchstaben: `R` für `.rodata`, `D` für `.data`, `B` für `.bss`. Ein `const` taucht gar nicht als Symbol auf, weil es nur ein eingesetzter Wert ist."
+  },
+  "begriffe": [
+    {
+      "begriff": "const-Kontext",
+      "englisch": "const context",
+      "erklaerung": "Stellen, die zur Compilezeit ausgewertet werden müssen: Initialisierer von `const` und `static`, Array-Längen, `const { … }`-Blöcke, const-generische Argumente."
+    },
+    {
+      "begriff": "const fn",
+      "englisch": "const function",
+      "erklaerung": "Funktion, die auch in einem const-Kontext aufgerufen werden darf. Zur Laufzeit ist sie eine normale Funktion."
+    },
+    {
+      "begriff": "const generics",
+      "englisch": "const generics",
+      "erklaerung": "Generische Parameter, die Werte statt Typen sind, z. B. `const N: usize` in `[T; N]`."
+    },
+    {
+      "begriff": "Innere Mutabilität",
+      "englisch": "interior mutability",
+      "erklaerung": "Veränderung über eine geteilte Referenz `&T`, z. B. mit `Cell`, Atomics oder `Mutex`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust Reference: Constant evaluation",
+      "url": "https://doc.rust-lang.org/reference/const_eval.html"
+    },
+    {
+      "titel": "Rust Reference: Static items",
+      "url": "https://doc.rust-lang.org/reference/items/static-items.html"
+    },
+    {
+      "titel": "Rust Reference: Constant items",
+      "url": "https://doc.rust-lang.org/reference/items/constant-items.html"
+    }
+  ]
+}

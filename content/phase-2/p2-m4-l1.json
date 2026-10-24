@@ -1,0 +1,260 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m4-l1",
+  "phase": 2,
+  "modul": "2.4 Polymorphie unter der Haube",
+  "titel": "Traits und statischer Dispatch",
+  "lernziele": [
+    "Einen Trait definieren und für eigene Typen implementieren",
+    "Generische Funktionen mit Trait-Bounds schreiben und Fehler E0277/E0599 deuten",
+    "Erklären, wie Monomorphisierung aus einer generischen Funktion mehrere Maschinenfunktionen macht"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Trait in Rust entspricht am ehesten …",
+      "optionen": [
+        "einer Schnittstelle: einer Menge von Methoden, die ein Typ anbietet, ohne Datenfelder",
+        "einer Basisklasse mit Feldern, von der man erbt",
+        "einem C++-Template",
+        "einem Makro, das Code einfügt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Trait** beschreibt Verhalten: Methoden-Signaturen, optional mit Standard-Implementierung (default method). Ein Typ bekommt es über `impl Trait for Typ`. Rust hat **keine Vererbung** von Daten. Gemeinsame Felder baut man durch Komposition. Traits sind gleichzeitig das Mittel, um Generics einzuschränken, ähnlich wie C++20-Concepts.",
+      "begruendungen": [
+        "Richtig.",
+        "Traits haben keine Felder und keine Vererbungshierarchie von Daten.",
+        "Templates entsprechen eher Rusts Generics. Traits sind die Bedingungen dafür.",
+        "Makros sind ein eigenes Sprachmittel (Phase 3)."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Trait, impl und Generics",
+      "text": "Eine generische Funktion mit **Trait-Bound** akzeptiert jeden Typ, der den Trait implementiert:",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Sensor {",
+          "    fn lies(&self) -> u32;",
+          "    fn beschreibe(&self) -> String { format!(\"Wert {}\", self.lies()) }",
+          "}",
+          "",
+          "struct Temperatur;",
+          "impl Sensor for Temperatur {",
+          "    fn lies(&self) -> u32 { 21 }",
+          "}",
+          "",
+          "fn protokolliere<S: Sensor>(s: &S) -> u32 {",
+          "    s.lies() * 2",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 2,
+            "text": "Pflichtmethode: Jede Implementierung muss sie liefern (sonst E0046)."
+          },
+          {
+            "zeile": 3,
+            "text": "Standard-Implementierung, darf überschrieben werden."
+          },
+          {
+            "zeile": 7,
+            "text": "Implementierung für einen konkreten Typ."
+          },
+          {
+            "zeile": 11,
+            "text": "`S: Sensor` ist der Bound. Gleichwertig: `where S: Sensor` oder `s: &impl Sensor`."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was fehlt?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0599]: no method named `lies` found for reference `&S` in the current scope",
+          " --> src/main.rs:3:7",
+          "  |",
+          "3 |     s.lies() * 2",
+          "  |       ^^^^ method not found in `&S`",
+          "  |",
+          "  = help: items from traits can only be used if the type parameter is bounded by the trait",
+          "help: the following trait defines an item `lies`, perhaps you need to restrict type parameter `S` with it:",
+          "  |",
+          "2 | fn protokolliere<S: Sensor>(s: &S) -> u32 {",
+          "  |                   ++++++++"
+        ]
+      },
+      "optionen": [
+        "Der Trait-Bound `S: Sensor`: Ohne ihn darf die Funktion keine `Sensor`-Methoden auf `S` aufrufen",
+        "Ein `use Sensor;` am Dateianfang",
+        "Die Implementierung `impl Sensor for S`",
+        "Nichts, der Fehler verschwindet beim ersten Aufruf mit einem konkreten Typ"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Anders als C++-Templates prüft Rust den Rumpf einer generischen Funktion **einmal, gegen ihre Bounds**, nicht erst bei jeder Instanziierung. Was nicht im Bound steht, darf nicht benutzt werden. Dafür bekommt man Fehlermeldungen an der richtigen Stelle statt seitenlanger Template-Fehler.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Trait ist im selben Modul definiert und schon sichtbar.",
+        "Man implementiert Traits für konkrete Typen, nicht für einen Typparameter einer Funktion.",
+        "Rust prüft generische Funktionen vor jeder Instanziierung."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "`struct Licht;` implementiert `Sensor` nicht. Was passiert bei `protokolliere(&Licht)`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Sensor { fn lies(&self) -> u32; }",
+          "struct Licht;",
+          "fn protokolliere<S: Sensor>(s: &S) -> u32 { s.lies() }",
+          "",
+          "fn main() {",
+          "    println!(\"{}\", protokolliere(&Licht));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Compilerfehler E0277: „the trait bound `Licht: Sensor` is not satisfied“",
+        "Laufzeitfehler, weil `lies` nicht gefunden wird",
+        "Es wird `0` ausgegeben, die Standard-Implementierung",
+        "Linkerfehler: undefined reference to `lies`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Am Aufrufort prüft der Compiler, ob der konkrete Typ alle Bounds erfüllt. Die Meldung zeigt auf das Argument und auf den Bound in der Signatur (`required by this bound in protokolliere`). Rust hat keine „Duck Typing“-Templates: Eine Methode mit passendem Namen reicht nicht, die `impl` muss da sein.",
+      "begruendungen": [
+        "Richtig.",
+        "Statischer Dispatch wird vollständig zur Compilezeit aufgelöst.",
+        "`lies` hat keine Standard-Implementierung, und ohne `impl` gäbe es ohnehin keine.",
+        "Der Fehler fällt schon bei der Typprüfung auf, lange vor dem Linker."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Monomorphisierung",
+      "text": "Für jeden konkreten Typ, mit dem eine generische Funktion benutzt wird, erzeugt rustc eine eigene Kopie, die **Monomorphisierung** (monomorphization). `protokolliere::<Temperatur>` und `protokolliere::<Druck>` sind danach zwei normale Funktionen, in denen `s.lies()` ein **direkter Aufruf** ist. Das heisst **statischer Dispatch**: Der Optimierer kann inlinen, es gibt keine Kosten zur Laufzeit. Der Preis: mehr Code im Binary und längere Kompilierzeit (Modul 2.5).",
+      "diagramm": {
+        "knoten": [
+          "`fn protokolliere<S: Sensor>`",
+          "Aufrufe mit `Temperatur` und `Druck`",
+          "`protokolliere::<Temperatur>` + `protokolliere::<Druck>`",
+          "zwei Maschinenfunktionen"
+        ],
+        "beschriftung": "Eine generische Funktion wird pro Typ instanziiert"
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Debug-Build mit beiden Aufrufen `protokolliere(&Temperatur)` und `protokolliere(&Druck)`. Was zeigt `nm`?",
+      "terminal": {
+        "befehl": "nm -C target/debug/mono | grep 'mono::'",
+        "ausgabe": [
+          "0000000000013fa0 t mono::protokolliere::<mono::Temperatur>",
+          "0000000000013fe0 t mono::protokolliere::<mono::Druck>",
+          "0000000000014030 t mono::main",
+          "00000000000140d0 t <mono::Temperatur as mono::Sensor>::lies",
+          "00000000000140e0 t <mono::Druck as mono::Sensor>::lies"
+        ]
+      },
+      "optionen": [
+        "Zwei getrennte Instanzen von `protokolliere`, eine pro Typ",
+        "Eine einzige `protokolliere`-Funktion, die zur Laufzeit den Typ prüft",
+        "`protokolliere` ist fehlerhaft doppelt definiert, ein Linkerproblem",
+        "Die `lies`-Methoden wurden in `protokolliere` eingebettet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`nm -C` entschlüsselt die Symbolnamen (demangling) und zeigt die Typparameter in `::<…>`. Im Release-Build verschwinden alle diese Symbole: Der Optimierer hat die kleinen Funktionen in `main` inlined und sogar das Ergebnis ausgerechnet. Mit `#[inline(never)]` auf `protokolliere` bleiben die beiden Instanzen auch im Release sichtbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Typprüfung zur Laufzeit gibt es beim statischen Dispatch nicht.",
+        "Die Namen unterscheiden sich durch den Typparameter, es sind verschiedene Symbole.",
+        "Im Debug-Build wird nicht inlined, die `lies`-Symbole stehen ja noch da."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die drei gleichwertigen Schreibweisen für den Bound.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn a<S: {{?}}>(s: &S) -> u32 { s.lies() }",
+          "fn b<S>(s: &S) -> u32 {{?}} S: Sensor { s.lies() }",
+          "fn c(s: &{{?}} Sensor) -> u32 { s.lies() }"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Sensor"
+          ]
+        },
+        {
+          "loesungen": [
+            "where"
+          ]
+        },
+        {
+          "loesungen": [
+            "impl"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Sensor",
+        "where",
+        "impl",
+        "dyn",
+        "for"
+      ],
+      "erklaerung": "Alle drei werden monomorphisiert. `where` lohnt sich bei vielen oder langen Bounds, `impl Trait` in Argumentposition ist die Kurzform, erlaubt aber keine Angabe des Typs beim Aufruf (`a::<Temperatur>(…)`). `&dyn Sensor` dagegen wäre dynamischer Dispatch, Thema der nächsten Lektion."
+    }
+  ],
+  "praxis": "Generics mit Trait-Bounds sind das Rückgrat des Embedded-Ökosystems: Ein Treiber nimmt `I2C: embedded_hal::i2c::I2c` und läuft dadurch auf jedem Mikrocontroller, für den eine HAL diesen Trait implementiert, ohne einen einzigen Laufzeit-Umweg. Im Test ersetzt man die echte Hardware durch einen Mock, der denselben Trait implementiert (Phase 4). Achte bei grossen generischen Funktionen auf die Code-Grösse, auf Flash-knappen Chips zählt jede Instanz.",
+  "labor": {
+    "titel": "Instanzen im Binary zählen",
+    "anleitung": "Baue das `Sensor`-Beispiel mit zwei Typen. Suche die Instanzen von `protokolliere` mit `nm` im Debug- und im Release-Build. Ergänze dann `#[inline(never)]` vor `fn protokolliere` und baue den Release-Build erneut.",
+    "befehle": [
+      "cargo new mono && cd mono",
+      "cargo build && nm -C target/debug/mono | grep 'mono::'",
+      "cargo build --release && nm -C target/release/mono | grep 'mono::'"
+    ],
+    "beobachtung": "Debug zeigt zwei `protokolliere::<…>`-Instanzen. Release zeigt ohne Attribut nur noch `mono::main`, mit `#[inline(never)]` wieder beide Instanzen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Trait",
+      "englisch": "trait",
+      "erklaerung": "Sammlung von Methoden-Signaturen, die Typen implementieren können. Rusts Mittel für Schnittstellen und Generic-Bounds."
+    },
+    {
+      "begriff": "Trait-Bound",
+      "englisch": "trait bound",
+      "erklaerung": "Bedingung an einen Typparameter, z. B. `S: Sensor`. Nur Methoden aus den Bounds sind im Rumpf nutzbar."
+    },
+    {
+      "begriff": "Monomorphisierung",
+      "englisch": "monomorphization",
+      "erklaerung": "Der Compiler erzeugt für jeden konkreten Typ eine eigene Kopie einer generischen Funktion."
+    },
+    {
+      "begriff": "Statischer Dispatch",
+      "englisch": "static dispatch",
+      "erklaerung": "Welche Methode aufgerufen wird, steht zur Compilezeit fest. Direkter Aufruf, inlinebar."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Traits: Defining Shared Behavior",
+      "url": "https://doc.rust-lang.org/book/ch10-02-traits.html"
+    },
+    {
+      "titel": "The Rust Book: Generic Data Types (Performance of Code Using Generics)",
+      "url": "https://doc.rust-lang.org/book/ch10-01-syntax.html"
+    }
+  ]
+}

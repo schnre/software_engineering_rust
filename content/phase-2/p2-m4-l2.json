@@ -1,0 +1,245 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m4-l2",
+  "phase": 2,
+  "modul": "2.4 Polymorphie unter der Haube",
+  "titel": "Trait-Objekte und dynamischer Dispatch",
+  "lernziele": [
+    "Den Aufbau eines Trait-Objekts aus Datenzeiger und vtable erklären",
+    "Erkennen, wann ein Trait nicht dyn-kompatibel ist, und E0038 beheben",
+    "Statischen und dynamischen Dispatch nach Kosten und Einsatzzweck abwägen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du brauchst eine Liste mit verschiedenen Sensortypen, die alle `Sensor` implementieren. Welcher Typ funktioniert?",
+      "optionen": [
+        "`Vec<Box<dyn Sensor>>`",
+        "`Vec<dyn Sensor>`",
+        "`Vec<impl Sensor>`",
+        "`Vec<S>` mit `S: Sensor`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Verschiedene Typen haben verschiedene Grössen, ein `Vec` braucht aber Elemente gleicher Grösse. `dyn Sensor` ist ein **Trait-Objekt**: ein Typ ohne feste Grösse (unsized). Man benutzt ihn deshalb immer hinter einem Zeiger, als `Box<dyn Sensor>`, `&dyn Sensor` oder `Arc<dyn Sensor>`. Dieses Muster ersetzt in Rust den `std::vector<std::unique_ptr<Basis>>` aus C++.",
+      "begruendungen": [
+        "Richtig.",
+        "`dyn Sensor` hat keine feste Grösse und kann nicht direkt in einem `Vec` liegen.",
+        "`impl Trait` steht für **einen** konkreten Typ, den der Compiler einsetzt. Mischen geht damit nicht.",
+        "Ein Typparameter `S` ist ebenfalls genau ein Typ pro Instanz."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Fat Pointer und vtable",
+      "text": "Ein `&dyn Sensor` ist ein **Fat Pointer** aus zwei Wörtern (16 Byte auf 64-Bit): ein Zeiger auf die Daten und ein Zeiger auf die **vtable** (virtual method table) des konkreten Typs. Für jedes Paar aus Typ und Trait legt der Compiler eine vtable als Konstante im Binary an. In der aktuellen rustc-Implementierung enthält sie:\n\n- einen Zeiger auf die Drop-Funktion (`drop_in_place`)\n- Grösse und Alignment des konkreten Typs\n- je einen Funktionszeiger pro Trait-Methode\n\nAnders als in C++ steckt der vtable-Zeiger **nicht im Objekt**. Ein `struct Temperatur;` bleibt 0 Byte gross, nur der Zeiger auf ihn wird dick."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wozu braucht Rust welchen vtable-Eintrag?",
+      "paare": [
+        {
+          "links": "Drop-Funktion",
+          "rechts": "`Box<dyn Sensor>` muss beim Droppen den richtigen Destruktor aufrufen"
+        },
+        {
+          "links": "Grösse und Alignment",
+          "rechts": "Speicher freigeben und `size_of_val` beantworten"
+        },
+        {
+          "links": "Methodenzeiger für `lies`",
+          "rechts": "`s.lies()` springt indirekt zur Implementierung des konkreten Typs"
+        },
+        {
+          "links": "Datenzeiger (nicht in der vtable)",
+          "rechts": "Wird bei jedem Aufruf als `self` übergeben"
+        }
+      ],
+      "erklaerung": "Deshalb gibt es in Rust kein Gegenstück zum fehlenden virtuellen Destruktor aus C++: Die vtable jedes Trait-Objekts kennt die Drop-Funktion immer. Gemessen: `size_of_val` auf einem `Box<dyn Sensor>` mit einem `D(u64)` liefert 8, mit dem leeren `T` 0."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Warum darf `Form` nicht als `dyn Form` benutzt werden?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Form {",
+          "    fn flaeche(&self) -> f64;",
+          "    fn klone(&self) -> Self;",
+          "}",
+          "fn summe(formen: &[Box<dyn Form>]) -> f64 {",
+          "    formen.iter().map(|f| f.flaeche()).sum()",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0038]: the trait `Form` is not dyn compatible",
+          " --> src/main.rs:5:24",
+          "  |",
+          "5 | fn summe(formen: &[Box<dyn Form>]) -> f64 {",
+          "  |                        ^^^^^^^^ `Form` is not dyn compatible",
+          "  |",
+          "note: for a trait to be dyn compatible it needs to allow building a vtable",
+          " --> src/main.rs:3:24",
+          "  |",
+          "1 | trait Form {",
+          "  |       ---- this trait is not dyn compatible...",
+          "2 |     fn flaeche(&self) -> f64;",
+          "3 |     fn klone(&self) -> Self;",
+          "  |                        ^^^^ ...because method `klone` references the `Self` type in its return type"
+        ]
+      },
+      "optionen": [
+        "Über einen `dyn Form` ist der konkrete Typ unbekannt, also auch Grösse und Typ des Rückgabewerts `Self`",
+        "Traits mit mehr als einer Methode können nie als `dyn` verwendet werden",
+        "`f64` als Rückgabetyp ist in einer vtable nicht erlaubt",
+        "`Box<dyn Form>` muss durch `&dyn Form` ersetzt werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Trait ist **dyn-kompatibel** (früher: object safe), wenn sich für jede Methode ein Eintrag in der vtable bauen lässt. Das scheitert z. B. an `Self` als Rückgabetyp, an generischen Methoden (`fn schreibe<T: Display>(&self, t: T)`: unendlich viele Varianten) und an Funktionen ohne `self`. Auswege: die Methode mit `where Self: Sized` aus der vtable ausschliessen oder sie in einen eigenen Trait verschieben, wie rustc vorschlägt.",
+      "begruendungen": [
+        "Richtig.",
+        "Beliebig viele Methoden sind erlaubt, solange jede einzelne die Regeln erfüllt.",
+        "`f64` hat eine feste Grösse und ist unproblematisch.",
+        "Die Art des Zeigers ändert nichts an der Dyn-Kompatibilität des Traits."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Mache `Form` dyn-kompatibel, ohne `klone` zu entfernen.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Form {",
+          "    fn flaeche(&self) -> f64;",
+          "    fn klone(&self) -> Self where Self: {{?}};",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "Sized"
+          ]
+        }
+      ],
+      "auswahl": [
+        "Sized",
+        "Clone",
+        "Copy",
+        "'static"
+      ],
+      "erklaerung": "`dyn Form` selbst ist nicht `Sized`. Mit `where Self: Sized` gilt `klone` nur für konkrete Typen und kommt nicht in die vtable. Über `Box<dyn Form>` kann man dann `flaeche` aufrufen, `klone` nur auf einer konkreten `Q`. Mit rustc 1.97 geprüft."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Statisch oder dynamisch?",
+      "tabelle": {
+        "kopf": [
+          "",
+          "Generics (`T: Trait`)",
+          "Trait-Objekt (`dyn Trait`)"
+        ],
+        "zeilen": [
+          [
+            "Aufruf",
+            "direkt, inlinebar",
+            "indirekt über vtable, meist nicht inlinebar"
+          ],
+          [
+            "Code-Grösse",
+            "eine Kopie pro Typ",
+            "eine Kopie für alle"
+          ],
+          [
+            "Verschiedene Typen in einer Sammlung",
+            "nein",
+            "ja"
+          ],
+          [
+            "Zeiger",
+            "normal (8 Byte)",
+            "Fat Pointer (16 Byte)"
+          ],
+          [
+            "Trait-Einschränkungen",
+            "keine",
+            "muss dyn-kompatibel sein"
+          ]
+        ]
+      },
+      "text": "Faustregel: Generics als Standard, `dyn` dort, wo zur Laufzeit wirklich verschiedene Typen zusammenkommen (Plugins, Handler-Listen, Fehlerobjekte wie `Box<dyn Error>`) oder wo Code-Grösse wichtiger ist als die letzte Nanosekunde."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Aussagen über `Box<dyn Sensor>` und `&dyn Sensor` stimmen?",
+      "optionen": [
+        "Beide sind 16 Byte gross und benutzen dieselbe Art vtable",
+        "`Box<dyn Sensor>` besitzt den Wert und braucht eine Heap-Allokation, `&dyn Sensor` leiht nur aus",
+        "`&dyn Sensor` braucht immer eine Heap-Allokation",
+        "Aus einem `&Temperatur` wird ohne Allokation automatisch ein `&dyn Sensor`"
+      ],
+      "korrekt": [
+        0,
+        1,
+        3
+      ],
+      "erklaerung": "Die Umwandlung eines Zeigers auf einen konkreten Typ in einen Fat Pointer heisst **Unsizing Coercion**: Der Compiler hängt nur den vtable-Zeiger an. `let r: &dyn Sensor = &t;` kostet also nichts, `t` kann auf dem Stack liegen. Das ist in `no_std`-Umgebungen ohne Heap wichtig: Dynamischer Dispatch geht dort auch ohne `Box`.",
+      "begruendungen": [
+        "Richtig. Gemessen: `size_of::<Box<dyn Sensor>>()` ist 16.",
+        "Richtig.",
+        "Eine Referenz zeigt auf einen bestehenden Wert, egal wo er liegt.",
+        "Richtig."
+      ]
+    }
+  ],
+  "praxis": "Im Embedded-Bereich sind Trait-Objekte seltener als auf dem Desktop, aber nicht verboten: `&mut dyn Write` für einen Logger spart Flash, wenn viele Typen dieselbe Funktion nutzen. Auf dem Host begegnen dir `Box<dyn Error + Send + Sync>` als allgemeiner Fehlertyp (Modul 2.7) und `Box<dyn Fn()>` für Callbacks (Phase 3). Wenn ein Profiler einen heissen Pfad mit vielen kleinen `dyn`-Aufrufen zeigt, ist ein Umbau auf Generics oder ein `enum` über alle Varianten oft ein schneller Gewinn.",
+  "labor": {
+    "titel": "Trait-Objekte vermessen",
+    "anleitung": "Baue einen `Vec<Box<dyn Sensor>>` mit einem leeren und einem 8-Byte-Typ. Gib für jedes Element `size_of_val(&**s)` aus, dazu `size_of::<Box<dyn Sensor>>()` und `size_of::<&dyn Sensor>()`. Füge danach dem Trait eine Methode `fn klone(&self) -> Self;` hinzu und lies die Fehlermeldung. Behebe sie mit `where Self: Sized`.",
+    "befehle": [
+      "cargo new dynamisch && cd dynamisch",
+      "cargo run",
+      "rustc --explain E0038"
+    ],
+    "beobachtung": "Die Werte sind 0 und 8 Byte gross, beide Zeigertypen 16 Byte. Mit `klone` meldet rustc E0038 und nennt die Methode samt Grund. Nach `where Self: Sized` kompiliert alles wieder."
+  },
+  "begriffe": [
+    {
+      "begriff": "Trait-Objekt",
+      "englisch": "trait object, `dyn Trait`",
+      "erklaerung": "Wert eines unbekannten konkreten Typs, der einen Trait implementiert. Nur hinter einem Zeiger benutzbar."
+    },
+    {
+      "begriff": "vtable",
+      "englisch": "virtual method table",
+      "erklaerung": "Konstante Tabelle pro Typ und Trait mit Drop-Funktion, Grösse, Alignment und Methodenzeigern."
+    },
+    {
+      "begriff": "Dynamischer Dispatch",
+      "englisch": "dynamic dispatch",
+      "erklaerung": "Welche Methode läuft, entscheidet sich zur Laufzeit über die vtable."
+    },
+    {
+      "begriff": "Dyn-Kompatibilität",
+      "englisch": "dyn compatibility (früher object safety)",
+      "erklaerung": "Eigenschaft eines Traits, als `dyn Trait` benutzbar zu sein. Verlangt u. a. keine generischen Methoden und kein `Self` als Rückgabetyp."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Using Trait Objects to Abstract over Shared Behavior",
+      "url": "https://doc.rust-lang.org/book/ch18-02-trait-objects.html"
+    },
+    {
+      "titel": "The Rust Reference: Traits (Dyn compatibility)",
+      "url": "https://doc.rust-lang.org/reference/items/traits.html"
+    },
+    {
+      "titel": "The Rust Reference: Trait objects",
+      "url": "https://doc.rust-lang.org/reference/types/trait-object.html"
+    }
+  ]
+}

@@ -1,0 +1,203 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m2-l1",
+  "phase": 8,
+  "modul": "8.2 Pipeline-Stufen und Quality Gates",
+  "titel": "Die Stufen einer Rust-Pipeline",
+  "lernziele": [
+    "Die Stufen einer Rust-Pipeline von `check` bis Cross-Build einordnen",
+    "Eine MSRV-Prüfung und eine Build-Matrix lesen",
+    "Rust-Builds in der CI mit Caching schnell halten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum steht `cargo check` oder `cargo clippy` in vielen Pipelines vor `cargo build` und `cargo test`?",
+      "optionen": [
+        "Beide prüfen Typen und Borrows, erzeugen aber keinen Maschinencode. Sie scheitern deshalb viel früher als ein vollständiger Build",
+        "`cargo build` verweigert den Dienst, wenn vorher kein `cargo check` lief",
+        "`cargo check` lädt die Abhängigkeiten herunter, `cargo build` kann das nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die meisten Fehler in einem Pull Request sind Typ- oder Borrow-Fehler. Die findet `cargo check` ohne LLVM-Codegen und Linken, also in einem Bruchteil der Zeit. *Fail fast*: Die günstige Prüfung kommt zuerst, damit niemand zehn Minuten auf eine Meldung wartet, die nach einer Minute klar war.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Befehle sind voneinander unabhängig.",
+        "Beide laden Abhängigkeiten bei Bedarf herunter."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wofür ist welche Stufe da?",
+      "paare": [
+        { "links": "`cargo +nightly miri test`", "rechts": "Führt Tests in einem Interpreter aus und findet undefiniertes Verhalten in `unsafe`-Code" },
+        { "links": "`cargo llvm-cov`", "rechts": "Misst, welche Zeilen und Zweige die Tests ausführen (Coverage)" },
+        { "links": "`cargo build --target thumbv7em-none-eabihf`", "rechts": "Prüft, ob das Crate für den Mikrocontroller baut (Cross-Build)" },
+        { "links": "`cargo +1.85 check`", "rechts": "Prüft, ob das Crate mit der ältesten unterstützten Compilerversion baut" },
+        { "links": "`cargo test --doc`", "rechts": "Führt die Codebeispiele in `///`-Kommentaren als Tests aus" }
+      ],
+      "erklaerung": "Nicht jede Stufe gehört in jeden Pull Request. Miri ist langsam und braucht nightly. Viele Projekte lassen es nur für die Module mit `unsafe` oder nächtlich laufen. Cross-Builds für Embedded-Targets sind dagegen billig und fangen früh ab, wenn jemand versehentlich `std` benutzt. Mehr zu Miri in Phase 4."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "MSRV: die älteste unterstützte Version",
+      "text": "Die **MSRV** (*Minimum Supported Rust Version*) steht in `Cargo.toml` als `rust-version`. Ist der Compiler älter, bricht Cargo sofort ab, statt mit unverständlichen Fehlern zu scheitern.\n\nDie Angabe ist aber nur ein Versprechen. Prüfen kann man es auf zwei Wegen: in der CI zusätzlich mit genau dieser Version bauen (`cargo +1.85 check`), und Clippy lesen lassen. Clippy kennt `rust-version` und warnt, wenn Code eine neuere API verwendet.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[package]",
+          "name = \"sensor\"",
+          "version = \"0.1.0\"",
+          "edition = \"2021\"",
+          "rust-version = \"1.80\""
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Edition 2024 setzt mindestens 1.85 voraus; Cargo lehnt eine kleinere `rust-version` dann ab." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Die CI baut mit dem aktuellen stable-Compiler, alles grün bis auf diese Clippy-Warnung. Was bedeutet sie für Nutzer des Crates?",
+      "terminal": {
+        "befehl": "cargo clippy",
+        "ausgabe": [
+          "    Checking sensor v0.1.0 (/home/user/sensor)",
+          "warning: current MSRV (Minimum Supported Rust Version) is `1.80.0` but this item is stable since `1.82.0`",
+          " --> src/lib.rs:3:12",
+          "  |",
+          "3 |     grenze.is_none_or(|g| wert <= g)",
+          "  |            ^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: `#[warn(clippy::incompatible_msrv)]` on by default"
+        ]
+      },
+      "optionen": [
+        "Wer mit Rust 1.80 oder 1.81 baut, bekommt einen Compilerfehler, obwohl `rust-version` 1.80 verspricht",
+        "Nichts, die Warnung betrifft nur Clippy selbst",
+        "Cargo wird das Crate mit 1.80 automatisch ohne diese Funktion bauen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Option::is_none_or` gibt es erst seit Rust 1.82. Mit dem neuen Compiler in der CI baut alles, mit dem versprochenen 1.80 nicht. Lösung: entweder `rust-version` auf 1.82 anheben (eine bewusste Entscheidung, bei Bibliotheken oft ein Minor-Release) oder den Code anders schreiben, z. B. `grenze.map_or(true, |g| wert <= g)`.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Warnung beschreibt einen echten Bruch des Versprechens in `rust-version`.",
+        "Cargo entfernt keine Funktionsaufrufe; der Compiler kennt die Methode einfach nicht."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Wie viele Jobs erzeugt diese Matrix in GitHub Actions?",
+      "code": {
+        "sprache": "yaml",
+        "datei": ".github/workflows/ci.yml (Ausschnitt)",
+        "zeilen": [
+          "strategy:",
+          "  matrix:",
+          "    os: [ubuntu-latest, windows-latest, macos-latest]",
+          "    toolchain: [stable, beta, \"1.85\"]",
+          "    exclude:",
+          "      - os: macos-latest",
+          "        toolchain: beta",
+          "      - os: windows-latest",
+          "        toolchain: beta"
+        ]
+      },
+      "optionen": ["7", "9", "5", "8"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "3 Betriebssysteme mal 3 Toolchains ergeben 9 Kombinationen, `exclude` streicht 2. Bleiben 7. Matrizen wachsen schnell: Jede neue Achse multipliziert die Jobs. Deshalb testet man beta oft nur auf einem System und nutzt die MSRV nur für `cargo check`.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre ohne die beiden `exclude`-Einträge.",
+        "Es werden nur zwei Kombinationen gestrichen, nicht vier.",
+        "Jeder `exclude`-Eintrag streicht genau eine Kombination."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Schnell bleiben: Caching",
+      "text": "Ein frischer CI-Runner kompiliert jede Abhängigkeit neu. Bei grösseren Projekten sind das schnell zehn Minuten. Zwei Arten von Cache helfen:\n\n- **Verzeichnis-Cache** wie die Action `Swatinem/rust-cache`: speichert `~/.cargo/registry`, `~/.cargo/git` und `target/` zwischen Läufen. Der Schlüssel enthält u. a. den Hash von `Cargo.lock` und die rustc-Version, damit kein falscher Stand wiederverwendet wird.\n- **Compiler-Cache** wie `sccache`: wird über `RUSTC_WRAPPER=sccache` vor rustc geschaltet und speichert einzelne Kompilationsergebnisse, auch geteilt zwischen Maschinen (z. B. in S3).\n\nDazu: `CARGO_INCREMENTAL=0` in der CI, weil inkrementelle Artefakte gross sind und bei frischen Runnern wenig bringen."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Nach einem `cargo update` ist der erste CI-Lauf deutlich langsamer als die vorherigen. Warum?",
+      "optionen": [
+        "`Cargo.lock` hat sich geändert, damit passt der Cache-Schlüssel nicht mehr, und geänderte Abhängigkeiten werden neu kompiliert",
+        "`cargo update` deaktiviert das Caching dauerhaft",
+        "Der Runner muss erst die neue Rust-Version installieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist gewollt: Ein Cache, der trotz neuer Abhängigkeiten den alten Stand liefert, wäre gefährlich. `Swatinem/rust-cache` stellt bei einem Fehltreffer meist einen älteren, teilweise passenden Cache wieder her, sodass nur die geänderten Crates neu gebaut werden. Ab dem zweiten Lauf ist alles wieder schnell.",
+      "begruendungen": [
+        "Richtig.",
+        "Der nächste Lauf legt einen neuen Cache an.",
+        "`cargo update` ändert Abhängigkeiten, nicht die Toolchain."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Befehle für den MSRV- und den Embedded-Job.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustup toolchain install 1.85 --profile minimal",
+          "cargo {{?}}1.85 check --all-features",
+          "rustup target {{?}} thumbv7em-none-eabihf",
+          "cargo build --{{?}} thumbv7em-none-eabihf -p firmware"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["+"] },
+        { "loesungen": ["add"] },
+        { "loesungen": ["target"] }
+      ],
+      "auswahl": ["+", "@", "add", "install", "target", "triple"],
+      "erklaerung": "`cargo +<toolchain>` ist die Kurzschreibweise von rustup, um für einen einzelnen Befehl eine andere Toolchain zu wählen. Für Cross-Builds braucht rustup die vorkompilierte `core`-Bibliothek des Ziels, die `rustup target add` installiert. Grundlagen dazu in Modul 1.5."
+    }
+  ],
+  "praxis": "Eine gute Rust-Pipeline ist gestaffelt: Bei jedem Pull Request laufen fmt, clippy, test und ein Cross-Build für jedes Ziel. MSRV-Check und Doku laufen parallel. Teures wie Miri, Coverage und lange Hardware-Tests laufen nächtlich oder nur auf `main`. Wenn eine Pipeline länger als zehn Minuten braucht, sieh dir zuerst den Cache an, dann `cargo build --timings`.",
+  "labor": {
+    "titel": "MSRV-Versprechen prüfen",
+    "anleitung": "Setze in einem Test-Crate `edition = \"2021\"` und `rust-version = \"1.80\"`. Benutze dann `Option::is_none_or` und lass Clippy laufen. Setze danach `rust-version` auf eine Zukunftsversion.",
+    "befehle": [
+      "cargo clippy",
+      "sed -i 's/rust-version = .*/rust-version = \"1.99\"/' Cargo.toml && cargo check"
+    ],
+    "beobachtung": "Clippy meldet `incompatible_msrv`. Mit einer zu neuen `rust-version` bricht Cargo sofort mit „rustc … is not supported by the following package“ ab, noch bevor irgendetwas kompiliert wird."
+  },
+  "begriffe": [
+    {
+      "begriff": "MSRV",
+      "englisch": "minimum supported Rust version",
+      "erklaerung": "Älteste Compilerversion, mit der ein Crate laut `rust-version` bauen soll."
+    },
+    {
+      "begriff": "Build-Matrix",
+      "englisch": "build matrix",
+      "erklaerung": "Automatisch erzeugte Kombinationen von Jobs, z. B. jedes Betriebssystem mit jeder Toolchain."
+    },
+    {
+      "begriff": "Cross-Build",
+      "englisch": "cross compilation build",
+      "erklaerung": "Bauen für ein anderes Ziel-Triple als das des Build-Rechners, z. B. für einen Cortex-M."
+    },
+    {
+      "begriff": "Compiler-Cache",
+      "englisch": "compiler cache",
+      "erklaerung": "Werkzeug wie `sccache`, das Kompilationsergebnisse anhand ihrer Eingaben speichert und wiederverwendet."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: rust-version",
+      "url": "https://doc.rust-lang.org/cargo/reference/rust-version.html"
+    },
+    {
+      "titel": "The Cargo Book: Continuous Integration",
+      "url": "https://doc.rust-lang.org/cargo/guide/continuous-integration.html"
+    }
+  ]
+}

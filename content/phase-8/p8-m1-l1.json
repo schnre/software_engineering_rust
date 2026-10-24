@@ -1,0 +1,194 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m1-l1",
+  "phase": 8,
+  "modul": "8.1 Continuous Integration und Deployment",
+  "titel": "Continuous Integration für Rust",
+  "lernziele": [
+    "CI als Arbeitsweise erklären, nicht nur als Werkzeug",
+    "Die vier Standardprüfungen einer Rust-CI nennen und begründen",
+    "Erklären, warum zwei grüne Pull Requests zusammen einen roten Build ergeben können"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Team arbeitet je drei Wochen auf eigenen Feature-Branches. Das Zusammenführen dauert danach jedes Mal mehrere Tage. Welche Beschreibung trifft **Continuous Integration**?",
+      "optionen": [
+        "Alle integrieren kleine Änderungen mindestens täglich in den Hauptzweig, und jede Integration wird automatisch gebaut und geprüft",
+        "Ein Build-Server führt jede Nacht `cargo build` auf allen Feature-Branches aus",
+        "Am Ende jedes Sprints werden alle Branches zusammengeführt und mit `cargo test` geprüft"
+      ],
+      "korrekt": 0,
+      "erklaerung": "CI ist zuerst eine **Arbeitsweise**: oft und in kleinen Schritten integrieren, damit Konflikte klein bleiben und sofort auffallen. Der CI-Server ist nur das Werkzeug, das jede Integration prüft. Wer einen Server hat, aber wochenlang getrennt arbeitet, macht kein CI.",
+      "begruendungen": [
+        "Richtig.",
+        "Damit baut man Branches, integriert sie aber nicht.",
+        "Genau dieses Muster führt zu tagelangen Zusammenführungen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Idee und die typische Rust-CI",
+      "text": "Je länger Code getrennt entwickelt wird, desto teurer wird das Zusammenführen. **Continuous Integration** (CI) dreht das um: kleine Commits, mindestens täglich in den Hauptzweig (*trunk*, *mainline*), jede Änderung wird automatisch geprüft, und ein roter Build hat Vorrang vor neuer Arbeit.\n\nFast jedes Rust-Projekt prüft dieselben vier Dinge. Weil Cargo, rustfmt und Clippy zur Standard-Toolchain gehören, braucht es dafür kein Build-System-Gebastel:",
+      "code": {
+        "sprache": "bash",
+        "datei": "ci.sh",
+        "zeilen": [
+          "cargo fmt --all --check",
+          "cargo clippy --all-targets --all-features -- -D warnings",
+          "cargo test --all-features",
+          "RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Formatierung prüfen, nichts ändern. Exit-Code 1 bei Abweichung." },
+          { "zeile": 2, "text": "Lints; `-D warnings` macht jede Warnung zum Fehler." },
+          { "zeile": 3, "text": "Unit-, Integrations- und Doc-Tests." },
+          { "zeile": 4, "text": "Doku bauen; kaputte Links in `///`-Kommentaren werden zum Fehler." }
+        ]
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Ordne die Prüfungen so, dass die CI möglichst schnell scheitert, wenn etwas nicht stimmt (*fail fast*).",
+      "elemente": [
+        "`cargo fmt --check` (kein Kompilieren nötig)",
+        "`cargo clippy -- -D warnings` (Typprüfung, kein Codegen)",
+        "`cargo test` (kompilieren, linken, ausführen)",
+        "`cargo doc` (Doku für alle Items erzeugen)"
+      ],
+      "erklaerung": "rustfmt liest nur den Quelltext und ist in Sekunden fertig. Clippy durchläuft wie `cargo check` die Analyse von rustc, erzeugt aber keinen Maschinencode. `cargo test` muss alles bauen und ausführen. Die Doku kommt zuletzt, weil ein Doku-Fehler den Rest selten entwertet. In der Praxis laufen diese Schritte oft parallel; die Reihenfolge innerhalb eines Jobs folgt trotzdem dieser Logik."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Lokal hat `cargo build` ohne Meldung funktioniert. In der CI scheitert diese Stufe. Warum?",
+      "terminal": {
+        "befehl": "cargo clippy --all-targets -- -D warnings",
+        "ausgabe": [
+          "    Checking sensor v0.1.0 (/home/user/sensor)",
+          "error: the loop variable `i` is only used to index `werte`",
+          " --> src/lib.rs:4:14",
+          "  |",
+          "4 |     for i in 0..werte.len() {",
+          "  |              ^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: `-D clippy::needless-range-loop` implied by `-D warnings`",
+          "help: consider using an iterator",
+          "  |",
+          "4 -     for i in 0..werte.len() {",
+          "4 +     for <item> in &werte {",
+          "  |",
+          "error: could not compile `sensor` (lib) due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "Clippy meldet einen Stil-Lint, und `-D warnings` macht daraus einen Fehler",
+        "Der Code enthält einen Typfehler, den `cargo build` übersehen hat",
+        "Clippy ist in der CI eine andere Version und kennt `for`-Schleifen nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`needless_range_loop` ist ein Clippy-Lint der Gruppe *style*, standardmässig nur eine Warnung. Die Zeile `implied by -D warnings` zeigt, dass erst das Flag sie zum Fehler macht. So bleibt `main` warnungsfrei. Lokal sieht man dasselbe mit `cargo clippy`, nicht mit `cargo build`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Code ist korrekt und kompiliert. Es geht um idiomatischen Stil.",
+        "Die Meldung ist ein gewöhnlicher Lint, keine Versionsfrage."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Grün einzeln, rot zusammen",
+      "text": "Pull Request A benennt das Feld `timeout_ms` in `zeitlimit_ms` um. Pull Request B, gleichzeitig entstanden, liest `timeout_ms` an einer neuen Stelle. Beide werden gegen den alten Stand von `main` geprüft: beide grün. Nach dem Mergen beider ist `main` rot.\n\nAbhilfe: Die CI prüft das **Ergebnis des Zusammenführens**, nicht nur den Branch. Eine **Merge Queue** führt Pull Requests nacheinander zusammen und prüft jede Kombination, bevor sie auf `main` landet."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Beide Pull Requests waren grün. Direkt nach dem Mergen des zweiten scheitert der Build auf `main`. Was ist passiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling konflikt v0.1.0 (/home/user/konflikt)",
+          "error[E0609]: no field `timeout_ms` on type `Konfig`",
+          " --> src/main.rs:7:20",
+          "  |",
+          "7 |     let t = konfig.timeout_ms;",
+          "  |                    ^^^^^^^^^^ unknown field",
+          "  |",
+          "  = note: available field is: `zeitlimit_ms`",
+          "",
+          "For more information about this error, try `rustc --explain E0609`."
+        ]
+      },
+      "optionen": [
+        "Ein PR hat das Feld umbenannt, der andere nutzt den alten Namen neu. Jeder war für sich korrekt, zusammen nicht",
+        "Der CI-Server hat eine veraltete rustc-Version",
+        "Jemand hat ungeprüften Code direkt auf `main` gepusht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **semantischer Konflikt**: Git sieht keinen Textkonflikt, weil die Änderungen in verschiedenen Zeilen liegen. Erst rustc bemerkt ihn. Rusts strenges Typsystem ist hier ein Vorteil: Viele solche Konflikte werden zum Compilerfehler statt zum Laufzeitfehler. Kurze Branches machen sie selten, eine Merge Queue verhindert sie.",
+      "begruendungen": [
+        "Richtig.",
+        "E0609 ist ein gewöhnlicher Typfehler, die Version spielt keine Rolle.",
+        "Beide PRs wurden geprüft, nur nicht in Kombination."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Der Build auf `main` ist rot. Wer behebt ihn, und wann?",
+      "optionen": [
+        "Wer ihn verursacht hat, sofort, notfalls durch Zurücknehmen der Änderung mit `git revert`",
+        "Das QA-Team am Ende der Woche",
+        "Niemand gezielt, der nächste grüne Pull Request löst das Problem"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Solange `main` rot ist, kann niemand sicher integrieren, und neue Fehler verstecken sich hinter dem alten. „Rot hat Vorrang“ ist eine Team-Vereinbarung. Ein schneller `revert` ist keine Niederlage, sondern gute Praxis: erst wieder grün, dann in Ruhe reparieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Woche mit rotem Hauptzweig blockiert das ganze Team.",
+        "Ein Build wird nicht von selbst grün, und jeder neue PR baut auf dem kaputten Stand auf."
+      ]
+    }
+  ],
+  "praxis": "Wenn du in ein Team kommst, schau dir drei Zahlen an: Wie lange leben Branches? Wie lange dauert die Pipeline? Wie oft ist `main` rot, und wie schnell wird es wieder grün? Bei Rust-Projekten ist eine CI mit `fmt`, `clippy -D warnings`, `test` und `doc` der Mindeststandard. Fehlt sie, ist das oft der Schritt mit dem grössten Nutzen pro Stunde Aufwand.",
+  "labor": {
+    "titel": "Die Rust-CI lokal ausführen",
+    "anleitung": "Lege ein Bibliotheks-Crate an, schreibe eine Schleife über Indizes und eine schlecht formatierte Funktion. Führe dann die vier CI-Befehle aus und beobachte Ausgabe und Exit-Code.",
+    "befehle": [
+      "cargo new --lib sensor && cd sensor",
+      "cargo fmt --all --check; echo \"Exit: $?\"",
+      "cargo clippy --all-targets -- -D warnings; echo \"Exit: $?\"",
+      "cargo test && RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps"
+    ],
+    "beobachtung": "`cargo fmt --check` zeigt einen Diff und endet mit Exit-Code 1, Clippy mit 101. Genau diese Exit-Codes ungleich 0 lassen einen CI-Schritt scheitern."
+  },
+  "begriffe": [
+    {
+      "begriff": "Continuous Integration",
+      "englisch": "continuous integration, CI",
+      "erklaerung": "Arbeitsweise, bei der alle häufig in den Hauptzweig integrieren und jede Integration automatisch geprüft wird."
+    },
+    {
+      "begriff": "Merge Queue",
+      "englisch": "merge queue",
+      "erklaerung": "Warteschlange, die Pull Requests nacheinander zusammenführt und jede Kombination vor dem Mergen prüft."
+    },
+    {
+      "begriff": "Semantischer Konflikt",
+      "englisch": "semantic conflict",
+      "erklaerung": "Zwei Änderungen lassen sich textuell konfliktfrei zusammenführen, passen inhaltlich aber nicht zusammen."
+    },
+    {
+      "begriff": "Lint",
+      "englisch": "lint",
+      "erklaerung": "Statische Prüfung auf verdächtigen oder unidiomatischen Code, in Rust durch rustc selbst und durch Clippy."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Martin Fowler: Continuous Integration",
+      "url": "https://martinfowler.com/articles/continuousIntegration.html"
+    },
+    {
+      "titel": "The Cargo Book: Continuous Integration",
+      "url": "https://doc.rust-lang.org/cargo/guide/continuous-integration.html"
+    }
+  ]
+}

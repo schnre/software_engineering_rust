@@ -1,0 +1,240 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m1-l3",
+  "phase": 4,
+  "modul": "4.1 Unit-Tests mit cargo test",
+  "titel": "Fixtures, Testdaten und Snapshots",
+  "lernziele": [
+    "Setup über Hilfsfunktionen und Teardown über `Drop` umsetzen",
+    "Parametrisierte Tests mit `rstest` und Snapshot-Tests mit `insta` schreiben",
+    "Testdaten mit `include_str!` einbinden und langsame Tests mit `#[ignore]` markieren"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "teardown",
+      "frage": "Ein Test legt ein temporäres Verzeichnis an. Es soll auch dann gelöscht werden, wenn der Test mit einem Panic fehlschlägt. Wie löst man das in Rust am saubersten?",
+      "optionen": [
+        "Ein Hilfstyp, der das Verzeichnis in seiner `Drop`-Implementierung löscht",
+        "Am Ende jedes Tests `std::fs::remove_dir_all` aufrufen",
+        "Eine Funktion mit `#[teardown]` markieren, die `cargo test` nach jedem Test aufruft",
+        "Den Test in `std::process::exit(0)` enden lassen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust hat keine eingebauten Setup- und Teardown-Hooks. Stattdessen nutzt man **RAII** (Ressourcen an die Lebensdauer eines Werts binden): Eine Setup-Funktion gibt einen Wert zurück, dessen `Drop` aufräumt. Bei einem Panic wird der Stack abgewickelt (unwinding), und `Drop` läuft trotzdem. Die Crate `tempfile` liefert genau so einen Typ: `tempfile::tempdir()` gibt ein `TempDir` zurück, das sich beim Drop selbst löscht.",
+      "begruendungen": [
+        "Richtig. `Drop` läuft auch beim Abwickeln nach einem Panic.",
+        "Diese Zeile wird nach einem fehlgeschlagenen `assert!` nie erreicht.",
+        "Ein solches Attribut gibt es im eingebauten Test-Framework nicht.",
+        "Das beendet das ganze Test-Binary samt aller anderen Tests."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Setup als Funktion, Teardown als Drop",
+      "text": "Eine **Fixture** ist der vorbereitete Ausgangszustand eines Tests. In Rust ist das einfach eine Funktion, die ihn baut. Braucht er Aufräumarbeit, kümmert sich `Drop` darum.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct TestDb { pfad: std::path::PathBuf }",
+          "",
+          "impl Drop for TestDb {",
+          "    fn drop(&mut self) {",
+          "        let _ = std::fs::remove_file(&self.pfad);",
+          "    }",
+          "}",
+          "",
+          "fn neue_db(name: &str) -> TestDb {",
+          "    let pfad = std::env::temp_dir().join(name);",
+          "    std::fs::write(&pfad, b\"\").unwrap();",
+          "    TestDb { pfad }",
+          "}",
+          "",
+          "#[test]",
+          "fn schreibt_eintrag() {",
+          "    let db = neue_db(\"schreibt_eintrag.db\");",
+          "    // ... Test mit db.pfad ...",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "Fehler beim Aufräumen ignorieren: Ein Panic in `drop` während eines Panics bricht den Prozess ab." },
+          { "zeile": 17, "text": "Eindeutiger Name pro Test, weil Tests parallel laufen." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "parallel-fixture",
+      "frage": "Zwei Tests rufen beide `neue_db(\"test.db\")` mit demselben Namen auf. Was ist das Risiko?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[test]",
+          "fn a() { let db = neue_db(\"test.db\"); /* schreibt */ }",
+          "",
+          "#[test]",
+          "fn b() { let db = neue_db(\"test.db\"); /* liest */ }"
+        ]
+      },
+      "optionen": [
+        "Die Tests laufen parallel und können sich gegenseitig die Datei überschreiben oder löschen: sporadisch rote Tests",
+        "Compilerfehler, weil `db` zweimal definiert ist",
+        "Kein Risiko, `cargo test` führt Tests einer Datei immer nacheinander aus"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Standardmässig führt das Test-Binary Tests in mehreren Threads gleichzeitig aus. Gemeinsame Dateien, Ports oder Umgebungsvariablen führen dann zu **wackeligen Tests** (flaky tests), die mal grün, mal rot sind. Abhilfe: eindeutige Namen (oder `tempfile`), sonst `--test-threads=1` oder ein gemeinsamer `Mutex`, oder cargo-nextest, das jeden Test in einem eigenen Prozess startet.",
+      "begruendungen": [
+        "Richtig.",
+        "Jedes `db` lebt in einer eigenen Funktion.",
+        "Das stimmt nur mit `--test-threads=1`."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "rstest",
+      "frage": "Ergänze den parametrisierten Test mit der Crate `rstest`: Jeder Fall soll als eigener Test erscheinen.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use rstest::rstest;",
+          "",
+          "#[{{?}}]",
+          "#[case(0, 0)]",
+          "#[case(3, 9)]",
+          "#[case(-4, 16)]",
+          "fn quadrat_faelle(#[{{?}}] x: i32, #[case] erwartet: i32) {",
+          "    assert_eq!(quadrat(x), erwartet);",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["rstest"] },
+        { "loesungen": ["case"] }
+      ],
+      "auswahl": ["rstest", "case", "test", "fixture", "values"],
+      "erklaerung": "`rstest` ist eine Entwicklungsabhängigkeit (`cargo add --dev rstest`). Statt `#[test]` steht `#[rstest]`, das für jedes `#[case]` eine eigene Testfunktion erzeugt. In der Ausgabe erscheinen sie als `quadrat_faelle::case_1` bis `case_3`. Ein fehlschlagender Fall verdeckt so die anderen nicht. Mit `#[fixture]` lassen sich ausserdem Setup-Funktionen als Parameter einspeisen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "insta-neu",
+      "frage": "Ein neuer Test mit `insta::assert_debug_snapshot!` läuft zum ersten Mal. Was ist zu tun?",
+      "terminal": {
+        "befehl": "cargo test",
+        "ausgabe": [
+          "test tests::mit_hardware ... ignored, braucht Hardware",
+          "test tests::quadrat_faelle::case_1 ... ok",
+          "stored new snapshot /home/user/projekt/src/snapshots/fixt__tests__snapshot.snap.new",
+          "test tests::snapshot ... FAILED",
+          "",
+          "Snapshot file: src/snapshots/fixt__tests__snapshot.snap",
+          "Snapshot: snapshot",
+          "Source: src/lib.rs:36",
+          "Expression: parse(\"port=1\\nname=x\")",
+          "+new results",
+          "          1 │+Konfig {",
+          "          2 │+    port: 1,",
+          "          3 │+    name: \"x\",",
+          "          4 │+}",
+          "To update snapshots run `cargo insta review` or set `INSTA_UPDATE=always`"
+        ]
+      },
+      "optionen": [
+        "Den neuen Snapshot mit `cargo insta review` prüfen und annehmen, dann die `.snap`-Datei einchecken",
+        "Den Code von `parse` korrigieren, er liefert falsche Werte",
+        "Nichts, beim zweiten Lauf ist der Test von selbst grün"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Snapshot-Test** vergleicht eine Ausgabe mit einer gespeicherten Referenz. Beim ersten Lauf gibt es noch keine. insta legt eine `.snap.new`-Datei an und lässt den Test scheitern. Du prüfst den Inhalt mit `cargo insta review` (Werkzeug `cargo-insta`) und nimmst ihn an. Ab dann zeigt jede Abweichung ein Diff. Das eignet sich für grosse Strukturen, Fehlermeldungen oder generierten Code, die man von Hand kaum mit `assert_eq!` beschreiben will.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Werte passen zur Eingabe. Es fehlt nur die Referenz.",
+        "Ohne angenommene Referenz bleibt der Test rot."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "hilfsmittel",
+      "frage": "Welches Werkzeug passt zu welchem Zweck?",
+      "paare": [
+        { "links": "`include_str!(\"../tests/daten/konfig.txt\")`", "rechts": "Testdatei zur Compile-Zeit als `&'static str` einbetten" },
+        { "links": "`#[ignore = \"braucht Hardware\"]`", "rechts": "Test standardmässig überspringen, mit Begründung" },
+        { "links": "`cargo test -- --ignored`", "rechts": "Nur die übersprungenen Tests ausführen" },
+        { "links": "`env!(\"CARGO_MANIFEST_DIR\")`", "rechts": "Pfad zum Paketverzeichnis für Dateien, die zur Laufzeit gelesen werden" },
+        { "links": "`tempfile::tempdir()`", "rechts": "Eindeutiges temporäres Verzeichnis, das sich beim Drop löscht" }
+      ],
+      "erklaerung": "`include_str!` löst den Pfad relativ zur Quelldatei auf und bricht den Build ab, wenn die Datei fehlt. Für grosse oder viele Dateien liest man zur Laufzeit und baut den Pfad mit `CARGO_MANIFEST_DIR`, weil das Arbeitsverzeichnis beim Testlauf nicht garantiert ist. `cargo test -- --include-ignored` führt alle Tests aus, auch die ignorierten."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "ignore-falsch",
+      "frage": "Der Test soll in der CI nicht laufen, weil er ein angeschlossenes Board braucht. Trotzdem ist die Pipeline rot. Welche Zeile ist falsch?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[cfg(test)]",
+          "mod hw_tests {",
+          "    use super::*;",
+          "",
+          "    #[test]",
+          "    #[should_panic]",
+          "    fn liest_sensor_vom_board() {",
+          "        let wert = board::verbinde().unwrap().lese();",
+          "        assert!(wert > 0);",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 6,
+      "erklaerung": "Hier wurde `#[should_panic]` als Ersatz für „nicht ausführen“ missbraucht. In der CI panikt `verbinde().unwrap()`, der Test ist grün. Auf dem Entwicklerrechner mit Board läuft er durch und wird damit **rot**, weil kein Panic kam. Richtig ist `#[ignore = \"braucht angeschlossenes Board\"]`. Dann läuft der Test nur mit `cargo test -- --ignored`."
+    }
+  ],
+  "praxis": "Für Firmware-Projekte ist `#[ignore]` der übliche Weg, Hardware-Tests im selben Code zu halten: Die CI läuft ohne, am Prüfplatz mit `--ignored`. Testdaten wie aufgezeichnete Sensorframes legst du unter `tests/daten/` ab und bindest sie mit `include_bytes!` ein. Snapshot-Tests mit insta lohnen sich für Parser und Protokoll-Encoder. Im Review gilt: Ein geänderter `.snap` ist eine Verhaltensänderung und gehört bewusst angeschaut.",
+  "labor": {
+    "titel": "rstest, insta und ignorierte Tests",
+    "anleitung": "Füge einem Bibliotheks-Crate `rstest` und `insta` als Entwicklungsabhängigkeiten hinzu, schreibe einen parametrisierten Test, einen Snapshot-Test und einen Test mit `#[ignore]`.",
+    "befehle": [
+      "cargo add --dev rstest insta",
+      "cargo test",
+      "cargo install cargo-insta && cargo insta review",
+      "cargo test -- --ignored"
+    ],
+    "beobachtung": "Die `rstest`-Fälle erscheinen als `case_1`, `case_2` usw. Nach dem Annehmen liegt unter `src/snapshots/` eine lesbare `.snap`-Datei, die du einchecken solltest."
+  },
+  "begriffe": [
+    {
+      "begriff": "Fixture",
+      "englisch": "fixture",
+      "erklaerung": "Vorbereiteter Ausgangszustand für einen Test, in Rust meist eine Funktion, die ihn baut."
+    },
+    {
+      "begriff": "RAII",
+      "englisch": "resource acquisition is initialization",
+      "erklaerung": "Ressourcen an die Lebensdauer eines Werts binden. In Rust räumt `Drop` beim Verlassen des Gültigkeitsbereichs auf."
+    },
+    {
+      "begriff": "Snapshot-Test",
+      "englisch": "snapshot test",
+      "erklaerung": "Test, der eine Ausgabe mit einer gespeicherten, geprüften Referenz vergleicht und Abweichungen als Diff zeigt."
+    },
+    {
+      "begriff": "Wackeliger Test",
+      "englisch": "flaky test",
+      "erklaerung": "Test, der ohne Codeänderung mal besteht und mal fehlschlägt, oft wegen gemeinsamem Zustand oder Zeitabhängigkeit."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "rstest auf docs.rs",
+      "url": "https://docs.rs/rstest"
+    },
+    {
+      "titel": "insta auf docs.rs",
+      "url": "https://docs.rs/insta"
+    },
+    {
+      "titel": "The Rust Book: Controlling How Tests Are Run",
+      "url": "https://doc.rust-lang.org/book/ch11-02-running-tests.html"
+    }
+  ]
+}

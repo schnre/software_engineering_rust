@@ -1,0 +1,218 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m3-l1",
+  "phase": 9,
+  "modul": "9.3 Abhängigkeiten managen",
+  "titel": "Dependency Injection in Rust",
+  "lernziele": [
+    "Abhängigkeiten über den Konstruktor statt über globale Zustände übergeben",
+    "Zwischen Generics, `dyn Trait` und Funktionszeigern als Injektionsmittel wählen",
+    "Code mit injizierten Abhängigkeiten ohne Hardware testen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Entpreller für Tasten ruft in seiner Methode direkt `hal::systick::jetzt_ms()` auf. Warum ist er schwer zu testen?",
+      "optionen": [
+        "Er holt sich seine Abhängigkeit (die Uhr) selbst. Im Test kann man die Zeit weder kontrollieren noch ohne Hardware laufen lassen",
+        "Funktionen aus anderen Modulen dürfen in Rust nicht in Methoden aufgerufen werden",
+        "`jetzt_ms` ist zu langsam für Unit-Tests",
+        "Gar nicht, man kann im Test einfach `cargo test --target thumbv7em-none-eabihf` verwenden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Entpreller ist fest an eine konkrete Uhr gekoppelt. Für einen Test müsste man auf echte Millisekunden warten und Hardware haben. **Dependency Injection** (DI) dreht das um: Die Uhr wird von aussen hineingegeben, im Test eine Fake-Uhr, deren Zeit der Test bestimmt.",
+      "begruendungen": [
+        "Richtig. Die Abhängigkeit ist versteckt und fest verdrahtet.",
+        "Solche Aufrufe sind erlaubt. Das Problem ist die feste Kopplung, nicht die Syntax.",
+        "Das Tempo ist nicht das Problem, sondern dass die Zeit im Test nicht steuerbar ist.",
+        "Tests für ein Embedded-Target laufen nicht ohne Weiteres auf dem Host, und die Zeit bliebe trotzdem unkontrollierbar."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Konstruktor-Injection",
+      "text": "Die einfachste Form: Der Konstruktor nimmt die Abhängigkeit entgegen, der Typ speichert sie. Die Abhängigkeit wird als Trait beschrieben, das in derselben Schicht liegt wie der Entpreller.\n\nIn Rust passt das besonders gut zu Ownership: Der Entpreller **besitzt** seine Uhr, es gibt keine versteckten Zeiger und keine Frage, wer was aufräumt. Das ist dasselbe Muster wie bei `embedded-hal`-Treibern, die ihren Bus als Wert übernehmen.",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub trait Uhr {",
+          "    fn jetzt_ms(&self) -> u64;",
+          "}",
+          "",
+          "pub struct Entpreller<U: Uhr> {",
+          "    uhr: U,",
+          "    letzte: u64,",
+          "}",
+          "",
+          "impl<U: Uhr> Entpreller<U> {",
+          "    pub fn neu(uhr: U) -> Self {",
+          "        Self { uhr, letzte: 0 }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "Der Vertrag: Das ist alles, was der Entpreller von einer Uhr braucht." },
+          { "zeile": 5, "text": "Generischer Parameter: Der Typ der Uhr wird zur Compilezeit festgelegt." },
+          { "zeile": 11, "text": "Konstruktor-Injection: Wer einen Entpreller baut, muss eine Uhr mitgeben." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Test mit einer Fake-Uhr. Die Zeit soll im Test verstellbar sein, obwohl `jetzt_ms` nur `&self` bekommt.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct FakeUhr(Cell<u64>);",
+          "impl Uhr for &FakeUhr {",
+          "    fn jetzt_ms(&self) -> u64 { self.0.{{?}}() }",
+          "}",
+          "",
+          "#[test]",
+          "fn prellen_wird_ignoriert() {",
+          "    let uhr = FakeUhr(Cell::new(100));",
+          "    let mut e = Entpreller::{{?}}(&uhr);",
+          "    assert!(e.taste_gedrueckt());",
+          "    uhr.0.{{?}}(120);",
+          "    assert!(!e.taste_gedrueckt());",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["get"] },
+        { "loesungen": ["neu"] },
+        { "loesungen": ["set"] }
+      ],
+      "auswahl": ["get", "neu", "set", "new", "borrow_mut", "lock"],
+      "erklaerung": "`Cell` erlaubt Veränderung hinter einer geteilten Referenz (interior mutability). Weil das Trait für `&FakeUhr` implementiert ist, behält der Test die Uhr und kann die Zeit zwischen zwei Aufrufen vorstellen. Der Test läuft in Mikrosekunden mit `cargo test` auf dem Host.",
+      "hinweis": "Der Konstruktor heisst hier wie im Code oben."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Drei Wege, eine Abhängigkeit zu übergeben",
+      "text": "Rust bietet mehrere Mittel. Die Wahl ist eine Abwägung zwischen Laufzeitkosten, Flexibilität und Lesbarkeit.",
+      "tabelle": {
+        "kopf": ["Mittel", "Auflösung", "Stärken", "Schwächen"],
+        "zeilen": [
+          ["Generics `<U: Uhr>`", "Compilezeit (Monomorphisierung)", "kein Overhead, inlinebar, ideal für `no_std`", "Typparameter wandert durch alle Nutzer, mehr Code pro Variante"],
+          ["`Box<dyn Uhr>` / `&dyn Uhr`", "Laufzeit (vtable)", "Wechsel zur Laufzeit, gemischte Typen in einer Liste", "indirekter Aufruf, `Box` braucht Heap, Trait muss dyn-kompatibel sein"],
+          ["`fn() -> u64`", "Laufzeit (Zeiger)", "sehr einfach, kein Trait nötig", "kein eigener Zustand, nur für einzelne Funktionen"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Logger soll mehrere verschiedene Sensoren in einer Liste halten. Was meldet der Compiler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Sensor {",
+          "    fn lese(&self) -> u16;",
+          "}",
+          "struct Temp;",
+          "struct Druck;",
+          "impl Sensor for Temp { fn lese(&self) -> u16 { 21 } }",
+          "impl Sensor for Druck { fn lese(&self) -> u16 { 1013 } }",
+          "",
+          "struct Logger<S: Sensor> {",
+          "    sensoren: Vec<S>,",
+          "}",
+          "",
+          "fn main() {",
+          "    let log = Logger { sensoren: vec![Temp, Druck] };",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler",
+        "E0308 in Zeile 14: erwartet `Temp`, gefunden `Druck`",
+        "E0038: `Sensor` ist nicht dyn-kompatibel",
+        "E0277: `Druck` implementiert `Sensor` nicht"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Ein generischer Parameter steht für **genau einen** Typ. `Vec<S>` kann nicht gleichzeitig `Temp` und `Druck` enthalten. Für eine gemischte Liste braucht es `Vec<Box<dyn Sensor>>` oder, ohne Heap, ein `enum` über die bekannten Sensoren.",
+      "begruendungen": [
+        "rustc legt `S` beim ersten Element auf `Temp` fest.",
+        "Richtig. Hier ist dynamischer Dispatch das passende Mittel.",
+        "`Sensor` ist dyn-kompatibel, `lese` gibt kein `Self` zurück.",
+        "Beide Typen implementieren `Sensor`, das Problem ist die Festlegung auf einen Typ."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Statt DI wollte jemand einen globalen Zähler als „Singleton“ verwenden. Was sagt der Compiler in Edition 2024?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static mut ZAEHLER: Vec<u32> = Vec::new();",
+          "",
+          "pub fn zaehle() {",
+          "    unsafe { ZAEHLER.push(1) };",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: creating a mutable reference to mutable static",
+          "  --> src/lib.rs:4:14",
+          "   |",
+          " 4 |     unsafe { ZAEHLER.push(1) };",
+          "   |              ^^^^^^^^^^^^^^^ mutable reference to mutable static",
+          "   |",
+          "   = note: mutable references to mutable statics are dangerous; it's undefined behavior if any other pointer to the static is used or if any other reference is created for the static while the mutable reference lives",
+          "   = note: `#[deny(static_mut_refs)]` (part of `#[deny(rust_2024_compatibility)]`) on by default"
+        ]
+      },
+      "optionen": [
+        "Referenzen auf `static mut` sind in Edition 2024 standardmässig ein Fehler, weil sie leicht zu Undefined Behavior führen. Besser den Zustand als Wert besitzen und übergeben",
+        "Nur eine Warnung, der Code läuft trotzdem",
+        "Der Fehler verschwindet mit einem zweiten `unsafe`-Block",
+        "`Vec` darf grundsätzlich nicht in einem `static` liegen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein globales Singleton ist versteckte Kopplung: Jede Funktion kann es ändern, Tests beeinflussen sich gegenseitig, und Nebenläufigkeit wird gefährlich. Rust macht das absichtlich unbequem. Wo wirklich ein globaler Zustand nötig ist (etwa für einen Interrupt-Handler), gibt es sichere Bausteine wie `Mutex` aus `critical-section`, `static` mit Atomics oder die Ressourcenverwaltung von RTIC und Embassy (Phase 6).",
+      "begruendungen": [
+        "Richtig.",
+        "Die Lint steht auf `deny`, der Build bricht ab.",
+        "Mehr `unsafe` ändert nichts an der Lint.",
+        "`Vec::new()` ist `const` und in einem `static` erlaubt. Der Fehler betrifft die veränderliche Referenz."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Du baust eine fest verdrahtete Abhängigkeit auf Injection um. In welcher Reihenfolge gehst du vor?",
+      "elemente": [
+        "Die benötigten Operationen der Abhängigkeit als kleines Trait formulieren",
+        "Den Typ über das Trait generisch machen oder ein `dyn Trait` speichern",
+        "Die Abhängigkeit über den Konstruktor annehmen",
+        "In `main` die echte Implementierung erzeugen und hineingeben",
+        "Im Test eine Fake-Implementierung hineingeben"
+      ],
+      "erklaerung": "Der Ort, an dem alles zusammengesteckt wird, heisst **Composition Root**: in einer Firmware meist `main` oder der Init-Task von RTIC/Embassy. Nur dort werden konkrete Typen genannt. Der Rest des Codes kennt nur Traits."
+    }
+  ],
+  "praxis": "In Embedded-Rust ist Konstruktor-Injection allgegenwärtig: Jeder `embedded-hal`-Treiber nimmt seinen Bus und seine Pins als Werte, und die Anwendung steckt in `main` alles zusammen. Bevorzuge Generics, wenn der Typ zur Compilezeit feststeht und Speicher knapp ist, `dyn Trait`, wenn zur Laufzeit gewechselt wird. Und wenn du im Review ein `static mut` oder einen globalen „Manager“ siehst, frag: Kann das nicht einfach übergeben werden?",
+  "labor": {
+    "titel": "Einen Entpreller testbar machen",
+    "anleitung": "Schreibe den Entpreller aus dieser Lektion mit einem `Uhr`-Trait und einer Methode `taste_gedrueckt`, die Druckereignisse innerhalb von 50 ms verwirft. Teste ihn mit einer Fake-Uhr. Probiere dann eine zweite Variante mit `Box<dyn Uhr>`.",
+    "befehle": [
+      "cargo new --lib entpreller && cd entpreller",
+      "cargo test",
+      "cargo clippy --all-targets"
+    ],
+    "beobachtung": "Der Test läuft ohne Hardware und ohne Warten. Bei der generischen Variante erscheint der Typparameter überall, wo ein `Entpreller` gespeichert wird. Bei der `dyn`-Variante nicht, dafür braucht sie `alloc`."
+  },
+  "begriffe": [
+    { "begriff": "Dependency Injection", "englisch": "dependency injection", "erklaerung": "Ein Typ bekommt seine Abhängigkeiten von aussen übergeben, statt sie selbst zu erzeugen oder global zu holen." },
+    { "begriff": "Konstruktor-Injection", "englisch": "constructor injection", "erklaerung": "Abhängigkeiten werden beim Erzeugen übergeben und im Objekt gespeichert." },
+    { "begriff": "Composition Root", "englisch": "composition root", "erklaerung": "Die eine Stelle, an der konkrete Implementierungen erzeugt und zusammengesteckt werden, meist `main`." },
+    { "begriff": "Test-Doppelgänger", "englisch": "test double", "erklaerung": "Ersatzimplementierung einer Abhängigkeit für Tests, z. B. eine Fake-Uhr." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Using Trait Objects", "url": "https://doc.rust-lang.org/book/ch18-02-trait-objects.html" },
+    { "titel": "Edition Guide: Disallow references to static mut", "url": "https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html" }
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m2-l1",
+  "phase": 1,
+  "modul": "1.2 Der Linker",
+  "titel": "Symbole und Name Mangling",
+  "lernziele": [
+    "Ein Rust-Object-File mit `nm` lesen und die Symboltypen `T`, `t` und `U` deuten",
+    "Legacy- und v0-Mangling erkennen und mit `nm -C` oder `rustfilt` entschlüsseln",
+    "Mit `#[unsafe(no_mangle)]`, `#[unsafe(export_name)]` und `#[unsafe(link_section)]` Namen und Ort eines Symbols festlegen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Im LLVM IR heisst `fn quadrat` aus dem Crate `main` plötzlich `_RNvCs5y46Eezllls_4main7quadrat`. Warum verändert rustc den Namen?",
+      "optionen": [
+        "Damit gleichnamige Funktionen aus verschiedenen Crates, Modulen oder Generics-Instanzen eindeutige Symbole bekommen",
+        "Um den Code gegen Reverse Engineering zu verschleiern",
+        "Weil der Linker keine Namen mit weniger als 16 Zeichen akzeptiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Linker kennt nur eine flache Liste von Namen. Rust hat aber Crates, Module, `impl`-Blöcke und Generics. **Name Mangling** kodiert all das in einen eindeutigen Symbolnamen. Der Teil `Cs5y46Eezllls_` ist ein Hash des Crates. So können zwei Versionen desselben Crates im selben Programm landen, ohne zu kollidieren.",
+      "begruendungen": [
+        "Richtig. `4main7quadrat` heisst: Pfad `main::quadrat`, jeweils mit Länge vorangestellt.",
+        "Mit `nm -C` ist alles sofort lesbar. Verschleierung ist nicht das Ziel.",
+        "Eine solche Grenze gibt es nicht. `main` als Symbol funktioniert problemlos."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zwei Mangling-Schemata",
+      "text": "- **Legacy**: angelehnt an C++ (Itanium-ABI), etwa `_ZN4main7quadrat17h…E`. Am Ende steht ein Hash `h` plus 16 Hex-Ziffern. Generische Parameter fehlen im Namen.\n- **v0**: eigenes Rust-Schema, beginnt mit `_R`. Es kodiert generische Parameter vollständig, z. B. `geom::groesster::<f64>`.\n\nDie Toolchain auf dieser Maschine (1.97 stable) erzeugt v0, auch die mitgelieferte Standardbibliothek. In älteren Binaries findest du noch Legacy-Namen. `nm -C` (aktuelle binutils) und das Werkzeug `rustfilt` entschlüsseln beide.",
+      "tabelle": {
+        "kopf": [
+          "Schema",
+          "Beginnt mit",
+          "Generics im Namen"
+        ],
+        "zeilen": [
+          [
+            "Legacy",
+            "`_ZN`",
+            "nein, nur über den Hash unterscheidbar"
+          ],
+          [
+            "v0",
+            "`_R`",
+            "ja, lesbar entschlüsselbar"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das ist ein Auszug aus `nm -C main.o` für ein Programm mit `fn quadrat` und `println!`. Was bedeutet das `U` vor `std::io::stdio::_print`?",
+      "terminal": {
+        "befehl": "nm -C main.o",
+        "ausgabe": [
+          "0000000000000000 T std::rt::lang_start::<()>",
+          "0000000000000000 T main::main",
+          "0000000000000000 t main::quadrat",
+          "                 U std::rt::lang_start_internal",
+          "                 U core::panicking::panic_const::panic_const_mul_overflow",
+          "                 U std::io::stdio::_print",
+          "                 U <i32 as core::fmt::Display>::fmt",
+          "0000000000000000 T main"
+        ]
+      },
+      "optionen": [
+        "Das Symbol wird hier benutzt, aber nicht definiert. Der Linker muss es in der Standardbibliothek finden",
+        "Das Symbol ist unbenutzt und wird vom Linker entfernt",
+        "Das Symbol ist unsicher (`unsafe`) und braucht einen `unsafe`-Block"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`U` heisst *undefined*: ein offener Verweis. `T` ist definierter Code mit globaler Sichtbarkeit, `t` lokaler Code. `main::quadrat` ist `t`, weil es eine private Funktion des Binary-Crates ist. Das C-Symbol `main` ganz unten ist der Einstiegspunkt, den rustc erzeugt und der `std::rt::lang_start` aufruft.",
+      "begruendungen": [
+        "Richtig. `_print` steckt in `libstd`, die erst der Linker hinzufügt.",
+        "Unbenutzte Symbole erscheinen gar nicht als `U`. `U` bedeutet gerade, dass jemand es braucht.",
+        "`nm` weiss nichts von `unsafe`. Die Buchstaben beschreiben Ort und Sichtbarkeit."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Symbolnamen aus einem echten Rust-Object-File ihrer entschlüsselten Form zu.",
+      "paare": [
+        {
+          "links": "`_RNvCs5y46Eezllls_4main7quadrat`",
+          "rechts": "`main::quadrat`"
+        },
+        {
+          "links": "`_RNvNtNtCsgczF5crJ4sT_3std2io5stdio6__print`",
+          "rechts": "`std::io::stdio::_print`"
+        },
+        {
+          "links": "`_RINvNtCsgczF5crJ4sT_3std2rt10lang_startuECs5y46Eezllls_4main`",
+          "rechts": "`std::rt::lang_start::<()>`"
+        },
+        {
+          "links": "`main`",
+          "rechts": "C-Einstiegspunkt, nicht gemangelt"
+        }
+      ],
+      "erklaerung": "Bei v0 steht `N` für einen Pfadbestandteil, `C` für das Crate, Zahlen geben Längen an. `I…E` umschliesst generische Argumente, `u` steht für den Unit-Typ `()`. Am Ende von `lang_start` steht das Crate `main`: Die generische Instanz wurde dort erzeugt. Von Hand entschlüsseln musst du das nie: `nm -C`, `rustfilt` oder `c++filt` (neuere Versionen) erledigen das."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Welche Symbole zeigt `nm` für diese Bibliothek (übersetzt mit `-O` zu einem Object-File)?",
+      "code": {
+        "sprache": "rust",
+        "datei": "lib.rs",
+        "zeilen": [
+          "#[unsafe(export_name = \"firmware_version\")]",
+          "pub extern \"C\" fn version() -> u32 { 3 }",
+          "",
+          "#[unsafe(link_section = \".konfig\")]",
+          "#[unsafe(no_mangle)]",
+          "pub static KONFIG: [u8; 4] = [1, 2, 3, 4];"
+        ]
+      },
+      "optionen": [
+        "`firmware_version` (T) und `KONFIG` (R), beide ungemangelt",
+        "`version` (T) und `KONFIG` (D)",
+        "`_RNv…7version` (T) und `_RNv…6KONFIG` (R)"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`#[unsafe(no_mangle)]` übernimmt den Rust-Namen unverändert, `#[unsafe(export_name)]` setzt einen beliebigen Namen. `#[unsafe(link_section)]` legt fest, in welcher Sektion das Symbol landet, hier `.konfig`. Das brauchst du später für Vektortabellen und Linker-Skripte (Modul 1.4). Echte Ausgabe: `0000000000000000 R KONFIG` und `0000000000000000 T firmware_version`.",
+      "begruendungen": [
+        "Richtig. Beide Namen sind exakt so im Object-File, wie die Attribute sie vorgeben.",
+        "`export_name` ersetzt den Namen `version` vollständig. Und ein unveränderliches `static` landet in einer Nur-Lese-Sektion.",
+        "Gemangelt würde nur ohne die beiden Attribute. Genau das verhindern sie."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Warum muss man seit Edition 2024 `#[unsafe(no_mangle)]` statt `#[no_mangle]` schreiben?",
+      "optionen": [
+        "Ein ungemangelter Name kann mit einem anderen Symbol im Programm kollidieren, und der Compiler kann das nicht immer verhindern",
+        "Weil Funktionen mit `no_mangle` automatisch `unsafe fn` werden",
+        "Weil `no_mangle` die Speichersicherheit innerhalb der Funktion abschaltet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Exportierst du z. B. eine Funktion namens `malloc` oder `memcpy`, ersetzt sie still die Version der C-Bibliothek. Das kann zu undefiniertem Verhalten führen. Deshalb verlangt Edition 2024 die ausdrückliche Markierung. Ohne sie meldet rustc `error: unsafe attribute used without unsafe` und schlägt `#[unsafe(no_mangle)]` vor.",
+      "begruendungen": [
+        "Richtig. Das Risiko liegt beim Linken, nicht im Funktionskörper.",
+        "Die Funktion bleibt eine normale, sicher aufrufbare Funktion.",
+        "Im Funktionskörper gelten weiterhin alle Regeln von safe Rust."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze: Exportiere die Funktion unter ihrem Rust-Namen mit C-Aufrufkonvention, damit C-Code sie aufrufen kann.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[unsafe({{?}})]",
+          "pub {{?}} fn rust_addiere(a: i32, b: i32) -> i32 {",
+          "    a + b",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "no_mangle"
+          ]
+        },
+        {
+          "loesungen": [
+            "extern \"C\""
+          ]
+        }
+      ],
+      "auswahl": [
+        "no_mangle",
+        "extern \"C\"",
+        "inline",
+        "extern \"Rust\""
+      ],
+      "erklaerung": "Es braucht beides: `no_mangle` für einen vorhersagbaren Namen und `extern \"C\"` für die Aufrufkonvention des C-ABI (welche Register, wer räumt den Stack auf). `extern \"Rust\"` ist die Standard-Konvention und nicht stabil festgelegt. Mehr dazu in Modul 1.3."
+    }
+  ],
+  "praxis": "Backtraces, Profiler (`perf`) und Crash-Dumps zeigen Symbolnamen. Moderne Werkzeuge entschlüsseln Rust-Namen automatisch. Siehst du rohe `_R…` oder `_ZN…17h…E`-Namen in einem Log, hilft `rustfilt`: `cat crash.log | rustfilt`. Und im Embedded-Bereich wirst du `#[unsafe(no_mangle)]` und `#[unsafe(link_section)]` regelmässig treffen, etwa bei Interrupt-Handlern und Vektortabellen.",
+  "labor": {
+    "titel": "Symbole einer Rust-Datei lesen",
+    "anleitung": "Übersetze eine kleine `main.rs` mit einer privaten und einer `#[unsafe(no_mangle)]`-Funktion zu einem Object-File und vergleiche rohe und entschlüsselte Symbole.",
+    "befehle": [
+      "rustc --emit=obj main.rs",
+      "nm main.o",
+      "nm -C main.o",
+      "cargo install rustfilt && nm main.o | rustfilt",
+      "nm -C main.o | grep ' U '"
+    ],
+    "beobachtung": "Rohe Namen beginnen mit `_R` (v0). Die `no_mangle`-Funktion erscheint unverändert mit `T`. Die offenen `U`-Symbole verweisen fast alle auf `std` und `core`. Das sind Funktionen, die der Linker aus der vorkompilierten Standardbibliothek holt."
+  },
+  "begriffe": [
+    {
+      "begriff": "Name Mangling",
+      "englisch": "name mangling",
+      "erklaerung": "Kodierung von Pfad, Crate und Generics in einen eindeutigen, für den Linker flachen Symbolnamen."
+    },
+    {
+      "begriff": "v0-Mangling",
+      "englisch": "v0 symbol mangling",
+      "erklaerung": "Rust-eigenes Mangling-Schema mit Präfix `_R`, das generische Parameter vollständig kodiert."
+    },
+    {
+      "begriff": "Symboltabelle",
+      "englisch": "symbol table",
+      "erklaerung": "Liste der definierten und benötigten Namen in einem Object-File, anzeigbar mit `nm`."
+    },
+    {
+      "begriff": "Undefiniertes Symbol",
+      "englisch": "undefined symbol",
+      "erklaerung": "Ein Name, den ein Object-File benutzt, aber nicht selbst definiert. Der Linker muss ihn auflösen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustc book: Symbol Mangling",
+      "url": "https://doc.rust-lang.org/rustc/symbol-mangling/index.html"
+    },
+    {
+      "titel": "RFC 2603: Rust Symbol Name Mangling (v0)",
+      "url": "https://rust-lang.github.io/rfcs/2603-rust-symbol-name-mangling-v0.html"
+    },
+    {
+      "titel": "The Rust Reference: ABI-Attribute (no_mangle, link_section, export_name)",
+      "url": "https://doc.rust-lang.org/reference/abi.html"
+    }
+  ]
+}

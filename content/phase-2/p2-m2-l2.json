@@ -1,0 +1,241 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m2-l2",
+  "phase": 2,
+  "modul": "2.2 Ownership und Borrowing",
+  "titel": "Borrowing: & und &mut",
+  "lernziele": [
+    "Die Regel „Aliasing XOR Mutability“ erklären und anwenden",
+    "Mit Non-Lexical Lifetimes abschätzen, wie lange eine Ausleihe dauert",
+    "Die Fehler E0499, E0502 und E0506 lesen und gezielt auflösen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Kompiliert dieser Code?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let mut werte = vec![1, 2, 3];",
+          "    let erstes = &werte[0];",
+          "    werte.push(4);",
+          "    println!(\"{erstes}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nein, E0502: `werte` ist schon geteilt ausgeliehen und kann nicht gleichzeitig veränderbar ausgeliehen werden",
+        "Ja, und es gibt `1` aus",
+        "Ja, aber es ist Undefined Behavior, weil `push` umziehen kann",
+        "Nein, E0382: `werte` wurde verschoben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das ist der C++-Klassiker vom ungültig gewordenen Element-Verweis nach `push_back`. In Rust kompiliert er nicht: `erstes` leiht `werte` aus, `push` braucht `&mut werte`, und `erstes` wird danach noch benutzt. rustc meldet: „cannot borrow `werte` as mutable because it is also borrowed as immutable“.",
+      "begruendungen": [
+        "Richtig. Der Borrow Checker verhindert hier eine hängende Referenz.",
+        "Das Problem: `push` kann den Puffer umziehen, dann würde `erstes` ins Leere zeigen.",
+        "In C++ wäre das so. Safe Rust lässt diesen Code gar nicht zu.",
+        "Es wird nichts verschoben, nur ausgeliehen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aliasing XOR Mutability",
+      "text": "Statt einen Wert zu verschieben, kann man ihn **ausleihen** (borrow): `&T` ist eine **geteilte Referenz** (shared reference), `&mut T` eine **exklusive Referenz** (mutable/exclusive reference). Zu jedem Zeitpunkt gilt genau eines:\n\n- beliebig viele `&T`, aber niemand ändert den Wert, oder\n- genau ein `&mut T`, und sonst greift niemand zu, auch nicht der Besitzer.\n\nDiese Regel heisst **Aliasing XOR Mutability**. Sie verhindert hängende Referenzen, Iterator-Invalidierung und Datenrennen (data races) zwischen Threads, alles zur Compilezeit. Referenzen sind zur Laufzeit gewöhnliche Zeiger ohne Zusatzkosten."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Welche Ausleihe kollidiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0499]: cannot borrow `puffer` as mutable more than once at a time",
+          " --> src/main.rs:4:13",
+          "  |",
+          "3 |     let a = &mut puffer;",
+          "  |             ----------- first mutable borrow occurs here",
+          "4 |     let b = &mut puffer;",
+          "  |             ^^^^^^^^^^^ second mutable borrow occurs here",
+          "5 |     a.push(4);",
+          "  |     - first borrow later used here"
+        ]
+      },
+      "optionen": [
+        "`b` wird erzeugt, während `a` noch lebt, weil `a` in Zeile 5 noch benutzt wird",
+        "Zwei `&mut` auf dieselbe Variable sind in einer Funktion grundsätzlich verboten",
+        "`puffer` wurde nicht als `mut` deklariert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Entscheidend ist die dritte Markierung: „first borrow later used here“. Eine Ausleihe dauert bis zu ihrer **letzten Benutzung**. Würde man `a.push(4)` vor `let b = …` schieben, wäre `a` schon tot und der Code würde kompilieren.",
+      "begruendungen": [
+        "Richtig. rustc zeigt immer: wo die erste Ausleihe beginnt, wo die zweite kollidiert, wo die erste noch gebraucht wird.",
+        "Nacheinander sind beliebig viele `&mut` erlaubt, nur nicht überlappend.",
+        "Dann wäre es ein anderer Fehler (E0596, „cannot borrow as mutable“)."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Non-Lexical Lifetimes",
+      "text": "Früher dauerte eine Ausleihe bis zum Ende des Blocks. Seit Edition 2018 rechnet der Compiler mit **Non-Lexical Lifetimes** (NLL): Eine Ausleihe endet nach ihrer letzten Benutzung. Deshalb kompiliert diese Variante:",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut werte = vec![1, 2, 3];",
+          "let erstes = &werte[0];",
+          "println!(\"{erstes}\");   // letzte Benutzung von erstes",
+          "werte.push(4);          // ok: keine Ausleihe mehr aktiv"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 3,
+            "text": "Hier endet die geteilte Ausleihe, obwohl `erstes` noch im Scope ist."
+          },
+          {
+            "zeile": 4,
+            "text": "`push` darf `&mut werte` nehmen."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Fehlercode passt zu welcher Situation?",
+      "paare": [
+        {
+          "links": "E0499",
+          "rechts": "Zwei überlappende `&mut` auf denselben Wert"
+        },
+        {
+          "links": "E0502",
+          "rechts": "`&mut` wird angefordert, während ein `&` noch gebraucht wird"
+        },
+        {
+          "links": "E0506",
+          "rechts": "Zuweisung an eine Variable, die gerade ausgeliehen ist"
+        },
+        {
+          "links": "E0382",
+          "rechts": "Zugriff auf einen verschobenen Wert"
+        }
+      ],
+      "erklaerung": "E0506 sieht z. B. so aus: `let r = &zaehler; zaehler = 11; println!(\"{r}\");`. rustc meldet „cannot assign to `zaehler` because it is borrowed“. Mit `rustc --explain E0506` bekommst du zu jedem Code eine ausführliche Erklärung."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche dieser Beispiele kompilieren?",
+      "optionen": [
+        "`let s = &r.soll; let i = &mut r.ist; *i += *s;` (zwei Felder eines Structs)",
+        "`v.push(v.len());` mit `let mut v = vec![1, 2, 3];`",
+        "`for a in &aufgaben { if *a == 2 { aufgaben.push(4); } }`",
+        "`let a = &mut x; let b = &x; *a += 1; println!(\"{b}\");`"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "Der Borrow Checker verfolgt **Felder** einzeln (disjoint fields): `&r.soll` und `&mut r.ist` überlappen nicht. `v.push(v.len())` klappt dank **two-phase borrows**: Die exklusive Ausleihe für `push` wird erst aktiv, nachdem die Argumente ausgewertet sind. Die Schleife dagegen hält eine geteilte Ausleihe über alle Durchläufe (E0502), und im letzten Beispiel lebt `a` noch, während `b` entsteht.",
+      "begruendungen": [
+        "Richtig. Über Methoden wie `r.soll()` und `r.ist_mut()` ginge das nicht, weil eine Methode immer das ganze `r` ausleiht.",
+        "Richtig. Geprüft mit rustc 1.97.",
+        "E0502: Der Iterator leiht `aufgaben` für die ganze Schleife. Lösung: Neue Elemente erst sammeln, dann nach der Schleife anhängen.",
+        "E0502: `a` wird nach `b` noch benutzt."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "rustc meldet E0502. Welche Zeile muss man ändern, damit die Funktion ohne Kopie kompiliert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn verarbeite(messungen: &mut Vec<f32>) {",
+          "    let max = messungen.iter().fold(f32::MIN, |a, &b| a.max(b));",
+          "    let letzte = messungen.last().unwrap();",
+          "    messungen.push(max);",
+          "    println!(\"vorher letzte: {letzte}\");",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "`letzte` ist eine Referenz in den Vektor und lebt bis Zeile 5. Dazwischen braucht `push` eine exklusive Ausleihe. Die einfachste Lösung: In Zeile 3 den Wert kopieren statt ausleihen, also `let letzte = *messungen.last().unwrap();`. Ein `f32` ist `Copy`, das kostet nichts. Alternativ verschiebt man `println!` vor das `push`."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Borrowing-Regel.",
+      "text": "Es darf beliebig viele {{?}}-Referenzen geben oder genau eine {{?}}-Referenz. Eine Ausleihe dauert bis zu ihrer letzten {{?}}.",
+      "luecken": [
+        {
+          "loesungen": [
+            "`&T`"
+          ]
+        },
+        {
+          "loesungen": [
+            "`&mut T`"
+          ]
+        },
+        {
+          "loesungen": [
+            "Benutzung"
+          ]
+        }
+      ],
+      "auswahl": [
+        "`&T`",
+        "`&mut T`",
+        "Benutzung",
+        "Blockende",
+        "`*const T`"
+      ],
+      "erklaerung": "„Blockende“ war die Regel vor NLL. Raw Pointer wie `*const T` prüft der Borrow Checker gar nicht, sie gehören zu `unsafe` (Modul 2.6)."
+    }
+  ],
+  "praxis": "Borrow-Checker-Fehler sind fast immer ein Hinweis auf echte Designfragen: Wer darf wann ändern? Typische Auswege, in dieser Reihenfolge: Ausleihen kürzer machen (Wert kopieren, Code umstellen), Felder statt ganzer Structs ausleihen, Änderungen sammeln und danach anwenden, mit Indizes statt Referenzen arbeiten. Erst wenn das nicht reicht, greift man zu innerer Mutabilität wie `RefCell` (Phase 3). In Embedded-Code schützt dieselbe Regel Peripherie: Wer `&mut` auf einen UART hat, ist der einzige, der gerade sendet.",
+  "labor": {
+    "titel": "Die vier Fehlercodes selbst erzeugen",
+    "anleitung": "Schreibe für E0499, E0502, E0506 und E0382 je ein Minimalbeispiel. Lies jeweils die drei Markierungen der Fehlermeldung (Beginn der Ausleihe, Konflikt, spätere Benutzung) und löse den Fehler, indem du nur die Reihenfolge der Zeilen änderst, wo das möglich ist.",
+    "befehle": [
+      "cargo new ausleihen && cd ausleihen",
+      "cargo check",
+      "rustc --explain E0502"
+    ],
+    "beobachtung": "Bei E0499, E0502 und E0506 genügt es oft, die letzte Benutzung der ersten Ausleihe vor den Konflikt zu schieben. Bei E0382 hilft Umstellen nicht, dort braucht es eine Referenz oder ein `clone()`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Ausleihen",
+      "englisch": "borrowing",
+      "erklaerung": "Zugriff auf einen Wert über eine Referenz, ohne den Besitz zu übernehmen."
+    },
+    {
+      "begriff": "Geteilte Referenz",
+      "englisch": "shared reference, `&T`",
+      "erklaerung": "Nur-Lese-Referenz. Davon darf es beliebig viele gleichzeitig geben."
+    },
+    {
+      "begriff": "Exklusive Referenz",
+      "englisch": "mutable reference, `&mut T`",
+      "erklaerung": "Referenz mit Schreibrecht. Solange sie lebt, gibt es keinen anderen Zugriff auf den Wert."
+    },
+    {
+      "begriff": "Non-Lexical Lifetimes",
+      "englisch": "non-lexical lifetimes (NLL)",
+      "erklaerung": "Eine Ausleihe endet nach ihrer letzten Benutzung, nicht erst am Blockende."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: References and Borrowing",
+      "url": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html"
+    },
+    {
+      "titel": "RFC 2094: Non-Lexical Lifetimes",
+      "url": "https://rust-lang.github.io/rfcs/2094-nll.html"
+    },
+    {
+      "titel": "Rust Compiler Error Index",
+      "url": "https://doc.rust-lang.org/error_codes/error-index.html"
+    }
+  ]
+}

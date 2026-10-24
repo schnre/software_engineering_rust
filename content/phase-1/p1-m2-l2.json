@@ -1,0 +1,250 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m2-l2",
+  "phase": 1,
+  "modul": "1.2 Der Linker",
+  "titel": "Linkerfehler in Rust lesen",
+  "lernziele": [
+    "`undefined symbol` und `unable to find library` bei FFI-Code erkennen und beheben",
+    "Erklären, warum zwei `#[unsafe(no_mangle)]`-Funktionen gleichen Namens kollidieren",
+    "Nachvollziehen, wie rustc den Linker aufruft, und ihn mit `-C linker` austauschen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Was passiert bei `rustc main.rs`, wenn `sensor_lesen` nirgends definiert ist?",
+      "code": {
+        "sprache": "rust",
+        "datei": "main.rs",
+        "zeilen": [
+          "unsafe extern \"C\" {",
+          "    fn sensor_lesen() -> i32;",
+          "}",
+          "",
+          "fn main() {",
+          "    let wert = unsafe { sensor_lesen() };",
+          "    println!(\"{wert}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Compilerfehler: Funktion ohne Körper",
+        "Linkerfehler: undefiniertes Symbol `sensor_lesen`",
+        "Es kompiliert, und das Programm stürzt beim Aufruf ab"
+      ],
+      "korrekt": 1,
+      "fest": true,
+      "erklaerung": "Ein `extern`-Block ist nur eine **Deklaration**: „Diese Funktion gibt es irgendwo“. rustc prüft Typen und Aufrufe und hinterlässt im Object-File ein `U sensor_lesen`. Erst der Linker merkt, dass keine Definition existiert.",
+      "begruendungen": [
+        "In einem `extern`-Block sind Funktionen ohne Körper gerade gewollt. rustc beschwert sich nicht.",
+        "Richtig. Das ist das Rust-Gegenstück zu `undefined reference` in C++.",
+        "Der Linker bricht ab. Ein Programm mit offenem Verweis entsteht gar nicht."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "So sieht der Fehler aus (Ausgabe gekürzt). Welche Aussagen treffen zu?",
+      "terminal": {
+        "befehl": "rustc main.rs",
+        "ausgabe": [
+          "error: linking with `cc` failed: exit status: 1",
+          "  |",
+          "  = note:  \"cc\" \"-m64\" … \"-fuse-ld=lld\" … \"-o\" \"main\" …",
+          "  = note: some arguments are omitted. use `--verbose` to show all linker arguments",
+          "  = note: rust-lld: error: undefined symbol: sensor_lesen",
+          "          >>> referenced by main.a63f48537a79f877-cgu.0",
+          "          >>>               main.main.a63f48537a79f877-cgu.0.rcgu.o:(main::main)",
+          "          collect2: error: ld returned 1 exit status",
+          "",
+          "error: aborting due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "rustc ruft `cc` als Treiber auf, und dieser verwendet `rust-lld` als eigentlichen Linker",
+        "Der Verweis stammt aus der Funktion `main::main` in der Codegen-Unit `cgu.0`",
+        "Der Fehler liegt in der Typprüfung, weil `sensor_lesen` keinen Körper hat",
+        "rustc hat die Bibliothek mit `sensor_lesen` gefunden, aber in der falschen Version"
+      ],
+      "korrekt": [
+        0,
+        1
+      ],
+      "erklaerung": "Auf Linux ruft rustc den C-Compiler `cc` als **Linker-Treiber** auf. Seit einigen Versionen gibt es auf `x86_64-unknown-linux-gnu` die Option `-fuse-ld=lld` mit, also linkt das mitgelieferte `rust-lld`. Die eigentliche Fehlermeldung steckt in der `= note:`-Zeile des Linkers, nicht in der ersten Zeile.",
+      "begruendungen": [
+        "Richtig. Das zeigen `\"cc\"` und `-fuse-ld=lld` in der Kommandozeile.",
+        "Richtig. `referenced by` nennt Object-File und Funktion.",
+        "Die Typprüfung war erfolgreich, sonst wäre rustc nie bis zum Linker gekommen.",
+        "Es wurde überhaupt keine Bibliothek angegeben, in der das Symbol stehen könnte."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Woher kommt die Definition?",
+      "text": "Liegt `sensor_lesen` in einer C-Bibliothek `libsensor.a` oder `libsensor.so`, muss der Linker davon erfahren. Dafür gibt es drei Wege:\n\n- `#[link(name = \"sensor\")]` direkt am `extern`-Block\n- `cargo::rustc-link-lib=sensor` aus einem Build-Skript (`build.rs`, Phase 1.6)\n- `-l sensor` auf der rustc-Kommandozeile\n\nFehlt zusätzlich der Suchpfad, meldet der Linker `unable to find library -lsensor`. Den Pfad setzt `cargo::rustc-link-search=native=<pfad>` oder rustc mit `-L`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[link(name = \"sensor\")]",
+          "unsafe extern \"C\" {",
+          "    fn sensor_lesen() -> i32;",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 1,
+            "text": "Entspricht `-lsensor`. Präfix `lib` und Endung ergänzt der Linker."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Linker-Meldung ihrer wahrscheinlichsten Ursache zu.",
+      "paare": [
+        {
+          "links": "`undefined symbol: sensor_lesen`",
+          "rechts": "Deklariert, aber keine Bibliothek mit der Definition gelinkt"
+        },
+        {
+          "links": "`unable to find library -lsensor`",
+          "rechts": "Bibliothek angefordert, aber nicht im Suchpfad"
+        },
+        {
+          "links": "`duplicate symbol: init`",
+          "rechts": "Zwei Crates exportieren dasselbe ungemangelte Symbol"
+        },
+        {
+          "links": "`symbol `init` is already defined` (von rustc)",
+          "rechts": "Zweimal `no_mangle` mit gleichem Namen im selben Crate"
+        }
+      ],
+      "erklaerung": "Innerhalb eines Crates erkennt rustc die Kollision selbst, bevor der Linker läuft. Über Crate-Grenzen hinweg sieht rustc jeweils nur ein Crate. Die Kollision merkt erst der Linker."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "rustc lehnt diesen Code ab. Auf welche Zeile zeigt die Fehlermeldung?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "mod uart {",
+          "    #[unsafe(no_mangle)]",
+          "    pub extern \"C\" fn init() {}",
+          "}",
+          "mod spi {",
+          "    #[unsafe(no_mangle)]",
+          "    pub extern \"C\" fn init() {}",
+          "}",
+          "",
+          "fn main() {}"
+        ]
+      },
+      "fehlerZeile": 7,
+      "erklaerung": "Im Rust-Namensraum sind `uart::init` und `spi::init` verschieden. `no_mangle` legt aber beide auf das Symbol `init`. rustc meldet `error: symbol `init` is already defined` an der zweiten Definition. Abhilfe: eindeutige Namen wie `uart_init` und `spi_init` oder `#[unsafe(export_name = \"…\")]`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Zwei Treiber-Crates exportieren je ein `#[unsafe(no_mangle)] extern \"C\" fn init()`. Die Anwendung benutzt beide Crates. Was sagt diese Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling treiber_a v0.1.0 (/home/user/app/treiber_a)",
+          "   Compiling app v0.1.0 (/home/user/app)",
+          "error: linking with `cc` failed: exit status: 1",
+          "  |",
+          "  = note: rust-lld: error: duplicate symbol: init",
+          "          >>> defined at lib.rs:2 (treiber_b/src/lib.rs:2)",
+          "          >>>            treiber_b-….rcgu.o:(init) in archive …/libtreiber_b-99392420f83dc540.rlib",
+          "          >>> defined at lib.rs:2 (treiber_a/src/lib.rs:2)",
+          "          >>>            treiber_a-….rcgu.o:(.text.init+0x0) in archive …/libtreiber_a-9fa5fc536d9f0363.rlib"
+        ]
+      },
+      "optionen": [
+        "Beide Crates kompilieren für sich fehlerfrei. Erst beim Zusammenfügen sieht der Linker zwei Definitionen von `init`",
+        "Cargo hat `treiber_a` doppelt gebaut, ein `cargo clean` behebt das",
+        "Der Fehler entsteht, weil `init` nicht `pub` ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Gemangelte Rust-Namen enthalten den Crate-Hash und kollidieren nie. Ungemangelte Namen dagegen landen alle im selben, flachen Namensraum des Linkers. Bei Bibliotheken solltest du ungemangelte Exporte deshalb mit einem Präfix versehen (`treiber_a_init`). Der Linker meldet das übrigens nur, wenn er die betroffenen Teile beider Crates tatsächlich braucht.",
+      "begruendungen": [
+        "Richtig. rustc sieht immer nur ein Crate, der Linker sieht alle.",
+        "Die zwei Pfade zeigen zwei verschiedene Crates, nicht zweimal dasselbe.",
+        "`pub` steuert die Sichtbarkeit in Rust. Für den Linker ist entscheidend, dass beide denselben ungemangelten Namen tragen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze: Du willst den Linker selbst festlegen und alle Argumente sehen, die rustc ihm übergibt.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustc -C {{?}}=clang main.rs",
+          "rustc --print {{?}} main.rs"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "linker"
+          ]
+        },
+        {
+          "loesungen": [
+            "link-args"
+          ]
+        }
+      ],
+      "auswahl": [
+        "linker",
+        "link-args",
+        "linker-flavor",
+        "opt-level"
+      ],
+      "erklaerung": "`-C linker=…` bestimmt das Programm, das rustc aufruft, z. B. `clang` oder einen Cross-Linker wie `arm-none-eabi-gcc`. `-C linker-flavor=…` sagt rustc, welche Art Kommandozeile das Programm versteht (`gcc`, `ld`, `ld.lld`, `msvc` …). Normalerweise erkennt rustc das selbst. `--print link-args` zeigt die vollständige Linker-Kommandozeile."
+    }
+  ],
+  "praxis": "Bei Linkerfehlern in Rust-Projekten: zuerst die `= note:`-Zeile des Linkers lesen und den ersten Fehler suchen. `undefined symbol` bei FFI heisst fast immer: fehlendes `cargo::rustc-link-lib` im `build.rs` oder ein `-sys`-Crate, das die native Bibliothek nicht gefunden hat. `cargo build -v` zeigt die vollständige Linker-Kommandozeile mit allen `-l` und `-L`. Und Bibliotheken sollten ungemangelte Symbole immer mit einem Präfix versehen.",
+  "labor": {
+    "titel": "Den Linker beim Arbeiten beobachten",
+    "anleitung": "Erzeuge mit dem Programm aus Schritt 1 den Linkerfehler, schau dir die Kommandozeile an und lass den Linker seine Version melden.",
+    "befehle": [
+      "rustc main.rs",
+      "rustc --print link-args main.rs",
+      "rustc -C link-arg=-Wl,--version main.rs",
+      "readelf -p .comment main"
+    ],
+    "beobachtung": "In der Kommandozeile siehst du `cc`, `-fuse-ld=lld`, die Rust-Bibliotheken als `.rlib` und am Ende `-lc` und `-lgcc_s`. Mit `-Wl,--version` meldet sich `ld.lld` aus dem Rust-Sysroot. `.comment` des fertigen Programms nennt die rustc-Version und `Linker: LLD`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Linker-Treiber",
+      "englisch": "linker driver",
+      "erklaerung": "Programm wie `cc` oder `clang`, das rustc statt des eigentlichen Linkers aufruft und das Startcode und Systembibliotheken ergänzt."
+    },
+    {
+      "begriff": "extern-Block",
+      "englisch": "extern block",
+      "erklaerung": "`unsafe extern \"C\" { … }`: Deklaration fremder Funktionen, deren Definition der Linker liefern muss."
+    },
+    {
+      "begriff": "rust-lld",
+      "englisch": "rust-lld",
+      "erklaerung": "Mit der Rust-Toolchain ausgelieferter LLVM-Linker lld."
+    },
+    {
+      "begriff": "Linker-Flavor",
+      "englisch": "linker flavor",
+      "erklaerung": "Art der Kommandozeile, die rustc für den Linker erzeugt, z. B. `gcc`-Stil oder `msvc`-Stil."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustc book: Codegen Options (linker, linker-flavor, link-arg)",
+      "url": "https://doc.rust-lang.org/rustc/codegen-options/index.html"
+    },
+    {
+      "titel": "The Rust Reference: External blocks",
+      "url": "https://doc.rust-lang.org/reference/items/external-blocks.html"
+    }
+  ]
+}

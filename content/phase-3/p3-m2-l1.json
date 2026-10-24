@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m2-l1",
+  "phase": 3,
+  "modul": "3.2 Closures und Iteratoren",
+  "titel": "Closures: Fn, FnMut, FnOnce",
+  "lernziele": [
+    "Verstehen, was der Compiler aus einer Closure macht und wie gross sie ist",
+    "Die drei Closure-Traits `Fn`, `FnMut` und `FnOnce` unterscheiden",
+    "Mit `move` und `impl Fn` bzw. `Box<dyn Fn>` Closures sicher weitergeben"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "fnmut-ausgabe",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut zaehler = 0;",
+          "let mut erhoehe = || { zaehler += 1; zaehler };",
+          "erhoehe();",
+          "erhoehe();",
+          "println!(\"{} {}\", erhoehe(), zaehler);"
+        ]
+      },
+      "optionen": ["`3 3`", "`3 0`", "`1 0`", "Compilerfehler: `zaehler` ist noch ausgeliehen"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Closure fängt `zaehler` per **veränderlicher Referenz** ein, weil sie ihn verändert. Sie verändert also das Original. Der Ausdruck `erhoehe()` wird vor `zaehler` ausgewertet, danach endet die Ausleihe (Non-Lexical Lifetimes), und `zaehler` darf gelesen werden. Mit `move ||` stünde dort `3 0`: Die Closure hätte eine eigene Kopie.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre die Ausgabe mit `move`: dann zählt eine Kopie innerhalb der Closure.",
+        "Die Closure läuft dreimal und verändert jedes Mal das Original.",
+        "Die Ausleihe endet nach dem letzten Aufruf von `erhoehe`, also vor dem Lesen von `zaehler`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was eine Closure ist",
+      "text": "Der Compiler macht aus jeder Closure einen **anonymen Struct** mit einem Feld pro eingefangener Variable und implementiert darauf einen oder mehrere Closure-Traits. Jede Closure hat einen eigenen Typ ohne Namen.\n\nDie Art des Einfangens (*capture*) wählt rustc nach Bedarf: lesen → `&T`, verändern → `&mut T`, verbrauchen → Wert. Mit **`move`** werden alle Variablen nach Wert eingefangen, auch wenn nur gelesen wird.\n\nDie Grösse folgt daraus: Eine Closure ohne Captures belegt 0 Bytes, eine, die ein `[u8; 100]` per `move` einfängt, 100 Bytes, und eine, die es per Referenz einfängt, 8 Bytes auf x86_64.",
+      "tabelle": {
+        "kopf": ["Trait", "Aufruf mit", "Darf", "Aufrufbar"],
+        "zeilen": [
+          ["`FnOnce`", "`self`", "Captures verbrauchen", "einmal"],
+          ["`FnMut`", "`&mut self`", "Captures verändern", "mehrfach"],
+          ["`Fn`", "`&self`", "Captures nur lesen", "mehrfach, auch gleichzeitig"]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "fn-verbraucht",
+      "frage": "Was sagt dir diese Meldung?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn zweimal<F: Fn()>(f: F) { f(); f(); }",
+          "",
+          "let name = String::from(\"Pumpe\");",
+          "zweimal(move || drop(name));"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0507]: cannot move out of `name`, a captured variable in an `Fn` closure",
+          " --> src/main.rs:4:26",
+          "  |",
+          "4 |     zweimal(move || drop(name));",
+          "  |             -------      ^^^^ `name` is moved here",
+          "  |             |",
+          "  |             captured by this `Fn` closure",
+          "  |",
+          "help: `Fn` and `FnMut` closures require captured values to be able to be consumed multiple times, but `FnOnce` closures may consume them only once"
+        ]
+      },
+      "optionen": [
+        "Die Closure verbraucht `name` und ist deshalb nur `FnOnce`. `zweimal` verlangt aber `Fn`, weil es sie zweimal aufruft",
+        "`move` ist bei `Fn` verboten",
+        "`drop` darf in Closures nicht aufgerufen werden",
+        "`String` muss `Copy` implementieren, damit es eingefangen werden kann"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Traits bilden eine Hierarchie: Jedes `Fn` ist auch `FnMut`, jedes `FnMut` auch `FnOnce`. Wer eine Closure annimmt, sollte den **schwächsten** Bound verlangen, der reicht: `FnOnce` für einmalige Aufrufe wie `thread::spawn` oder `Option::map`, `FnMut` für wiederholte Aufrufe ohne Parallelität wie `Iterator::for_each`, `Fn` nur, wenn gleichzeitige Aufrufe möglich sein müssen.",
+      "begruendungen": [
+        "Richtig.",
+        "`move` bestimmt nur, wie eingefangen wird. Eine `move`-Closure, die nur liest, ist durchaus `Fn`.",
+        "`drop` ist eine normale Funktion. Das Problem ist, dass sie `name` verbraucht.",
+        "Einfangen nach Wert geht mit jedem Typ. `Copy` würde nur das Verbrauchen umgehen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welchen Bound verlangt die Funktion aus der Standardbibliothek?",
+      "paare": [
+        { "links": "`std::thread::spawn(f)`", "rechts": "`FnOnce() + Send + 'static`" },
+        { "links": "`Option::map(self, f)`", "rechts": "`FnOnce(T) -> U`" },
+        { "links": "`Iterator::for_each(self, f)`", "rechts": "`FnMut(Self::Item)`" },
+        { "links": "`slice::sort_by(&mut self, f)`", "rechts": "`FnMut(&T, &T) -> Ordering`" }
+      ],
+      "erklaerung": "`Option::map` ruft die Closure höchstens einmal auf, darum genügt `FnOnce`. `sort_by` ruft den Vergleich oft, aber nie parallel auf: `FnMut`. Bei `thread::spawn` kommt `Send + 'static` hinzu, weil die Closure in einen anderen Thread wandert und beliebig lange leben kann."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "closure-zurueckgeben",
+      "frage": "Diese Funktion soll eine Closure zurückgeben, die später den Namen ausgibt. Welche Zeile führt zu `E0373: closure may outlive the current function`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn starte() -> impl Fn() {",
+          "    let name = String::from(\"Temperatur\");",
+          "    || println!(\"{name}\")",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "Ohne `move` fängt die Closure `name` per Referenz ein, weil sie es nur liest. `name` stirbt aber am Ende von `starte`. In C++ wäre das eine hängende Referenz, die erst zur Laufzeit auffällt; Rust lehnt es beim Übersetzen ab und schlägt `move || println!(\"{name}\")` vor. Faustregel: Closures, die zurückgegeben, gespeichert oder in Threads verschoben werden, brauchen `move`."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Ereignis-Dispatcher soll eine Liste von Handlern mit unterschiedlichen Closures speichern. Was ist der passende Typ?",
+      "optionen": [
+        "`Vec<Box<dyn FnMut(Ereignis)>>`",
+        "`Vec<impl FnMut(Ereignis)>`",
+        "`Vec<fn(Ereignis)>`, weil Funktionszeiger am schnellsten sind",
+        "`Vec<F>` mit einem Typparameter `F: FnMut(Ereignis)`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jede Closure hat einen eigenen Typ. Ein `Vec<F>` kann nur Closures **eines** Typs aufnehmen. Für eine gemischte Sammlung braucht es ein **Trait-Objekt** `dyn FnMut` hinter einem Zeiger: Heap-Allokation plus dynamischer Aufruf über eine vtable. Ein `Box<dyn Fn…>` ist 16 Bytes gross (Datenzeiger + vtable-Zeiger). Ohne Heap, etwa in `no_std`, nimmt man Funktionszeiger mit Kontextargument oder ein Enum.",
+      "begruendungen": [
+        "Richtig.",
+        "`impl Trait` ist in dieser Position nicht erlaubt und stünde ohnehin für einen einzigen Typ.",
+        "Funktionszeiger nehmen nur Closures ohne Captures auf.",
+        "Damit wären alle Handler vom selben Closure-Typ, also praktisch derselbe Handler."
+      ],
+      "fest": false
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Eine Closure, die eingefangene Werte nur liest, implementiert {{?}}. Wer eine Closure nur einmal aufruft, verlangt als Bound {{?}}. Damit eine Closure ihre Captures nach Wert übernimmt, schreibt man {{?}} davor.",
+      "luecken": [{ "loesungen": ["Fn"] }, { "loesungen": ["FnOnce"] }, { "loesungen": ["move"] }],
+      "auswahl": ["Fn", "FnOnce", "move", "FnMut", "ref", "dyn"],
+      "erklaerung": "Merkregel: Als Aufrufer möglichst wenig verlangen (`FnOnce` vor `FnMut` vor `Fn`), als Closure-Autor möglichst viel bieten (`Fn` ist überall einsetzbar)."
+    }
+  ],
+  "praxis": "Closures stecken in Iterator-Ketten, Callbacks, `thread::spawn`, `Option`/`Result`-Kombinatoren und in jedem async-Executor. Im Review fallen vor allem drei Dinge auf: zu strenge Bounds (`Fn`, wo `FnMut` reicht), vergessenes `move` bei gespeicherten Closures und `Box<dyn Fn>` an Stellen, wo ein Typparameter die Allokation sparen würde. Im Embedded-Code ohne Allokator sind generische Closures der Normalfall.",
+  "labor": {
+    "titel": "Wie gross ist eine Closure?",
+    "anleitung": "Erzeuge mehrere Closures: ohne Captures, mit einem `u64` per Referenz, mit einem `[u8; 100]` per `move` und per Referenz. Gib jeweils `std::mem::size_of_val(&closure)` aus und vergleiche mit `size_of::<Box<dyn Fn()>>()`.",
+    "befehle": [
+      "cargo new closures && cd closures",
+      "cargo run",
+      "cargo run --release"
+    ],
+    "beobachtung": "Ohne Captures 0 Bytes, per Referenz 8 Bytes (ein Zeiger), per `move` genau die Grösse der eingefangenen Werte. `Box<dyn Fn()>` ist ein Fat Pointer mit 16 Bytes."
+  },
+  "begriffe": [
+    { "begriff": "Closure", "englisch": "closure", "erklaerung": "Anonyme Funktion, die Variablen aus ihrer Umgebung einfangen kann. Der Compiler erzeugt dafür einen eigenen Struct-Typ." },
+    { "begriff": "Capture", "englisch": "capture", "erklaerung": "Übernahme einer Umgebungsvariablen in eine Closure, per `&`, `&mut` oder Wert." },
+    { "begriff": "move-Closure", "englisch": "move closure", "erklaerung": "Closure mit `move`, die alle Captures nach Wert übernimmt." },
+    { "begriff": "Trait-Objekt", "englisch": "trait object", "erklaerung": "`dyn Trait` hinter einem Zeiger, Aufruf über eine vtable zur Laufzeit." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rust Book: Closures", "url": "https://doc.rust-lang.org/book/ch13-01-closures.html" },
+    { "titel": "Rust Reference: Closure expressions", "url": "https://doc.rust-lang.org/reference/expressions/closure-expr.html" }
+  ]
+}

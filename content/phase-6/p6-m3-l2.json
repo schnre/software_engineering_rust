@@ -1,0 +1,170 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m3-l2",
+  "phase": 6,
+  "modul": "6.3 Takt, GPIO und Timer",
+  "titel": "Timer, Delays und PWM",
+  "lernziele": [
+    "Timer-Frequenzen aus Takt, Prescaler und Reload berechnen",
+    "`DelayNs` und `SetDutyCycle` aus `embedded-hal` 1.0 einsetzen",
+    "Zeitangaben mit `fugit` typsicher schreiben und Polling von Interrupts unterscheiden"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "busy-loop",
+      "frage": "Warum ist `for _ in 0..1_000_000 { cortex_m::asm::nop(); }` keine gute Verzögerung?",
+      "optionen": [
+        "Die Dauer hängt von Taktfrequenz, Optimierungsstufe und Flash-Wartezyklen ab und die CPU ist die ganze Zeit blockiert",
+        "`nop` ist in Rust `unsafe`",
+        "Die Schleife wird immer wegoptimiert",
+        "Ein Mikrocontroller kann nicht bis eine Million zählen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Zählschleifen sind nur eine grobe Schätzung. Ein **Timer** ist ein Hardware-Zähler, der mit einem bekannten Takt läuft. Er misst Zeit genau, unabhängig davon, was die CPU gerade tut, und kann bei Ablauf einen Interrupt auslösen.",
+      "begruendungen": [
+        "Richtig.",
+        "`cortex_m::asm::nop()` ist eine sichere Funktion.",
+        "Mit `nop` bleibt die Schleife erhalten, weil es ein Inline-Assembler-Befehl ist. Ohne ihn würde sie wegfallen.",
+        "Ein 32-Bit-Register zählt bis über vier Milliarden."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Wie ein Timer zählt",
+      "text": "Ein Timer teilt seinen Eingangstakt durch den **Prescaler** (*Vorteiler*) und zählt dann bis zum **Reload**-Wert (*auto-reload*, `ARR`). Beim Überlauf beginnt er von vorn und setzt ein Flag:\n\n`f_überlauf = f_takt / ((PSC + 1) · (ARR + 1))`\n\nJeder Cortex-M hat zusätzlich den **SysTick**: einen 24-Bit-Abwärtszähler im Kern, den `cortex-m` als `SYST` anbietet. HALs bauen daraus Delays und RTOS-Ticks. Für PWM, Eingangserfassung und präzise Zeitbasen nimmt man die Hersteller-Timer (TIM1, TIM2, …)."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "timer-rechnen",
+      "frage": "Takt 100 MHz, `PSC = 99`, `ARR = 999`. Wie oft läuft der Timer pro Sekunde über?",
+      "optionen": ["1000-mal (1 kHz)", "10 000-mal", "100-mal", "1 000 000-mal"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "100 MHz / 100 = 1 MHz Zähltakt, also 1 µs pro Schritt. 1000 Schritte bis zum Überlauf ergeben 1 ms bzw. 1 kHz. Die „+1“ kommt daher, dass beide Register ab 0 zählen. HALs rechnen das für dich aus, wenn du `timer.start(1.millis())` schreibst.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre mit `ARR = 99`.",
+        "Das wäre mit `PSC = 999` oder `ARR = 9999`.",
+        "Das ist der Zähltakt nach dem Prescaler, nicht die Überlauffrequenz."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zeit als Typ: fugit",
+      "text": "HALs wie `stm32f4xx-hal` verwenden **`fugit`** für Zeiten und Frequenzen. Die Einheit steckt im Typ, z. B. `MillisDurationU32` oder `HertzU32`. Umrechnungen passieren zur Compilezeit oder mit reiner Ganzzahl-Arithmetik, ohne Gleitkomma.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use stm32f4xx_hal::prelude::*;   // bringt .millis(), .MHz() …",
+          "",
+          "let mut rcc = dp.RCC.freeze(Config::hse(25.MHz()).sysclk(100.MHz()));",
+          "let mut delay = cp.SYST.delay(&rcc.clocks);",
+          "let mut timer = dp.TIM2.counter_ms(&mut rcc);",
+          "timer.start(500.millis()).unwrap();"
+        ],
+        "anmerkungen": [
+          { "zeile": 4, "text": "Delay auf Basis von SysTick; braucht die tatsächliche Kernfrequenz." },
+          { "zeile": 6, "text": "Eine Verwechslung wie `500` statt `500.millis()` ist ein Typfehler." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "delayns",
+      "frage": "Ein Treiber soll nach dem Einschalten eines Sensors 20 ms warten. Er bekommt die Verzögerung als generischen Parameter. Ergänze mit dem Trait aus `embedded-hal` 1.0.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use embedded_hal::delay::{{?}};",
+          "",
+          "pub fn sensor_starten<D: DelayNs>(delay: &mut D) {",
+          "    // Versorgung einschalten …",
+          "    delay.{{?}}(20);",
+          "}"
+        ]
+      },
+      "luecken": [{ "loesungen": ["DelayNs"] }, { "loesungen": ["delay_ms"] }],
+      "auswahl": ["DelayNs", "DelayMs", "delay_ms", "sleep"],
+      "erklaerung": "In `embedded-hal` 1.0 gibt es nur noch **einen** Delay-Trait, `DelayNs`. Pflicht ist `delay_ns`, `delay_us` und `delay_ms` haben Standard-Implementierungen. Die getrennten Traits `DelayMs`/`DelayUs` gab es in der alten Version 0.2. Delays geben kein `Result` zurück."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "pwm-begriffe",
+      "frage": "PWM (*Pulsweitenmodulation*) schaltet einen Pin schnell ein und aus. Ordne zu.",
+      "paare": [
+        { "links": "Periode", "rechts": "Dauer eines vollständigen Ein-Aus-Zyklus, bestimmt durch PSC und ARR" },
+        { "links": "Tastgrad (duty cycle)", "rechts": "Anteil der Periode, in dem der Ausgang an ist" },
+        { "links": "`max_duty_cycle()`", "rechts": "Wert, der 100 % entspricht, abhängig von der Timer-Auflösung" },
+        { "links": "`set_duty_cycle_percent(25)`", "rechts": "Setzt den Tastgrad auf ein Viertel des Maximums" }
+      ],
+      "erklaerung": "Mit PWM steuerst du LED-Helligkeit, Motorgeschwindigkeit oder Servos. `SetDutyCycle` aus `embedded-hal` 1.0 hat nur zwei Pflichtmethoden: `max_duty_cycle()` und `set_duty_cycle(u16)`. Helfer wie `set_duty_cycle_percent` und `set_duty_cycle_fraction` rechnen in Ganzzahlen und runden dabei ab."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "duty-rechnen",
+      "frage": "`max_duty_cycle()` liefert 999. Welchen Wert schreibt `set_duty_cycle_percent(25)` in den Kanal?",
+      "optionen": ["249", "250", "25", "999"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Standard-Implementierung rechnet `(25 · 999) / 100` in Ganzzahlen, das ergibt 249 (abgerundet von 249,75). Bei kleinen Maximalwerten machen solche Rundungen spürbare Unterschiede. Wer genau 25 % braucht, wählt `ARR` so, dass `max_duty_cycle() + 1` durch 4 teilbar ist und setzt den Wert direkt.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre 25 % von 1000. Die Methode rechnet mit dem Maximum 999 und rundet ab.",
+        "Der Wert wird relativ zum Maximum skaliert, nicht direkt übernommen.",
+        "Das wäre 100 %."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "polling-vs-irq",
+      "frage": "Was ist das Problem dieser Hauptschleife?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "loop {",
+          "    nb::block!(timer.wait()).unwrap();   // wartet auf den 1-ms-Überlauf",
+          "    led.toggle();",
+          "    verarbeite_uart();                   // dauert manchmal 3 ms",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Dauert `verarbeite_uart` länger als eine Periode, verpasst die Schleife Überläufe und das Blinken wird unregelmässig",
+        "`nb::block!` ist veraltet und kompiliert nicht",
+        "`toggle` funktioniert nur in Interrupts",
+        "Nichts, der Timer holt verpasste Überläufe automatisch nach"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beim **Polling** fragt die CPU selbst nach. Das ist einfach, aber jede lange Aufgabe in derselben Schleife verschiebt das Timing. Mit einem **Timer-Interrupt** reagiert die Hardware unabhängig davon (Modul 6.4). `nb::block!` verwandelt eine nicht-blockierende Operation, die `WouldBlock` liefert, in eine blockierende Warteschleife.",
+      "begruendungen": [
+        "Richtig.",
+        "`nb::block!` aus dem `nb`-Crate ist weiterhin üblich.",
+        "`toggle` funktioniert überall, wo man den Pin besitzt.",
+        "Das Überlauf-Flag ist nur ein Bit, mehrfache Überläufe gehen verloren."
+      ]
+    }
+  ],
+  "praxis": "Delays mit `DelayNs` sind gut für Initialisierung und kurze Wartezeiten in Treibern. Für alles, was regelmässig passieren muss, nimm einen Timer mit Interrupt oder später einen async-Timer in Embassy (Phase 7). Prüfe nach dem Konfigurieren des Takts immer `rcc.clocks`: Eine falsch angenommene Frequenz verschiebt jede Zeitangabe.",
+  "labor": {
+    "titel": "Zeittypen auf dem PC",
+    "anleitung": "Probiere `fugit` auf dem PC aus: Erzeuge Dauern und Frequenzen, rechne um und provoziere einen Typfehler, indem du Millisekunden an eine Funktion übergibst, die Mikrosekunden erwartet.",
+    "befehle": [
+      "cargo new zeit && cd zeit",
+      "cargo add fugit@0.3",
+      "cargo run"
+    ],
+    "beobachtung": "`1500.millis()` braucht eine Typangabe wie `MillisDurationU32`. Ein `MillisDurationU32` passt nicht in einen `MicrosDurationU32`-Parameter, erst `.convert()` macht die Umrechnung ausdrücklich."
+  },
+  "begriffe": [
+    { "begriff": "Prescaler", "englisch": "prescaler", "erklaerung": "Teiler vor dem Timer-Zähler, der den Eingangstakt verlangsamt." },
+    { "begriff": "SysTick", "englisch": "system tick timer", "erklaerung": "24-Bit-Abwärtszähler im Cortex-M-Kern, oft für Delays und Systemticks." },
+    { "begriff": "PWM", "englisch": "pulse width modulation", "erklaerung": "Schnelles Ein- und Ausschalten mit einstellbarem Tastgrad." },
+    { "begriff": "Polling", "englisch": "polling", "erklaerung": "Die CPU fragt einen Zustand wiederholt selbst ab, statt auf einen Interrupt zu warten." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-hal (docs.rs)", "url": "https://docs.rs/embedded-hal" },
+    { "titel": "fugit (docs.rs)", "url": "https://docs.rs/fugit" }
+  ]
+}

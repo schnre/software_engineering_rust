@@ -1,0 +1,168 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m1-l2",
+  "phase": 10,
+  "modul": "10.1 Prinzipien",
+  "titel": "Kapselung und „Parse, don't validate“",
+  "lernziele": [
+    "Law of Demeter und „Tell, don't ask“ an Methodenketten erkennen und auflösen",
+    "Invarianten mit privaten Feldern und Konstruktoren schützen",
+    "Eingaben einmal in einen gültigen Typ parsen statt sie überall erneut zu prüfen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "demeter",
+      "frage": "Was ist an dieser Zeile problematisch?\n\n`fahrzeug.antrieb.motor.drehzahl = 0;`",
+      "optionen": [
+        "Der Aufrufer kennt die innere Struktur von drei Typen. Ändert sich der Aufbau des Antriebs, bricht er mit",
+        "Felder dürfen in Rust nicht verkettet zugegriffen werden",
+        "Die Zeile ist langsamer als ein Methodenaufruf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das **Law of Demeter** (Gesetz von Demeter) sagt sinngemäss: Sprich nur mit deinen direkten Nachbarn, nicht mit den Nachbarn deiner Nachbarn. Besser ist `fahrzeug.notstopp()`. Dann entscheidet `Fahrzeug`, wie es anhält, und kann später etwa auch die Bremse ansteuern, ohne dass ein Aufrufer etwas merkt.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust erlaubt das, sofern alle Felder sichtbar sind. Genau das ist das Problem.",
+        "Der Compiler optimiert beides gleich. Es geht um Kopplung, nicht um Geschwindigkeit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Tell, don't ask",
+      "text": "Eng verwandt ist **„Tell, don't ask“** (sag, was zu tun ist, statt nachzufragen): Statt den Zustand eines Objekts abzufragen und dann aussen zu entscheiden, gibt man ihm einen Auftrag.\n\n```rust\n// fragen: Logik liegt beim Aufrufer\nif ventil.offen() && ventil.druck() > MAX { ventil.schliesse(); }\n// sagen: Logik liegt im Typ\nventil.begrenze_druck(MAX);\n```\n\nIn Rust kommt ein handfester Vorteil dazu: Wer Felder nicht kennt, kann sie auch nicht ausleihen. Weniger offene Felder heisst weniger Konflikte mit dem Borrow-Checker an fremden Stellen."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "e0451",
+      "frage": "Was passiert beim Kompilieren dieser Datei?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "mod einheiten {",
+          "    pub struct Temperatur {",
+          "        kelvin: f32,",
+          "    }",
+          "",
+          "    impl Temperatur {",
+          "        pub fn neu(kelvin: f32) -> Option<Self> {",
+          "            (kelvin >= 0.0).then_some(Self { kelvin })",
+          "        }",
+          "    }",
+          "}",
+          "",
+          "pub fn beispiel() {",
+          "    let t = einheiten::Temperatur { kelvin: -5.0 };",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0451: Das Feld `kelvin` ist privat, ausserhalb von `einheiten` kann man den Struct nicht direkt bauen",
+        "Es kompiliert, `t` hat dann den ungültigen Wert -5 K",
+        "Panic zur Laufzeit, weil `neu` den Wert ablehnt",
+        "Fehler, weil ein `pub struct` nur `pub`-Felder haben darf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Compiler meldet `error[E0451]: field kelvin of struct Temperatur is private`. Private Felder sind in Rust das wichtigste Werkzeug zur Kapselung: Der einzige Weg zu einer `Temperatur` führt über `neu`, und `neu` prüft die **Invariante** (eine Bedingung, die für jeden Wert des Typs immer gilt): nie unter 0 K. Sichtbarkeit gilt pro Modul, nicht pro Typ, deshalb darf `neu` im selben Modul den Struct bauen.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau das verhindert die Sichtbarkeitsregel.",
+        "`neu` wird gar nicht aufgerufen, der Code baut den Struct direkt.",
+        "Ein öffentlicher Struct mit privaten Feldern ist erlaubt und üblich."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "pub-feld",
+      "frage": "Der Konstruktor prüft den Bereich. Welche Zeile macht diese Prüfung trotzdem wertlos?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub struct Sollwert {",
+          "    pub milligrad: i32,",
+          "}",
+          "",
+          "impl Sollwert {",
+          "    pub fn neu(milligrad: i32) -> Option<Self> {",
+          "        if (5_000..=30_000).contains(&milligrad) {",
+          "            Some(Self { milligrad })",
+          "        } else {",
+          "            None",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 2,
+      "erklaerung": "Mit `pub` kann jeder Aufrufer `Sollwert { milligrad: 99_000 }` direkt bauen oder ein bestehendes Feld überschreiben. Die Invariante „5 bis 30 °C“ gilt dann nicht mehr. Lass das Feld privat und biete einen Getter `pub fn milligrad(&self) -> i32` an. Ein öffentliches Feld später privat zu machen ist übrigens ein Breaking Change (Modul 9.2), also lieber von Anfang an privat."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Parse, don't validate",
+      "text": "**Validieren** heisst: prüfen und den Rohwert weiterreichen. Jede Funktion weiter hinten muss dann hoffen oder erneut prüfen. **Parsen** heisst: prüfen und dabei einen neuen Typ erzeugen, der nur gültige Werte darstellen kann.\n\n```rust\nfn validiere(p: u16) -> bool          // danach ist es immer noch ein u16\nfn parse(p: u16) -> Result<Port, Fehler> // danach ist es ein Port\n```\n\nNach dem Parsen trägt der Typ den Beweis mit sich. `fn verbinde(port: Port)` muss nichts mehr prüfen, weil es keinen ungültigen `Port` geben kann. Die Prüfung passiert einmal, an der Systemgrenze."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "tryfrom",
+      "frage": "Ergänze die Umwandlung, sodass ein `Port` nie 0 sein kann.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub struct Port(u16);",
+          "",
+          "impl {{?}}<u16> for Port {",
+          "    type Error = PortFehler;",
+          "",
+          "    fn try_from(wert: u16) -> Result<Self, Self::Error> {",
+          "        if wert == 0 {",
+          "            return {{?}}(PortFehler::Null);",
+          "        }",
+          "        Ok(Self(wert))",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["TryFrom"] },
+        { "loesungen": ["Err"] }
+      ],
+      "auswahl": ["TryFrom", "From", "Err", "None", "panic!"],
+      "erklaerung": "`TryFrom` ist der idiomatische Weg für Umwandlungen, die scheitern können. Damit funktioniert auch `let p: Port = 502u16.try_into()?;`. `From` wäre falsch, denn `From` verspricht eine Umwandlung, die nie fehlschlägt. Weil das Feld von `Port` privat ist (kein `pub` vor `u16`), kommt man von ausserhalb des Moduls nur über `try_from` an einen `Port`."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "zuordnen-prinzipien",
+      "frage": "Ordne das Prinzip dem passenden Code-Hinweis zu.",
+      "paare": [
+        { "links": "Law of Demeter", "rechts": "`a.b().c().d()` wird zu `a.mach_etwas()`" },
+        { "links": "Tell, don't ask", "rechts": "`if heizung.an() { heizung.aus() }` wird zu `heizung.aus()`" },
+        { "links": "Kapselung", "rechts": "Felder privat, Zugriff nur über Methoden" },
+        { "links": "Parse, don't validate", "rechts": "`fn sende(ziel: Port)` statt `fn sende(ziel: u16)`" }
+      ],
+      "erklaerung": "Alle vier zielen auf dasselbe: Wissen über Struktur und Regeln an **einer** Stelle bündeln. Nicht jede Kette verletzt Demeter: Iterator-Ketten wie `werte.iter().filter(..).sum()` oder Builder geben immer wieder Werte desselben Abstraktionsniveaus zurück und sind unproblematisch."
+    }
+  ],
+  "praxis": "Typisches Review-Muster in Rust: Eine Funktion nimmt `&str`, `u16` oder `f32` entgegen und prüft am Anfang mit `assert!` oder `if`. Frag dann, ob der Wert nicht besser an der Grenze, beim Einlesen von Konfiguration, Netzwerk oder Sensor, in einen eigenen Typ geparst werden sollte. Danach verschwinden die Prüfungen aus dem Kern. Ebenso fallen `pub`-Felder an Typen mit Invarianten und lange Feldketten über mehrere Typen hinweg auf.",
+  "labor": {
+    "titel": "Den Sichtbarkeitsschutz ausprobieren",
+    "anleitung": "Lege eine Bibliothek an, schreibe ein Modul `einheiten` mit `Temperatur` wie im Beispiel und versuche, den Struct ausserhalb des Moduls direkt zu bauen. Setze danach das Feld auf `pub` und sieh, was passiert.",
+    "befehle": [
+      "cargo new --lib kapsel && cd kapsel",
+      "cargo build",
+      "rustc --explain E0451 | head -20"
+    ],
+    "beobachtung": "Mit privatem Feld bricht der Build mit E0451 ab. Mit `pub` kompiliert er, und ein Wert von -5 K ist plötzlich möglich. Die Prüfung in `neu` schützt nur, solange es keinen anderen Weg zum Wert gibt."
+  },
+  "begriffe": [
+    { "begriff": "Gesetz von Demeter", "englisch": "Law of Demeter", "erklaerung": "Ein Typ spricht nur mit seinen direkten Nachbarn und greift nicht durch sie hindurch auf deren Innenleben zu." },
+    { "begriff": "Tell, don't ask", "englisch": "tell, don't ask", "erklaerung": "Einem Objekt einen Auftrag geben, statt seinen Zustand abzufragen und aussen zu entscheiden." },
+    { "begriff": "Invariante", "englisch": "invariant", "erklaerung": "Bedingung, die für jeden Wert eines Typs immer gilt, z. B. „Temperatur nie unter 0 K“." },
+    { "begriff": "Parse, don't validate", "englisch": "parse, don't validate", "erklaerung": "Eingaben einmal prüfen und dabei in einen Typ umwandeln, der nur gültige Werte darstellen kann." }
+  ],
+  "weiterlesen": [
+    { "titel": "Rust Reference: Visibility and privacy", "url": "https://doc.rust-lang.org/reference/visibility-and-privacy.html" },
+    { "titel": "std::convert::TryFrom", "url": "https://doc.rust-lang.org/std/convert/trait.TryFrom.html" }
+  ]
+}

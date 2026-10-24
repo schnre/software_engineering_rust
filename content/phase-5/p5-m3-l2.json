@@ -1,0 +1,237 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m3-l2",
+  "phase": 5,
+  "modul": "5.3 Atomics und Speichermodell",
+  "titel": "Lock-frei, Spinlocks und Atomics auf Mikrocontrollern",
+  "lernziele": [
+    "Typische Fallen lock-freier Strukturen benennen (ABA, falsche Ordnung, Spinnen)",
+    "Nebenläufigen Code mit loom systematisch testen",
+    "Erklären, warum Cortex-M0 kein `fetch_add` hat und wie `portable-atomic` hilft"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "lockfrei-schneller",
+      "frage": "Ein Teammitglied will einen `Mutex<VecDeque<Job>>` durch eine selbst geschriebene lock-freie Warteschlange ersetzen, „weil lock-frei schneller ist“. Was ist die beste erste Reaktion?",
+      "optionen": [
+        "Erst messen, ob der Mutex überhaupt ein Engpass ist, und dann ein bewährtes Crate wie `crossbeam` prüfen",
+        "Gute Idee, lock-freie Strukturen sind immer schneller",
+        "Gute Idee, solange alle Operationen `SeqCst` verwenden",
+        "Unmöglich, in Rust kann man keine lock-freien Strukturen schreiben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Lock-frei** (*lock-free*) heisst: Irgendein Thread kommt immer voran, auch wenn ein anderer mittendrin angehalten wird. Schneller ist das nicht automatisch: Unter Last wandern die Cache-Zeilen der Atomics ständig zwischen den Kernen. Vor allem sind solche Strukturen extrem schwer korrekt zu bauen, und viele Fehler zeigen sich nur selten und nur auf manchen CPUs.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein unbelasteter Mutex kostet ungefähr ein Atomic. Unter Last bremst die Konkurrenz um Cache-Zeilen beide Ansätze.",
+        "`SeqCst` behebt keine Logikfehler wie das ABA-Problem.",
+        "Das geht schon, mit Atomics und etwas `unsafe`. Die Frage ist, ob es sich lohnt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Das ABA-Problem",
+      "text": "Ein lock-freier Stack entfernt das oberste Element mit CAS: „Wenn `kopf` noch auf A zeigt, setze ihn auf A.next.“\n\n1. Thread 1 liest `kopf = A` und `A.next = B`, wird dann unterbrochen.\n2. Thread 2 entfernt A und B, gibt beide frei und legt ein neues Element oben auf, das zufällig wieder an Adresse A liegt.\n3. Thread 1 macht weiter: CAS sieht `kopf == A` und gelingt. `kopf` zeigt jetzt auf das freigegebene B.\n\nDer Vergleich prüft nur die Adresse, nicht, ob sich dazwischen etwas geändert hat. Gegenmittel sind Versionszähler neben dem Zeiger oder sichere Speicherfreigabe mit Epochen (`crossbeam-epoch`) bzw. Hazard Pointers. Safe Rust verhindert ABA nicht, die Freigabe läuft hier ja über `unsafe`."
+    },
+    {
+      "typ": "reihenfolge",
+      "id": "aba-ablauf",
+      "frage": "Bringe den ABA-Fehler in die richtige Reihenfolge.",
+      "elemente": [
+        "Thread 1 liest `kopf == A` und merkt sich `A.next == B`",
+        "Thread 2 entfernt A und B und gibt beide frei",
+        "Thread 2 legt ein neues Element auf, das wieder an Adresse A liegt",
+        "Thread 1 führt CAS aus: `kopf` ist A, also wird er auf B gesetzt",
+        "`kopf` zeigt auf freigegebenen Speicher"
+      ],
+      "erklaerung": "Der Kern des Problems: „gleiche Adresse“ heisst nicht „gleicher Zustand“. Speicherallokatoren verwenden frei gewordene Adressen gern sofort wieder, deshalb ist dieser Ablauf keineswegs exotisch."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "spinlock-ordering",
+      "frage": "Dieser Spinlock zählt im Test mit 4 Threads korrekt bis 400 000. Trotzdem ist eine Zeile falsch. Welche?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub struct SpinLock<T> {",
+          "    gesperrt: AtomicBool,",
+          "    wert: UnsafeCell<T>,",
+          "}",
+          "",
+          "unsafe impl<T: Send> Sync for SpinLock<T> {}",
+          "",
+          "impl<T> SpinLock<T> {",
+          "    pub fn mit<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {",
+          "        while self.gesperrt.swap(true, Ordering::Acquire) {",
+          "            std::hint::spin_loop();",
+          "        }",
+          "        let r = f(unsafe { &mut *self.wert.get() });",
+          "        self.gesperrt.store(false, Ordering::Relaxed);",
+          "        r",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 14,
+      "erklaerung": "Das Freigeben muss `Release` sein. Nur dann sind die Änderungen aus `f` für den nächsten Thread sichtbar, der mit `Acquire` sperrt. Mit `Relaxed` darf der Store vor die Schreibzugriffe von `f` rutschen. Auf x86 fällt das praktisch nie auf, weil die Hardware Stores ohnehin geordnet sichtbar macht. Auf ARM kann der nächste Thread veraltete Daten sehen. Genau solche Fehler findet man mit Tests auf x86 nicht – aber mit loom."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "loom: alle Verschränkungen durchprobieren",
+      "text": "`loom` führt einen Test viele Male aus und probiert dabei systematisch die möglichen Verschränkungen der Threads durch, einschliesslich der Umordnungen, die das Speichermodell erlaubt. Man ersetzt `std::sync` und `std::thread` im Test durch die loom-Varianten, meist per `#[cfg(loom)]`. Ausgeführt wird das mit `RUSTFLAGS=\"--cfg loom\" cargo test --release`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[cfg(loom)]",
+          "#[test]",
+          "fn zwei_threads_zaehlen() {",
+          "    loom::model(|| {",
+          "        let lock = loom::sync::Arc::new(SpinLock::new(0));",
+          "        let l2 = lock.clone();",
+          "        let t = loom::thread::spawn(move || l2.mit(|x| *x += 1));",
+          "        lock.mit(|x| *x += 1);",
+          "        t.join().unwrap();",
+          "        assert_eq!(lock.mit(|x| *x), 2);",
+          "    });",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 4,
+            "text": "`loom::model` führt die Closure für jede mögliche Verschränkung erneut aus."
+          },
+          {
+            "zeile": 7,
+            "text": "loom-Threads statt `std::thread`. Auch der `SpinLock` muss intern `loom::sync::atomic` verwenden."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "id": "werkzeuge-nebenlaeufig",
+      "frage": "Welches Werkzeug findet welchen Fehler am ehesten?",
+      "paare": [
+        {
+          "links": "Falsches `Ordering` in einer eigenen Synchronisation",
+          "rechts": "loom"
+        },
+        {
+          "links": "Data Race in `unsafe`-Code bei einem echten Programmlauf",
+          "rechts": "ThreadSanitizer (`-Zsanitizer=thread`, nightly)"
+        },
+        {
+          "links": "Undefined Behavior in einem kleinen `unsafe`-Test, auch Data Races",
+          "rechts": "Miri"
+        },
+        {
+          "links": "Ein `&mut` von zwei Threads gleichzeitig in safe Rust",
+          "rechts": "Der Compiler"
+        }
+      ],
+      "erklaerung": "loom erschöpft den Zustandsraum kleiner Tests, wird aber bei mehr als zwei, drei Threads schnell sehr langsam. Miri und ThreadSanitizer finden nur Fehler in den Abläufen, die tatsächlich ausgeführt werden. Für eigene Synchronisationsprimitive ist loom das Werkzeug der Wahl. Tokio und crossbeam testen damit."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "cortex-m0",
+      "frage": "Ein Treiber verwendet `AtomicU32::fetch_add`. Auf einem Cortex-M4 (`thumbv7em-none-eabihf`) kompiliert er, auf einem Cortex-M0+ (`thumbv6m-none-eabi`) nicht. Warum?",
+      "optionen": [
+        "ARMv6-M hat keine LDREX/STREX-Befehle. Atomare Lese-Ändere-Schreibe-Operationen gibt es dort nicht, nur atomares Laden und Speichern",
+        "Der Cortex-M0+ ist ein 16-Bit-Prozessor",
+        "Auf `no_std`-Zielen gibt es grundsätzlich keine Atomics",
+        "`fetch_add` braucht eine FPU"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für Compare-and-Swap und `fetch_*` braucht ARM die exklusiven Befehle `LDREX`/`STREX`, die erst ab ARMv7-M existieren. `core` bietet deshalb auf `thumbv6m` nur `load` und `store`. `rustc --print cfg --target thumbv6m-none-eabi` zeigt kein `target_has_atomic=\"32\"`, für `thumbv7em-none-eabihf` dagegen schon. Ähnlich ist es bei RISC-V-Kernen ohne A-Erweiterung, etwa `riscv32imc`.",
+      "begruendungen": [
+        "Richtig.",
+        "Alle Cortex-M sind 32-Bit-Kerne.",
+        "`core::sync::atomic` gibt es auch ohne `std`, nur nicht überall mit allen Operationen.",
+        "Atomics haben nichts mit Gleitkommazahlen zu tun."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-portable-atomic",
+      "frage": "Ergänze: Mit `portable-atomic` funktioniert derselbe Code auf beiden Kernen. Auf dem Single-Core-M0+ werden die Operationen über einen kritischen Abschnitt nachgebildet.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[dependencies]",
+          "{{?}} = { version = \"1\", features = [\"{{?}}\"] }",
+          "critical-section = \"1\""
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "portable-atomic"
+          ]
+        },
+        {
+          "loesungen": [
+            "critical-section"
+          ]
+        }
+      ],
+      "auswahl": [
+        "portable-atomic",
+        "critical-section",
+        "std",
+        "atomic-polyfill",
+        "heapless"
+      ],
+      "erklaerung": "Im Code ersetzt man `core::sync::atomic::AtomicU32` durch `portable_atomic::AtomicU32`. Wo die Hardware es kann, entstehen echte atomare Befehle. Sonst sperrt `portable-atomic` kurz die Interrupts über das `critical-section`-Crate. Die Implementierung dafür liefert meist das HAL bzw. `cortex-m` mit dem Feature `critical-section-single-core`. Das ältere `atomic-polyfill` ist veraltet. Mehr zu Interrupts und kritischen Abschnitten in Phase 6 und 7."
+    }
+  ],
+  "praxis": "Eigene lock-freie Strukturen gehören im Alltag fast nie in Produktivcode. Wenn doch, dann mit loom-Tests, ausführlichen `// SAFETY:`-Kommentaren und einem Review durch jemanden, der Erfahrung mit dem Speichermodell hat. Auf Mikrocontrollern prüfst du früh, welche Atomics das Ziel kann. Bibliotheken für mehrere Kerne nehmen `portable-atomic`, damit sie auch auf M0+ und kleinen RISC-V-Kernen laufen.",
+  "labor": {
+    "titel": "Atomic-Fähigkeiten der Ziele vergleichen",
+    "anleitung": "Lass dir die cfg-Werte für zwei Embedded-Ziele ausgeben und vergleiche die Atomic-Einträge. Dafür muss das Ziel nicht installiert sein.",
+    "befehle": [
+      "rustc --print cfg --target thumbv6m-none-eabi | grep atomic",
+      "rustc --print cfg --target thumbv7em-none-eabihf | grep atomic",
+      "rustc --print cfg --target riscv32imc-unknown-none-elf | grep atomic"
+    ],
+    "beobachtung": "Bei `thumbv7em` erscheinen `target_has_atomic=\"8\"`, `\"16\"`, `\"32\"` und `\"ptr\"`. Bei `thumbv6m` und `riscv32imc` fehlen diese Einträge. Dort sind nur Laden und Speichern atomar. Genau darauf reagiert `portable-atomic`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Lock-frei",
+      "englisch": "lock-free",
+      "erklaerung": "Eigenschaft eines Algorithmus: Mindestens ein Thread macht immer Fortschritt, auch wenn andere angehalten werden."
+    },
+    {
+      "begriff": "ABA-Problem",
+      "englisch": "ABA problem",
+      "erklaerung": "CAS hält einen Wert für unverändert, weil er zufällig wieder gleich ist, obwohl sich der Zustand dazwischen geändert hat."
+    },
+    {
+      "begriff": "Spinlock",
+      "englisch": "spinlock",
+      "erklaerung": "Sperre, bei der ein Thread in einer Schleife aktiv wartet, statt zu schlafen. Nur bei sehr kurzen kritischen Abschnitten sinnvoll."
+    },
+    {
+      "begriff": "Kritischer Abschnitt",
+      "englisch": "critical section",
+      "erklaerung": "Codebereich, der nicht unterbrochen werden darf. Auf Single-Core-Mikrocontrollern meist durch Sperren der Interrupts umgesetzt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "loom auf docs.rs",
+      "url": "https://docs.rs/loom"
+    },
+    {
+      "titel": "portable-atomic auf docs.rs",
+      "url": "https://docs.rs/portable-atomic"
+    },
+    {
+      "titel": "The Embedded Rust Book: Concurrency",
+      "url": "https://docs.rust-embedded.org/book/concurrency/"
+    }
+  ]
+}

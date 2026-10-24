@@ -1,0 +1,150 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m6-l2",
+  "phase": 7,
+  "modul": "7.6 Debugging auf der Zielhardware",
+  "titel": "HardFaults, Panics und Profiling",
+  "lernziele": [
+    "Einen HardFault-Handler mit `#[exception]` schreiben und den `ExceptionFrame` auswerten",
+    "Stacküberläufe mit flip-link erkennbar machen und von anderen Faults unterscheiden",
+    "Laufzeitverhalten auf dem Target mit Trace-Pins, defmt-Zeitstempeln und `probe-rs profile` untersuchen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Worin unterscheidet sich eine **Panik** von einem **HardFault** auf einem Cortex-M?",
+      "optionen": [
+        "Eine Panik löst Rust selbst aus (z. B. `unwrap` auf `None`, Indexfehler), ein HardFault ist eine Ausnahme der CPU (z. B. Zugriff auf ungültigen Speicher)",
+        "Beides ist dasselbe, nur unterschiedlich benannt",
+        "Ein HardFault entsteht nur in `unsafe`-Code, eine Panik nur in sicherem Code",
+        "Paniken gibt es nur im Debug-Build"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Panik ruft den `#[panic_handler]` auf (`panic-probe`, `panic-halt`, `panic-reset` …), mit Meldung und Ort. Ein HardFault springt über die Vektortabelle in den HardFault-Handler, ohne Rust-Meldung. Auch sicherer Code kann einen HardFault auslösen, etwa durch einen Stacküberlauf gegen die RAM-Grenze mit flip-link oder eine Division durch null, wenn die CPU dafür konfiguriert ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Mechanismen sind völlig verschieden.",
+        "Ein Stacküberlauf mit flip-link löst auch aus sicherem Code einen HardFault aus.",
+        "Paniken gibt es auch im Release-Build."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "HardFault-Handler mit cortex-m-rt",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use cortex_m_rt::{exception, ExceptionFrame};",
+          "",
+          "#[exception]",
+          "unsafe fn HardFault(ef: &ExceptionFrame) -> ! {",
+          "    let scb = unsafe { &*cortex_m::peripheral::SCB::PTR };",
+          "    defmt::error!(",
+          "        \"HardFault pc={=u32:#x} lr={=u32:#x} cfsr={=u32:#x}\",",
+          "        ef.pc(), ef.lr(), scb.cfsr.read()",
+          "    );",
+          "    cortex_m::asm::udf();",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Ohne Parameter gleichbedeutend mit `#[exception(trampoline = true)]`" },
+          { "zeile": 4, "text": "Muss `unsafe` sein und darf nie zurückkehren (`-> !`)" },
+          { "zeile": 8, "text": "`pc`: Adresse der Instruktion, die den Fault ausgelöst hat" }
+        ]
+      },
+      "text": "Beim Eintritt in eine Ausnahme sichert die CPU acht Register auf den Stack: r0–r3, r12, lr, pc und xPSR. Das ist der **ExceptionFrame**. Mit dem Trampolin übergibt `cortex-m-rt` dem Handler eine Referenz darauf. Das Register `CFSR` im SCB verrät die Art des Fehlers, `BFAR` bzw. `MMFAR` die betroffene Adresse."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Ein Gerät meldet `HardFault pc=0x08001a3c`. Bringe die Analyse in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Das ELF der exakt gleichen Firmware-Version bereitlegen",
+        "Den PC mit `addr2line -e firmware.elf 0x08001a3c` einer Codezeile zuordnen",
+        "`CFSR` auswerten: Bus-, Speicherschutz- oder Usage-Fault?",
+        "Bei Bus-Fault mit gültiger Adresse in `BFAR` prüfen, welche Variable dort liegt",
+        "Hypothese im Labor reproduzieren und mit einem Test absichern"
+      ],
+      "erklaerung": "Ohne passendes ELF sind Adressen wertlos, darum gehört es zu jedem Release ins Archiv. Liegt der PC im Speicher eines Peripheriemoduls oder ist er ungerade/ungültig, ist oft ein überschriebener Stack oder Funktionszeiger die Ursache. probe-rs zeigt bei einem HardFault zusätzlich einen Backtrace, wenn die Probe angeschlossen ist."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Symptome der wahrscheinlichsten Ursache zu.",
+      "paare": [
+        { "links": "HardFault, Stackpointer liegt am unteren RAM-Rand (mit flip-link)", "rechts": "Stacküberlauf" },
+        { "links": "`CFSR` meldet einen präzisen Bus-Fault, `BFAR` zeigt in einen unbelegten Adressbereich", "rechts": "Zugriff über einen falschen Zeiger oder auf nicht getaktete Peripherie" },
+        { "links": "`CFSR` meldet eine undefinierte Instruktion, PC zeigt auf `udf`", "rechts": "Bewusst ausgelöste Falle, z. B. aus `cortex_m::asm::udf()`" },
+        { "links": "Panik-Meldung „index out of bounds“ über defmt", "rechts": "Logikfehler im sicheren Rust-Code" }
+      ],
+      "erklaerung": "Mit flip-link wird ein Stacküberlauf eindeutig: Der Stack läuft gegen die RAM-Grenze, die CPU löst sofort einen Fault aus. Ohne flip-link würden still `static`-Variablen überschrieben, und der Fehler zeigt sich erst viel später an einer ganz anderen Stelle."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieser Fault-Handler soll im Feld den PC für die Diagnose nach dem Neustart sichern. Welche Zeile ist problematisch?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[unsafe(link_section = \".uninit.DIAG\")]",
+          "static mut LETZTER_PC: MaybeUninit<u32> = MaybeUninit::uninit();",
+          "",
+          "#[exception]",
+          "unsafe fn HardFault(ef: &ExceptionFrame) -> ! {",
+          "    unsafe { (&raw mut LETZTER_PC).write(MaybeUninit::new(ef.pc())); }",
+          "    let text = alloc::format!(\"Fault bei {:#x}\", ef.pc());",
+          "    defmt::error!(\"{}\", text.as_str());",
+          "    cortex_m::peripheral::SCB::sys_reset();",
+          "}"
+        ]
+      },
+      "fehlerZeile": 7,
+      "erklaerung": "Im Fault-Handler ist der Zustand des Systems unklar: Der Heap kann beschädigt, der Stack fast voll sein. `format!` alloziert und formatiert, also genau das, was jetzt scheitern kann, oft mit einem verschachtelten Fault. Ein Fault-Handler soll so wenig wie möglich tun: Register in einen nicht initialisierten RAM-Bereich schreiben (Zeilen 1–6, die Werte überleben den Neustart), dann zurücksetzen. Die Auswertung macht die Firmware nach dem Neustart."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Du willst wissen, in welchen Funktionen deine Firmware die meiste Zeit verbringt, ohne den Code zu ändern. Was nutzt du?",
+      "optionen": [
+        "Einen Sampling-Profiler wie `probe-rs profile`, der regelmässig den PC über die Debug-Schnittstelle abfragt",
+        "`defmt::info!` am Anfang jeder Funktion",
+        "`cargo bloat`",
+        "Den HardFault-Handler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein **Sampling-Profiler** liest viele Male pro Sekunde den aktuellen PC und zählt, wie oft welche Funktion getroffen wird. Das verändert das Zeitverhalten kaum. probe-rs bietet dafür `probe-rs profile` mit einfacher und Callstack-Variante. Für genaue Einzelmessungen nimmst du den DWT-Zykluszähler oder einen Trace-Pin mit Logikanalysator, für Abläufe zwischen Tasks defmt-Meldungen mit Zeitstempel (`defmt::timestamp!`) oder RTOS-Tracing.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ändert den Code und kostet bei jedem Aufruf Zeit.",
+        "`cargo bloat` misst Codegrösse, nicht Laufzeit.",
+        "Der HardFault-Handler läuft nur bei Fehlern."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Beim Eintritt in eine Ausnahme sichert die CPU acht Register, den {{?}}. Die Art des Fehlers steht im Register {{?}}. Damit ein Stacküberlauf zuverlässig einen Fault auslöst, linkt man mit {{?}}.",
+      "luecken": [{ "loesungen": ["ExceptionFrame"] }, { "loesungen": ["CFSR"] }, { "loesungen": ["flip-link"] }],
+      "auswahl": ["ExceptionFrame", "CFSR", "flip-link", "BASEPRI", "rust-lld", "Vektortabelle"],
+      "erklaerung": "`BASEPRI` ist das Register für Prioritätsmasken (RTIC), `rust-lld` der Standard-Linker ohne Stack-Schutz. Die Vektortabelle enthält die Adressen der Handler, nicht die gesicherten Register."
+    }
+  ],
+  "praxis": "Diagnosefähigkeit wird eingebaut, nicht nachgerüstet: ein schlanker HardFault-Handler, der PC, LR und CFSR in nicht initialisiertes RAM schreibt, ein Panik-Handler für das Feld (z. B. `panic-persist` oder `panic-reset`), flip-link, defmt mit Zeitstempeln und für jede ausgelieferte Version das ELF im Archiv. Damit wird aus „das Gerät startet manchmal neu“ eine konkrete Codezeile.",
+  "labor": {
+    "titel": "Adresse einer Codezeile zuordnen",
+    "anleitung": "Ohne Board kannst du das Prinzip auf dem PC üben: Baue ein Programm mit Debug-Infos, suche mit `nm` die Adresse einer Funktion und übersetze sie mit `addr2line` zurück in Datei und Zeile.",
+    "befehle": [
+      "cargo build",
+      "nm -C target/debug/projekt | grep regelschritt",
+      "addr2line -f -C -e target/debug/projekt 0x<adresse>"
+    ],
+    "beobachtung": "`addr2line` liefert Funktionsname, Datei und Zeile. Mit Embedded-Target und probe-rs funktioniert das genauso mit `arm-none-eabi-addr2line` oder `llvm-addr2line` auf dem Firmware-ELF."
+  },
+  "begriffe": [
+    { "begriff": "HardFault", "englisch": "hard fault", "erklaerung": "Ausnahme des Cortex-M bei schweren Fehlern wie ungültigen Speicherzugriffen." },
+    { "begriff": "ExceptionFrame", "englisch": "exception frame", "erklaerung": "Von der CPU beim Ausnahme-Eintritt auf den Stack gesicherte Register (r0–r3, r12, lr, pc, xPSR)." },
+    { "begriff": "CFSR", "englisch": "configurable fault status register", "erklaerung": "Register im SCB, das die Art eines Faults anzeigt." },
+    { "begriff": "Sampling-Profiler", "englisch": "sampling profiler", "erklaerung": "Werkzeug, das regelmässig den Programmzähler abfragt und so die Zeitverteilung schätzt." }
+  ],
+  "weiterlesen": [
+    { "titel": "docs.rs: cortex-m-rt (exception)", "url": "https://docs.rs/cortex-m-rt/latest/cortex_m_rt/attr.exception.html" },
+    { "titel": "probe-rs", "url": "https://probe.rs/" }
+  ]
+}

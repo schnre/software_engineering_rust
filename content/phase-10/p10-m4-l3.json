@@ -1,0 +1,228 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m4-l3",
+  "phase": 10,
+  "modul": "10.4 Entwurfsmuster",
+  "titel": "Strategy, Builder und Newtype",
+  "lernziele": [
+    "Strategy als Generic oder als `dyn Trait` umsetzen und den Unterschied begründen",
+    "Einen Builder schreiben, auch als Typestate-Builder, der Pflichtfelder zur Kompilierzeit erzwingt",
+    "Newtypes einsetzen, um Werte mit gleicher Darstellung unterscheidbar zu machen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "erklaerung",
+      "titel": "Strategy: austauschbares Verhalten",
+      "text": "Das **Strategy-Muster** (strategy pattern) lagert einen austauschbaren Algorithmus hinter eine Schnittstelle aus, z. B. den Filter eines Reglers. In Rust ist die Schnittstelle ein Trait. Für den Einbau gibt es zwei Wege:\n\n- **Generic** `Regler<F: Filter>`: Der Filter ist Teil des Typs. Der Compiler erzeugt pro Filter eigenen Code und kann ihn inlinen. Austausch zur Laufzeit ist nicht möglich.\n- **Trait-Objekt** `Box<dyn Filter>`: Der Aufruf geht über eine vtable. Dafür lässt sich der Filter zur Laufzeit wechseln, etwa per Konfiguration.\n\nMehr zu dieser Abwägung in Modul 10.5.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "trait Filter {",
+          "    fn anwenden(&mut self, x: f32) -> f32;",
+          "}",
+          "",
+          "struct ReglerStatisch<F: Filter> { filter: F }",
+          "struct ReglerDynamisch { filter: Box<dyn Filter> }"
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "`Roh` und `Glaetten` implementieren beide `Filter`. Was passiert hier?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Regler<F: Filter> { filter: F }",
+          "",
+          "fn main() {",
+          "    let mut r = Regler { filter: Roh };",
+          "    r.filter = Glaetten { letzter: 0.0 };",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, der Regler nutzt danach `Glaetten`",
+        "Fehler `E0308`: erwartet `Roh`, gefunden `Glaetten`",
+        "Fehler `E0038`: `Filter` ist nicht dyn-kompatibel",
+        "Kompiliert, aber `Roh` wird nie freigegeben"
+      ],
+      "korrekt": 1,
+      "erklaerung": "`r` hat den Typ `Regler<Roh>`. Der Typparameter ist fest, sobald der Wert entsteht. Wer den Filter zur Laufzeit tauschen will, braucht `Box<dyn Filter>` oder ein `enum` über alle Filter. Mit `Box<dyn Filter>` kompiliert dieselbe Zuweisung (als `Box::new(Glaetten { … })`).",
+      "begruendungen": [
+        "Ein generischer Typparameter lässt sich nachträglich nicht ändern.",
+        "Richtig.",
+        "Der Trait ist dyn-kompatibel, er wird hier aber gar nicht als `dyn` benutzt.",
+        "Es entsteht gar kein Programm."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "In welchem Fall ist `Box<dyn Filter>` die bessere Wahl als ein Generic?",
+      "optionen": [
+        "Der Filter wird beim Start aus einer Konfigurationsdatei gewählt und soll im Betrieb umschaltbar sein",
+        "Der Filter läuft in einer Regelschleife mit 20 kHz auf einem Mikrocontroller ohne Heap",
+        "Es gibt genau einen Filter, der nie wechselt",
+        "Man möchte, dass der Compiler den Filteraufruf inlinet"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Laufzeitwahl ist die Stärke des Trait-Objekts. Für feste Konfigurationen, heisse Pfade und Systeme ohne Allocator ist das Generic meist besser. Auf Mikrocontrollern geht `dyn` auch ohne Heap, etwa als `&mut dyn Filter` auf einen statischen Wert.",
+      "begruendungen": [
+        "Richtig.",
+        "Hier spricht alles für ein Generic: kein Heap, Inlining, fester Filter.",
+        "Dann bringt die Laufzeitflexibilität nichts.",
+        "Inlining über eine vtable hinweg gelingt dem Compiler nur selten."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Builder",
+      "text": "Rust hat keine überladenen Konstruktoren und keine Default-Argumente. Bei vielen optionalen Parametern hilft das **Builder-Muster** (builder pattern): Ein Hilfstyp sammelt die Einstellungen über verkettete Methoden, `build()` erzeugt am Ende das Objekt.\n\nDie Methoden nehmen `self` per Wert und geben `Self` zurück, damit man `UartBuilder::new().baudrate(9600).paritaet(true).build()` schreiben kann. Fehlt ein Pflichtfeld, liefert `build()` ein `Result`. `std::process::Command` und `std::thread::Builder` sind Builder aus der Standardbibliothek.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Default)]",
+          "struct UartBuilder { baud: Option<u32>, paritaet: bool }",
+          "",
+          "impl UartBuilder {",
+          "    fn baudrate(mut self, b: u32) -> Self { self.baud = Some(b); self }",
+          "    fn paritaet(mut self, p: bool) -> Self { self.paritaet = p; self }",
+          "    fn build(self) -> Result<Uart, &'static str> {",
+          "        let baud = self.baud.ok_or(\"Baudrate fehlt\")?;",
+          "        Ok(Uart { baud, paritaet: self.paritaet })",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 5, "text": "`mut self` per Wert: Der Builder wird durchgereicht." },
+          { "zeile": 8, "text": "Pflichtfeld zur Laufzeit geprüft." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein **Typestate-Builder** hat den Typparameter `Fehlt` oder `Gesetzt`. `bauen()` gibt es nur für `UartBuilder<Gesetzt>`, und erst `baudrate()` wechselt dorthin. Jemand schreibt `UartBuilder::neu().paritaet(true).bauen()`. Was bedeutet die Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0599]: no method named `bauen` found for struct `UartBuilder<Fehlt>` in the current scope",
+          "  --> src/main.rs:16:47",
+          "   |",
+          " 3 | struct UartBuilder<B> { baud: u32, paritaet: bool, _b: PhantomData<B> }",
+          "   | --------------------- method `bauen` not found for this struct",
+          "...",
+          "16 |     let u = UartBuilder::neu().paritaet(true).bauen();",
+          "   |                                               ^^^^^ method not found in `UartBuilder<Fehlt>`",
+          "   |",
+          "   = note: the method was found for `UartBuilder<Gesetzt>`"
+        ]
+      },
+      "optionen": [
+        "Die Baudrate wurde nicht gesetzt. Das Pflichtfeld wird zur Kompilierzeit erzwungen, ein `Result` ist nicht nötig",
+        "`bauen` ist privat und muss mit `pub` markiert werden",
+        "`paritaet` hat den Builder verbraucht, er kann nicht weiterverwendet werden",
+        "Die Methode `bauen` wurde vergessen zu implementieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Typestate-Builder verschiebt die Prüfung „Pflichtfeld gesetzt?“ vom Laufzeit-`Result` in den Typ. Der Hinweis `the method was found for UartBuilder<Gesetzt>` zeigt, was fehlt. Der Preis: mehr Typparameter und `impl`-Blöcke. Das lohnt sich bei wenigen, wirklich zwingenden Feldern, etwa bei der Konfiguration von Peripherie.",
+      "begruendungen": [
+        "Richtig.",
+        "Sichtbarkeit ist hier nicht das Problem, der Fehler wäre dann `E0624`.",
+        "`paritaet` gibt den Builder zurück, die Kette ist gültig.",
+        "Die Methode existiert, nur nicht für diesen Zustand."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Newtypes, damit Höhen in Metern und in Fuss nicht verwechselt werden können.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Meter(f64);",
+          "struct Fuss(f64);",
+          "",
+          "impl {{?}}<Fuss> for Meter {",
+          "    fn from(f: Fuss) -> Self { Meter(f.{{?}} * 0.3048) }",
+          "}",
+          "",
+          "fn hoehe_setzen(h: {{?}}) { /* … */ }"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["From"] },
+        { "loesungen": ["0"] },
+        { "loesungen": ["Meter"] }
+      ],
+      "auswahl": ["From", "Into", "0", "1", "Meter", "f64"],
+      "erklaerung": "Ein **Newtype** ist ein Tupel-Struct mit genau einem Feld. Auf das Feld greift man mit `.0` zu. Implementiert man `From<Fuss> for Meter`, bekommt man `Into` gratis und kann `Fuss(1000.0).into()` schreiben. Würde `hoehe_setzen` ein `f64` nehmen, wäre die ganze Unterscheidung wertlos."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was kostet ein Newtype wie `struct Meter(f64)` zur Laufzeit?",
+      "optionen": [
+        "Nichts: Er hat dieselbe Grösse wie `f64`, und nach der Optimierung entsteht derselbe Maschinencode",
+        "Eine zusätzliche Indirektion über einen Zeiger",
+        "Acht zusätzliche Bytes für die Typinformation",
+        "Eine Laufzeitprüfung bei jeder Zuweisung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`size_of::<Meter>()` ist 8, genau wie `size_of::<f64>()`. Die Typinformation existiert nur für den Compiler. Mit `#[repr(transparent)]` garantiert man das gleiche Layout sogar über eine FFI-Grenze. Mehr zu starken Typen in Modul 10.6.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Feld liegt direkt im Struct, ohne Zeiger.",
+        "Rust speichert keine Typinformation in Werten, ausser bei `dyn`-Zeigern in der vtable.",
+        "Geprüft wird beim Kompilieren, nicht zur Laufzeit."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne Muster und Zweck zu.",
+      "paare": [
+        { "links": "Strategy mit Generic", "rechts": "Austauschbarer Algorithmus, zur Kompilierzeit festgelegt, ohne vtable" },
+        { "links": "Strategy mit `dyn Trait`", "rechts": "Austauschbarer Algorithmus, zur Laufzeit wählbar" },
+        { "links": "Builder", "rechts": "Viele optionale Einstellungen ohne überladene Konstruktoren" },
+        { "links": "Typestate-Builder", "rechts": "Pflichtfelder werden vom Compiler erzwungen" },
+        { "links": "Newtype", "rechts": "Gleiche Darstellung, aber verschiedene Bedeutung, z. B. Meter und Fuss" }
+      ],
+      "erklaerung": "Viele klassische Entwurfsmuster schrumpfen in Rust zu wenigen Zeilen, weil Traits, Closures und Enums die Arbeit übernehmen. Eine Strategy kann sogar einfach eine Closure sein: `fn regeln(filter: impl FnMut(f32) -> f32)`."
+    }
+  ],
+  "praxis": "Builder begegnen dir in fast jedem Rust-Crate mit Konfiguration: `reqwest::ClientBuilder`, `tokio::runtime::Builder`, in HALs bei Takt- und UART-Konfiguration. Wenn du selbst einen schreibst, prüfe Crates wie `bon` oder `typed-builder`, die Builder per derive erzeugen. Bei Strategy lohnt im Review die Frage: Muss das wirklich zur Laufzeit wechseln? Wenn nein, ist ein Generic meist einfacher und schneller.",
+  "labor": {
+    "titel": "Builder per Hand und per derive",
+    "anleitung": "Schreibe den `UartBuilder` aus der Lektion von Hand. Füge danach `typed-builder` hinzu und vergleiche: Was meldet der Compiler, wenn ein Pflichtfeld fehlt?",
+    "befehle": [
+      "cargo new builder && cd builder",
+      "cargo add typed-builder",
+      "cargo build"
+    ],
+    "beobachtung": "Der handgeschriebene Builder meldet ein fehlendes Pflichtfeld erst zur Laufzeit als `Err`. Der generierte Typestate-Builder lässt den Aufruf von `build()` gar nicht erst kompilieren."
+  },
+  "begriffe": [
+    {
+      "begriff": "Strategie-Muster",
+      "englisch": "strategy pattern",
+      "erklaerung": "Austauschbarer Algorithmus hinter einer gemeinsamen Schnittstelle, in Rust ein Trait oder eine Closure."
+    },
+    {
+      "begriff": "Builder-Muster",
+      "englisch": "builder pattern",
+      "erklaerung": "Hilfstyp, der Einstellungen über verkettete Methoden sammelt und am Ende das Objekt erzeugt."
+    },
+    {
+      "begriff": "Newtype",
+      "englisch": "newtype",
+      "erklaerung": "Tupel-Struct mit einem Feld, das einem vorhandenen Typ eine eigene Bedeutung gibt, ohne Laufzeitkosten."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust API Guidelines",
+      "url": "https://rust-lang.github.io/api-guidelines/"
+    },
+    {
+      "titel": "Rust Design Patterns",
+      "url": "https://rust-unofficial.github.io/patterns/"
+    }
+  ]
+}

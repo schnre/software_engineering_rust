@@ -1,0 +1,274 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m3-l3",
+  "phase": 12,
+  "modul": "12.3 Security für Embedded-Systeme",
+  "titel": "Secure Boot, Härtung und Fuzzing",
+  "lernziele": [
+    "Die Vertrauenskette von Secure Boot erklären und Signaturen mit RustCrypto-Crates prüfen",
+    "Firmware härten: Überlaufprüfungen im Release, Vergleiche mit konstanter Laufzeit, Schlüsselablage",
+    "Parser mit cargo-fuzz und libFuzzer systematisch angreifen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "reihenfolge",
+      "id": "chain-of-trust",
+      "frage": "Bringe die Glieder der Vertrauenskette (*chain of trust*) beim Secure Boot in die richtige Reihenfolge.",
+      "elemente": [
+        "Unveränderlicher Boot-ROM-Code im Chip, Hash des öffentlichen Schlüssels in OTP-Speicher",
+        "Boot-ROM prüft die Signatur des Bootloaders",
+        "Bootloader prüft die Signatur des Anwendungs-Images",
+        "Nur bei gültiger Signatur springt der Bootloader in die Anwendung"
+      ],
+      "erklaerung": "Der **Root of Trust** ist Code, den niemand ändern kann, mit einem Schlüssel, den niemand austauschen kann. Jede Stufe prüft die nächste, bevor sie sie startet. In Rust-Projekten übernimmt das z. B. `embassy-boot` mit Ed25519-Signaturen oder MCUboot (Phase 6). Reisst ein Glied, etwa weil ein Debug-Port offen bleibt, ist die ganze Kette wertlos."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "ed25519",
+      "frage": "Der Bootloader prüft ein Image mit `ed25519-dalek`. Was ist an diesem Entwurf richtig?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use ed25519_dalek::{Signature, Verifier, VerifyingKey};",
+          "",
+          "const HERSTELLER_PK: [u8; 32] = *include_bytes!(\"hersteller.pub\");",
+          "",
+          "fn firmware_gueltig(image: &[u8], sig: &[u8; 64]) -> bool {",
+          "    let Ok(pk) = VerifyingKey::from_bytes(&HERSTELLER_PK) else { return false };",
+          "    let sig = Signature::from_bytes(sig);",
+          "    pk.verify(image, &sig).is_ok()",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 3,
+            "text": "Nur der **öffentliche** Schlüssel gehört ins Gerät."
+          },
+          {
+            "zeile": 6,
+            "text": "Ungültiger Schlüssel führt zu „nicht gültig“, nicht zu einem Panic."
+          }
+        ]
+      },
+      "optionen": [
+        "Nur der öffentliche Schlüssel liegt im Gerät, jeder Fehlerpfad endet in „ungültig“ (*fail-closed*), und es wird eine geprüfte Bibliothek statt eigener Kryptografie verwendet",
+        "Das Image wird verschlüsselt, damit niemand es lesen kann",
+        "Der private Schlüssel ist im Binary sicher, weil Rust speichersicher ist",
+        "Die Prüfung ist überflüssig, wenn das Image per CRC geschützt ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Signatur schützt **Echtheit und Unverfälschtheit**, nicht Vertraulichkeit. Die Crates der **RustCrypto**-Familie und `ed25519-dalek` sind `no_std`-fähig und auf Mikrocontrollern einsetzbar. Wichtig ist, was danach kommt: Rollback-Schutz (Versionszähler, damit keine alte, verwundbare Firmware zurückgespielt wird) und eine definierte Reaktion bei ungültigem Image, z. B. Start der vorherigen Partition.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Signatur verschlüsselt nichts. Dafür bräuchte es zusätzlich z. B. AES-GCM.",
+        "Der private Schlüssel gehört nie aufs Gerät, sondern in ein HSM beim Hersteller. Ein ausgelesenes Gerät würde sonst alle kompromittieren.",
+        "Eine CRC erkennt zufällige Fehler, aber jeder kann sie für ein manipuliertes Image neu berechnen."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "timing",
+      "frage": "Diese Funktion prüft ein Authentifizierungs-Token. Welche Zeile ist eine Schwachstelle?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn token_gueltig(erhalten: &[u8; 32], erwartet: &[u8; 32]) -> bool {",
+          "    for i in 0..32 {",
+          "        if erhalten[i] != erwartet[i] {",
+          "            return false;",
+          "        }",
+          "    }",
+          "    true",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Die Schleife bricht beim ersten falschen Byte ab. Die Laufzeit verrät, wie viele Bytes stimmen, und ein Angreifer kann das Token Byte für Byte erraten (**Timing-Angriff**). Dasselbe gilt für `erhalten == erwartet`. Richtig ist ein Vergleich mit **konstanter Laufzeit**, z. B. mit dem Crate `subtle`: `erhalten.ct_eq(erwartet).into()`. Speichersicherheit hilft gegen solche Seitenkanäle nicht."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "overflow-release",
+      "frage": "Dasselbe Programm berechnet `n + 1` mit `n: u8 = 255`. Was zeigen die beiden Läufe?",
+      "terminal": {
+        "befehl": "cargo run; cargo run --release",
+        "ausgabe": [
+          "thread 'main' (9220) panicked at src/main.rs:3:17:",
+          "attempt to add with overflow",
+          "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+          "    Finished `release` profile [optimized] target(s) in 0.31s",
+          "     Running `target/release/overflow`",
+          "0"
+        ]
+      },
+      "optionen": [
+        "Im Debug-Build wird der Überlauf erkannt und panikt, im Release-Build läuft der Wert standardmässig still auf 0 über",
+        "Der Release-Build ist fehlerhaft übersetzt",
+        "Überlauf ist in Rust undefiniertes Verhalten, beide Ergebnisse sind zufällig",
+        "Der Release-Build hat den Überlauf behoben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ganzzahlüberlauf ist in Rust kein UB, aber im Release-Profil ist `overflow-checks` standardmässig aus. Ein still übergelaufener Längenwert oder Zähler kann zur Sicherheitslücke werden. Für sicherheitsrelevante Firmware setzt man oft `overflow-checks = true` im `[profile.release]` und verwendet für erwartbare Überläufe gezielt `checked_add`, `saturating_add` oder `wrapping_add`, damit das Verhalten explizit ist.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Verhalten ist dokumentiert: Im Release wird zweierkomplementär umgebrochen.",
+        "Rust definiert beide Verhaltensweisen genau. UB entsteht hier nicht.",
+        "Er ist nur unbemerkt geblieben. Das Ergebnis 0 ist falsch."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "profil-haertung",
+      "frage": "Ergänze das gehärtete Release-Profil.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "{{?}} = true",
+          "panic = \"{{?}}\"",
+          "debug-assertions = false",
+          "lto = true"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "overflow-checks"
+          ]
+        },
+        {
+          "loesungen": [
+            "abort"
+          ]
+        }
+      ],
+      "auswahl": [
+        "overflow-checks",
+        "abort",
+        "unwind",
+        "bounds-checks"
+      ],
+      "erklaerung": "`overflow-checks` kostet etwas Laufzeit und Codegrösse, die man messen sollte. `panic = \"abort\"` ist auf Mikrocontrollern üblich, der `#[panic_handler]` entscheidet dann über die Reaktion. Eine Option `bounds-checks` gibt es nicht: Bereichsprüfungen bei Slices sind in Rust immer aktiv."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Fuzzing mit cargo-fuzz",
+      "text": "**Fuzzing** füttert eine Funktion mit Millionen automatisch erzeugter Eingaben und beobachtet, ob sie abstürzt. *Coverage-guided* Fuzzer wie **libFuzzer** merken sich, welche Eingaben neue Pfade erreichen, und variieren gezielt diese. `cargo fuzz` (benötigt nightly) richtet das ein: `cargo fuzz init`, ein Ziel schreiben, `cargo fuzz run parser`. Ein Panic, ein Überlauf mit aktivierten Checks oder ein Fehler, den der AddressSanitizer in `unsafe`-Code findet, wird als Absturz mit Eingabedatei gemeldet.\n\nIdeale Ziele sind Parser für externe Daten: Funkprotokolle, Konfigurationsdateien, Update-Pakete.",
+      "code": {
+        "sprache": "rust",
+        "datei": "fuzz/fuzz_targets/parser.rs",
+        "zeilen": [
+          "#![no_main]",
+          "use libfuzzer_sys::fuzz_target;",
+          "",
+          "fuzz_target!(|daten: &[u8]| {",
+          "    let _ = protokoll::nutzdaten(daten);",
+          "});"
+        ]
+      }
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "fuzz-fund",
+      "frage": "Der Fuzzer findet im Parser `nutzdaten` einen Panic `range end index 6 out of range for slice of length 2`. Wie gehst du vor?",
+      "optionen": [
+        "Die gespeicherte Eingabe als Regressionstest übernehmen, den Parser panikfrei umbauen (`split_first`, `get` mit `Option`) und den Fuzzer weiterlaufen lassen",
+        "Den Panic ignorieren, weil kein Speicherfehler vorliegt",
+        "Den Fuzzer so einstellen, dass er nur noch Pakete ab 7 Bytes erzeugt",
+        "`catch_unwind` um den Aufruf legen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Panic auf Eingaben aus dem Netz ist ein Denial-of-Service. Der Absturzfall wird zum festen Test, damit er nie zurückkommt. Danach läuft der Fuzzer weiter, oft im CI nachts. Die Sammlung interessanter Eingaben (*corpus*) wird mitversioniert, damit spätere Läufe darauf aufbauen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Angreifer kann das Gerät damit gezielt abstürzen lassen.",
+        "Damit versteckt man den Fehler nur, Angreifer halten sich nicht an diese Einschränkung.",
+        "Auf Mikrocontrollern mit `panic = \"abort\"` gibt es kein Unwinding, und es kaschiert nur das Symptom."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "haertung",
+      "frage": "Welche Härtungsmassnahme schützt wogegen?",
+      "paare": [
+        {
+          "links": "Debug-Port (SWD/JTAG) in der Fertigung sperren",
+          "rechts": "Auslesen und Umprogrammieren mit physischem Zugang"
+        },
+        {
+          "links": "Rollback-Schutz mit Versionszähler",
+          "rechts": "Einspielen einer alten, signierten, aber verwundbaren Firmware"
+        },
+        {
+          "links": "Schlüssel im Secure Element",
+          "rechts": "Extraktion des Geräteschlüssels aus dem Flash"
+        },
+        {
+          "links": "Vergleich mit konstanter Laufzeit",
+          "rechts": "Erraten von Geheimnissen über Zeitmessung"
+        },
+        {
+          "links": "`zeroize` für Schlüsselpuffer",
+          "rechts": "Geheimnisse, die nach Gebrauch im RAM liegen bleiben"
+        }
+      ],
+      "erklaerung": "Das Crate `zeroize` überschreibt Speicher so, dass der Compiler das nicht wegoptimiert, und wird von vielen RustCrypto-Crates verwendet. Keine einzelne Massnahme genügt. Härtung ist Schichtarbeit (*defense in depth*): Jede Schicht soll halten, auch wenn eine andere fällt."
+    }
+  ],
+  "praxis": "Für eine vernetzte Firmware sind diese Massnahmen heute Stand der Technik und mit dem CRA auch nachzuweisen: Secure Boot mit Rollback-Schutz, Geräteschlüssel im Secure Element, Debug-Zugang im Feld gesperrt, Überlaufprüfungen bewusst entschieden, Geheimnisse mit `subtle` verglichen und mit `zeroize` gelöscht, Parser im CI gefuzzt. Rust nimmt dir die Speicherfehler ab. Diese Liste bleibt deine Aufgabe.",
+  "labor": {
+    "titel": "Signatur prüfen und einen Parser fuzzen",
+    "anleitung": "Lege ein Projekt mit `ed25519-dalek` und `subtle` an und schreibe `firmware_gueltig` und einen konstanten Vergleich. Prüfe danach die Wirkung von `overflow-checks`. Wenn eine nightly-Toolchain verfügbar ist, fuzze den Parser aus Lektion 12.3.1.",
+    "befehle": [
+      "cargo add ed25519-dalek subtle",
+      "cargo run --release",
+      "cargo install cargo-fuzz",
+      "cargo +nightly fuzz init",
+      "cargo +nightly fuzz add parser",
+      "cargo +nightly fuzz run parser -- -max_total_time=60"
+    ],
+    "beobachtung": "Ein falscher Schlüssel oder eine falsche Signatur liefert `false` statt eines Panics. Der Fuzzer findet den Bereichsfehler im naiven Parser meist innerhalb von Sekunden und legt die auslösende Eingabe unter `fuzz/artifacts/parser/` ab."
+  },
+  "begriffe": [
+    {
+      "begriff": "Secure Boot",
+      "englisch": "secure boot",
+      "erklaerung": "Startvorgang, bei dem jede Stufe die Signatur der nächsten prüft."
+    },
+    {
+      "begriff": "Root of Trust",
+      "englisch": "root of trust",
+      "erklaerung": "Unveränderlicher Ausgangspunkt der Vertrauenskette."
+    },
+    {
+      "begriff": "Konstante Laufzeit",
+      "englisch": "constant time",
+      "erklaerung": "Eigenschaft eines Vergleichs oder Algorithmus, dessen Dauer nicht von geheimen Daten abhängt."
+    },
+    {
+      "begriff": "Fuzzing",
+      "englisch": "fuzzing",
+      "erklaerung": "Automatisches Testen mit massenhaft erzeugten, oft ungültigen Eingaben, um Abstürze zu finden."
+    },
+    {
+      "begriff": "Rollback-Schutz",
+      "englisch": "anti-rollback protection",
+      "erklaerung": "Verhindert das Zurückspielen älterer Firmware-Versionen trotz gültiger Signatur."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "docs.rs: ed25519-dalek",
+      "url": "https://docs.rs/ed25519-dalek"
+    },
+    {
+      "titel": "docs.rs: subtle",
+      "url": "https://docs.rs/subtle"
+    },
+    {
+      "titel": "Rust Fuzz Book",
+      "url": "https://rust-fuzz.github.io/book/"
+    }
+  ]
+}

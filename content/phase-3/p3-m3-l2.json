@@ -1,0 +1,174 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p3-m3-l2",
+  "phase": 3,
+  "modul": "3.3 Wertsemantik und Operatoren",
+  "titel": "Operatoren und Umwandlungen",
+  "lernziele": [
+    "Operatoren über die Traits aus `std::ops` überladen",
+    "`From`/`Into` und `TryFrom` für verlustfreie und fehlbare Umwandlungen einsetzen",
+    "`Deref`, `AsRef`, `Display` und `Debug` passend wählen und Deref-Missbrauch erkennen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "mul-reihenfolge",
+      "frage": "`V2` implementiert `Mul<f32>`. Welche Zeile kompiliert nicht?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Debug, Clone, Copy)]",
+          "struct V2 { x: f32, y: f32 }",
+          "",
+          "impl Mul<f32> for V2 {",
+          "    type Output = V2;",
+          "    fn mul(self, k: f32) -> V2 { V2 { x: self.x * k, y: self.y * k } }",
+          "}",
+          "",
+          "let a = V2 { x: 1.0, y: 2.0 };",
+          "let b = a * 2.0;   // Zeile 10",
+          "let c = 2.0 * a;   // Zeile 11"
+        ]
+      },
+      "optionen": [
+        "Zeile 11: `E0277: cannot multiply `{float}` by `V2``",
+        "Zeile 10: `f32` muss als Referenz übergeben werden",
+        "Beide kompilieren, Multiplikation ist kommutativ",
+        "Keine, aber `a` ist nach Zeile 10 verschoben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`a * 2.0` ruft `Mul::mul(a, 2.0)` auf, der **linke** Operand bestimmt die Impl. Für `2.0 * a` bräuchte es `impl Mul<V2> for f32`. Das ist erlaubt, obwohl `f32` fremd ist, weil `V2` als Typparameter lokal ist (Orphan Rule, Modul 3.1). Der Compiler nimmt keine Kommutativität an.",
+      "begruendungen": [
+        "Richtig.",
+        "`Mul<f32>` nimmt `f32` nach Wert.",
+        "Rust leitet keine Operator-Impls aus anderen ab.",
+        "`V2` ist `Copy`, `a` bleibt nutzbar."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Operatoren sind Traits",
+      "text": "Jeder Operator ist ein Trait in `std::ops`, mit einem assoziierten Typ `Output` für das Ergebnis:\n\n- `a + b` → `Add::add(a, b)`, analog `Sub`, `Mul`, `Div`, `Rem`, `BitAnd` …\n- `-a` → `Neg`, `!a` → `Not`\n- `a += b` → `AddAssign::add_assign(&mut a, b)`, eigener Trait, nicht automatisch aus `Add`\n- `a[i]` → `*Index::index(&a, i)` bzw. `IndexMut`\n- `*a` → `Deref`/`DerefMut`\n\nDie Operatoren nehmen ihre Operanden **nach Wert**. Für Typen ohne `Copy` heisst das: `a + b` verschiebt `a`. Darum implementieren Bibliotheken oft zusätzlich `impl Add<&Matrix> for &Matrix`. Neue Operatoren erfinden oder `&&`, `||`, `=` überladen geht nicht."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "add-verschiebt",
+      "frage": "Welche Zeile meldet `E0382: borrow of moved value: a`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[derive(Debug)]",
+          "struct Puffer { daten: Vec<u8> }",
+          "// impl Add for Puffer { … hängt die Daten an … }",
+          "",
+          "let a = Puffer { daten: vec![1] };",
+          "let b = Puffer { daten: vec![2] };",
+          "let c = a + b;",
+          "println!(\"{:?} {:?}\", c, a);"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "`a + b` verbraucht beide Operanden, rustc vermerkt „calling this operator moves the left-hand side“. Der Fehler wird beim späteren Zugriff in Zeile 8 gemeldet. Für teure Typen ist ein `AddAssign` (`a += b`) oft die bessere Schnittstelle: Es verändert `a` an Ort und Stelle und gibt den Puffer nicht weg."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Umwandlungs-Trait passt?",
+      "paare": [
+        { "links": "`u8` → `u32`, kann nie scheitern", "rechts": "`From`/`Into`" },
+        { "links": "`i32` → `Prozent(u8)`, nur 0 bis 100 gültig", "rechts": "`TryFrom`/`TryInto`" },
+        { "links": "Funktion soll `&str`, `String` und `PathBuf` als Pfad annehmen", "rechts": "`AsRef<Path>`" },
+        { "links": "Ausgabe für Benutzer, z. B. „21.5 °C“", "rechts": "`Display`" },
+        { "links": "Ausgabe für Entwickler, z. B. `Messwert { roh: 512 }`", "rechts": "`Debug`" }
+      ],
+      "erklaerung": "Implementiere immer `From`, nie direkt `Into`: Eine Blanket Impl liefert `Into` dann gratis. Dasselbe gilt für `TryFrom`/`TryInto`. `AsRef` ist eine billige Referenz-Umwandlung ohne Kopie. `Borrow` ist ähnlich, verspricht aber zusätzlich gleiches `Hash`/`Eq`, darum verlangt `HashMap::get` es."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die fehlbare Umwandlung.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Prozent(u8);",
+          "",
+          "impl {{?}}<i32> for Prozent {",
+          "    type {{?}} = String;",
+          "    fn try_from(v: i32) -> Result<Self, Self::Error> {",
+          "        if (0..=100).contains(&v) { Ok(Prozent(v as u8)) }",
+          "        else { Err(format!(\"{v} ausserhalb 0..=100\")) }",
+          "    }",
+          "}",
+          "",
+          "let p: Result<Prozent, _> = 150.{{?}}();"
+        ]
+      },
+      "luecken": [{ "loesungen": ["TryFrom"] }, { "loesungen": ["Error"] }, { "loesungen": ["try_into"] }],
+      "auswahl": ["TryFrom", "Error", "try_into", "From", "Output", "into"],
+      "erklaerung": "`p` ist `Err(\"150 ausserhalb 0..=100\")`. Die Standardbibliothek bietet dasselbe für Zahlen: `u8::try_from(300i32)` liefert `Err(TryFromIntError(..))`. Im Gegensatz zu `300 as u8` (ergibt stillschweigend 44) geht hier nichts verloren. Seit Edition 2021 sind `TryFrom` und `TryInto` im Prelude."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Kollege schreibt `struct Sensor { treiber: Adc }` und `impl Deref for Sensor { type Target = Adc; … }`, damit man `sensor.lese_kanal(3)` direkt aufrufen kann. Was ist das Problem?",
+      "optionen": [
+        "`Deref` ist für Smart Pointer und Wrapper gedacht. Hier wird es als Vererbungsersatz missbraucht: Alle `Adc`-Methoden werden Teil der `Sensor`-API, ohne dass man es in der Doku von `Sensor` direkt sieht",
+        "`Deref` funktioniert nur für Typen auf dem Heap",
+        "Es kompiliert nicht, weil `Adc` nicht `Copy` ist",
+        "Kein Problem, das ist das empfohlene Muster für Komposition"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Deref-Coercion** wandelt `&Sensor` automatisch in `&Adc` um. Das ist für `Box<T>`, `String` → `str` oder einen Newtype um `Vec<u8>` sinnvoll, denn dort *ist* der Wrapper das Innere. Für Komposition ist es verwirrend. Besser: ausdrückliche Methoden, die weiterleiten, oder ein Zugriff `fn adc(&mut self) -> &mut Adc`.",
+      "begruendungen": [
+        "Richtig.",
+        "`Deref` hat nichts mit dem Speicherort zu tun.",
+        "`deref` liefert eine Referenz, `Copy` ist nicht nötig.",
+        "Die API-Richtlinien sagen ausdrücklich: Nur Smart Pointer implementieren `Deref`."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "display-padding",
+      "frage": "`Temperatur` implementiert `Display` mit `write!(f, \"{:.1} °C\", self.0)`. Was gibt `println!(\"[{:>10}]\", Temperatur(3.0))` aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "impl fmt::Display for Temperatur {",
+          "    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {",
+          "        write!(f, \"{:.1} °C\", self.0)",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": ["`[3.0 °C]`", "`[    3.0 °C]`", "`[3.0 °C    ]`", "`[3 °C]`"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die Breite `:>10` ist eine Bitte an die Impl, kein Automatismus. `write!` schreibt direkt in den Formatter und ignoriert sie. Wer Breite und Ausrichtung unterstützen will, erzeugt erst den Text und gibt ihn mit `f.pad(&text)` aus.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre die Ausgabe mit `f.pad(...)` oder für einen `String`.",
+        "`>` bedeutet rechtsbündig, und die Breite wird hier ohnehin ignoriert.",
+        "`{:.1}` erzwingt eine Nachkommastelle."
+      ]
+    }
+  ],
+  "praxis": "Operator-Überladung lohnt sich für mathematische Typen: Vektoren, Festkommazahlen, Einheiten (`Millivolt + Millivolt`), Zeitdauern. Im Embedded-Bereich findest du `From`/`TryFrom` überall: Register-Rohwerte in Enums, Fehler in übergeordnete Fehler, Bytes in Telegramme. Die Regel „`From` statt `Into` implementieren, `Deref` nur für Pointer-artige Typen“ gehört zu den häufigsten Review-Kommentaren.",
+  "labor": {
+    "titel": "Eine Festkommazahl",
+    "anleitung": "Schreibe einen Typ `Q16(i32)` für Festkommazahlen mit 16 Nachkommabits. Implementiere `Add`, `Sub`, `Mul`, `AddAssign`, `Neg`, `From<i16>`, `TryFrom<f32>` (Fehler bei Überlauf und NaN) und `Display` mit `f.pad`. Teste mit `cargo test`.",
+    "befehle": [
+      "cargo new --lib festkomma && cd festkomma",
+      "cargo test",
+      "cargo clippy -- -W clippy::pedantic"
+    ],
+    "beobachtung": "Bei `Mul` musst du in `i64` rechnen und zurückschieben. Clippy pedantic weist auf `as`-Umwandlungen hin, die Werte abschneiden können."
+  },
+  "begriffe": [
+    { "begriff": "Operator-Überladung", "englisch": "operator overloading", "erklaerung": "Eigene Bedeutung für Operatoren durch Implementierung der Traits aus `std::ops`." },
+    { "begriff": "Deref-Coercion", "englisch": "deref coercion", "erklaerung": "Automatische Umwandlung von `&T` in `&U`, wenn `T: Deref<Target = U>`." },
+    { "begriff": "From/Into", "englisch": "From/Into", "erklaerung": "Verlustfreie Umwandlung. `From` implementieren, `Into` gibt es dann automatisch." },
+    { "begriff": "TryFrom", "englisch": "TryFrom", "erklaerung": "Fehlbare Umwandlung mit `Result` und assoziiertem Fehlertyp." }
+  ],
+  "weiterlesen": [
+    { "titel": "std::ops (Dokumentation)", "url": "https://doc.rust-lang.org/std/ops/index.html" },
+    { "titel": "Rust API Guidelines: Predictability", "url": "https://rust-lang.github.io/api-guidelines/predictability.html" }
+  ]
+}

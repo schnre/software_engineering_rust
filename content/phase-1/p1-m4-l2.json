@@ -1,0 +1,223 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m4-l2",
+  "phase": 1,
+  "modul": "1.4 Speicherlayout des Binaries",
+  "titel": "memory.x, link.x und Linker-Skripte",
+  "lernziele": [
+    "Erklären, wie `memory.x` und `link.x` von `cortex-m-rt` zusammenspielen",
+    "Das Linker-Skript über `.cargo/config.toml` einbinden",
+    "Mit `#[unsafe(link_section)]` Daten gezielt platzieren und Overflow-Meldungen des Linkers deuten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Mikrocontroller hat Flash ab `0x08000000` und RAM ab `0x20000000`. Nach dem Einschalten ist der RAM leer. Wo steht der Startwert `7` von `static mut ZUSTAND: u32 = 7;`?",
+      "optionen": [
+        "Im Flash. Der Reset-Handler kopiert ihn vor `main` in den RAM",
+        "Im RAM. Der Wert bleibt dort auch ohne Strom erhalten",
+        "Nirgends. rustc ersetzt `ZUSTAND` überall durch `7`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`.data` hat zwei Adressen: die **Ladeadresse** (LMA) im Flash, wo der Startwert dauerhaft liegt, und die **Laufzeitadresse** (VMA) im RAM, wo das Programm liest und schreibt. Unter Linux erledigt das Kopieren der Loader. Auf Bare Metal macht es der Reset-Handler aus `cortex-m-rt`, bevor er die `#[entry]`-Funktion aufruft. Dabei nullt er auch `.bss`.",
+      "begruendungen": [
+        "Richtig. Kopieren und Nullen passiert vor der ersten Zeile deines Codes.",
+        "RAM verliert seinen Inhalt ohne Strom.",
+        "Das ginge nur bei einem `const` oder einem unveränderlichen `static`. `ZUSTAND` ist veränderbar."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Zwei Dateien, eine Aufgabe",
+      "text": "Das Crate `cortex-m-rt` liefert das generische Linker-Skript `link.x`: Vektortabelle, `.text`, `.rodata`, `.data`, `.bss`. Es weiss aber nicht, wie gross *dein* Chip ist. Dafür schreibst du `memory.x` ins Projektverzeichnis, `link.x` bindet sie mit `INCLUDE memory.x` ein. Ein Build-Skript von `cortex-m-rt` kopiert `link.x` nach `OUT_DIR` und fügt den Suchpfad hinzu.",
+      "code": {
+        "sprache": "linker",
+        "datei": "memory.x",
+        "zeilen": [
+          "MEMORY",
+          "{",
+          "  FLASH : ORIGIN = 0x08000000, LENGTH = 512K",
+          "  RAM   : ORIGIN = 0x20000000, LENGTH = 128K",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Startadresse und Grösse laut Datenblatt des Chips." },
+          { "zeile": 4, "text": "Der Stack beginnt standardmässig am Ende des RAM (`_stack_start`) und wächst nach unten." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze `.cargo/config.toml`, damit `link.x` beim Linken verwendet wird und `cargo build` für Cortex-M4F baut.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[build]",
+          "target = \"{{?}}\"",
+          "",
+          "[target.'cfg(all(target_arch = \"arm\", target_os = \"none\"))']",
+          "rustflags = [\"-C\", \"link-arg={{?}}\"]"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["thumbv7em-none-eabihf"] },
+        { "loesungen": ["-Tlink.x"] }
+      ],
+      "auswahl": ["thumbv7em-none-eabihf", "-Tlink.x", "-Tmemory.x", "x86_64-unknown-linux-gnu"],
+      "erklaerung": "Übergeben wird `link.x`, nicht `memory.x`: Das Hauptskript holt sich `memory.x` selbst. Gibst du `-Tmemory.x` an, kennt der Linker zwar die Speicherbereiche, aber nicht, welche Sektion wohin gehört. Die Vektortabelle fehlt dann. Das Target-Triple lernst du in Modul 1.5 genauer kennen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Ausschnitt aus `link.x` von `cortex-m-rt` 0.7. Was steht ganz am Anfang des Flash?",
+      "code": {
+        "sprache": "linker",
+        "datei": "link.x (Ausschnitt)",
+        "zeilen": [
+          ".vector_table ORIGIN(FLASH) :",
+          "{",
+          "  __vector_table = .;",
+          "  LONG(_stack_start & 0xFFFFFFF8);",
+          "  KEEP(*(.vector_table.reset_vector));",
+          "  KEEP(*(.vector_table.exceptions));",
+          "  KEEP(*(.vector_table.interrupts));",
+          "} > FLASH"
+        ]
+      },
+      "optionen": [
+        "Zuerst der Startwert des Stack-Pointers, dann die Adresse des Reset-Handlers, dann die übrigen Exception- und Interrupt-Vektoren",
+        "Zuerst die Funktion `main`, dann die Vektortabelle",
+        "Die Startwerte von `.data`, damit sie schnell kopiert werden können"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **Vektortabelle** (vector table) ist eine Liste von Adressen. Ein Cortex-M liest nach dem Reset das erste Wort als Stack-Pointer und das zweite als Sprungadresse. `KEEP` verhindert, dass `--gc-sections` die Einträge entfernt, denn kein Code ruft sie direkt auf. Mehr zum Ablauf vom Reset bis `#[entry]` in Phase 6.",
+      "begruendungen": [
+        "Richtig. Genau diese Reihenfolge erwartet die Hardware.",
+        "Die Hardware springt nicht nach `main`, sondern zum Reset-Handler.",
+        "Die Startwerte von `.data` liegen nach `.rodata`, nicht am Anfang."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Testprojekt hat ein Linker-Skript mit `FLASH … LENGTH = 1K` und ein `static GROSS: [u8; 2048]`. Was sagt die Meldung von `rust-lld`?",
+      "terminal": {
+        "befehl": "cargo build --release",
+        "ausgabe": [
+          "   Compiling bare v0.1.0 (/home/user/bare)",
+          "error: linking with `rust-lld` failed: exit status: 1",
+          "  |",
+          "  = note: rust-lld: error: section '.rodata' will not fit in region 'FLASH': overflowed by 1026 bytes",
+          "",
+          "error: could not compile `bare` (bin \"bare\") due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "Code und Konstanten sind zusammen 1026 Byte zu gross für den Flash. Der Fehler kommt beim Bauen, nicht erst auf dem Gerät",
+        "Der Stack läuft zur Laufzeit um 1026 Byte über",
+        "rustc hat einen Typfehler in `GROSS` gefunden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Linker kennt aus `MEMORY` die Grösse jeder Region und bricht ab, wenn die Sektionen nicht passen. `rustc` hat erfolgreich kompiliert, der Fehler beginnt mit `linking with`. Stack-Überläufe dagegen sieht der Linker nicht. Dafür gibt es Werkzeuge wie `flip-link` (Phase 7).",
+      "begruendungen": [
+        "Richtig. `GROSS` ist unveränderlich und liegt deshalb in `.rodata` im Flash.",
+        "Wie tief der Stack wächst, weiss der Linker nicht.",
+        "Typfehler meldet rustc mit `error[E…]` vor dem Linken."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Daten gezielt platzieren",
+      "text": "Mit `#[unsafe(link_section = \"…\")]` legst du ein Item in eine bestimmte Sektion. Seit Edition 2024 muss das Attribut in `unsafe(…)` stehen, denn eine falsche Sektion kann Undefined Behavior auslösen: Eine Variable mit Startwert in einer `NOLOAD`-Sektion wird nie initialisiert. `link.x` kennt z. B. `.uninit`: Diese RAM-Variablen werden beim Start weder kopiert noch genullt und überleben so einen Software-Reset.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::mem::MaybeUninit;",
+          "",
+          "#[used]",
+          "#[unsafe(link_section = \".uninit.BOOT\")]",
+          "static mut BOOT_GRUND: MaybeUninit<u32> = MaybeUninit::uninit();"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "`#[used]` verhindert, dass der Compiler das scheinbar ungenutzte Static entfernt." },
+          { "zeile": 5, "text": "`MaybeUninit`, weil der Inhalt nach einem Kaltstart beliebig ist." }
+        ]
+      }
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieses `memory.x` führt dazu, dass Programme auf dem Chip mit 128 KiB RAM ab `0x20000000` sofort abstürzen. Welche Zeile ist falsch?",
+      "code": {
+        "sprache": "linker",
+        "datei": "memory.x",
+        "zeilen": [
+          "MEMORY",
+          "{",
+          "  FLASH : ORIGIN = 0x08000000, LENGTH = 512K",
+          "  RAM   : ORIGIN = 0x20000000, LENGTH = 256K",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Der Stack-Pointer startet am Ende von `RAM`, hier bei `0x20040000`. Dort gibt es keinen Speicher, der erste Push löst einen HardFault aus. Der Linker merkt das nicht, er glaubt `memory.x`. Werte immer aus dem Reference Manual übernehmen, nicht aus einem anderen Projekt kopieren."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Wer ist wofür zuständig?",
+      "paare": [
+        { "links": "`memory.x`", "rechts": "Grösse und Lage von FLASH und RAM des konkreten Chips" },
+        { "links": "`link.x`", "rechts": "Platzierung der Sektionen und der Vektortabelle" },
+        { "links": "`.cargo/config.toml`", "rechts": "Übergibt `-Tlink.x` an den Linker" },
+        { "links": "Reset-Handler von `cortex-m-rt`", "rechts": "Kopiert `.data`, nullt `.bss`, ruft `#[entry]` auf" }
+      ],
+      "erklaerung": "Diese Arbeitsteilung macht Projektvorlagen portabel: Für einen anderen Chip änderst du nur `memory.x`. Board-Support-Crates liefern `memory.x` manchmal schon mit, dann brauchst du keine eigene."
+    }
+  ],
+  "praxis": "Wenn ein Bootloader die ersten 32 KiB des Flash belegt, verschiebst du in `memory.x` `ORIGIN` und verkleinerst `LENGTH`. Mehr ist oft nicht nötig. Schlägt der Build mit „will not fit in region“ fehl, schaust du mit `cargo size` oder `cargo bloat` nach, wer den Platz frisst. Und bei mysteriösen Abstürzen gleich nach dem Reset prüfst du zuerst, ob `memory.x` zum Chip passt.",
+  "labor": {
+    "titel": "Einen Overflow provozieren",
+    "anleitung": "Auch ohne Embedded-Target kannst du `rust-lld` mit einem eigenen Linker-Skript füttern. Lege ein `#![no_std]`/`#![no_main]`-Projekt mit `panic = \"abort\"` und einem grossen `static`-Array an, schreibe ein `link.x` mit einer 1K grossen `FLASH`-Region und linke mit `rust-lld`.",
+    "befehle": [
+      "cargo new bare && cd bare",
+      "RUSTFLAGS='-C linker=rust-lld -C linker-flavor=ld.lld -C link-arg=-Tlink.x -C relocation-model=static' cargo build --release",
+      "cargo add cortex-m-rt && cat ~/.cargo/registry/src/*/cortex-m-rt-*/link.x.in | less"
+    ],
+    "beobachtung": "Der Linker bricht mit `will not fit in region 'FLASH'` ab und nennt die Anzahl Bytes. In `link.x.in` von `cortex-m-rt` findest du `INCLUDE memory.x`, die Vektortabelle und viele `ASSERT`s mit verständlichen Fehlermeldungen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Linker-Skript",
+      "englisch": "linker script",
+      "erklaerung": "Datei mit Speicherbereichen (`MEMORY`) und der Platzierung der Sektionen (`SECTIONS`)."
+    },
+    {
+      "begriff": "Vektortabelle",
+      "englisch": "vector table",
+      "erklaerung": "Tabelle am Anfang des Flash mit Start-Stack-Pointer und den Adressen von Reset-Handler, Exceptions und Interrupts."
+    },
+    {
+      "begriff": "LMA und VMA",
+      "englisch": "load / virtual memory address",
+      "erklaerung": "Ladeadresse (wo Daten gespeichert sind) und Laufzeitadresse (wo das Programm sie verwendet). Bei `.data` auf Mikrocontrollern verschieden."
+    },
+    {
+      "begriff": "cortex-m-rt",
+      "englisch": "Cortex-M runtime",
+      "erklaerung": "Crate mit Startup-Code, Vektortabelle und `link.x` für Cortex-M-Mikrocontroller."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "docs.rs: cortex-m-rt",
+      "url": "https://docs.rs/cortex-m-rt"
+    },
+    {
+      "titel": "The Embedonomicon",
+      "url": "https://docs.rust-embedded.org/embedonomicon/"
+    },
+    {
+      "titel": "The Rust Reference: link_section",
+      "url": "https://doc.rust-lang.org/reference/abi.html#the-link_section-attribute"
+    }
+  ]
+}

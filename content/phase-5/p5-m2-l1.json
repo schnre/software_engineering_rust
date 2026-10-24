@@ -1,0 +1,232 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m2-l1",
+  "phase": 5,
+  "modul": "5.2 Synchronisation",
+  "titel": "Mutex, RwLock und Condvar",
+  "lernziele": [
+    "Mit `Mutex<T>` und `RwLock<T>` gemeinsame Daten schützen und die Rolle des Guards erklären",
+    "Poisoning verstehen und bewusst behandeln",
+    "Deadlocks durch Lock-Reihenfolge vermeiden und mit `Condvar` auf Bedingungen warten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "daten-im-lock",
+      "frage": "In C++ stehen `std::mutex m;` und `int stand;` nebeneinander. In Rust schreibt man `Mutex<i64>`. Was ist der wichtigste Vorteil?",
+      "optionen": [
+        "An die Daten kommt man nur über `lock()`. Vergessenes Sperren ist ein Compilerfehler",
+        "Ein Rust-Mutex ist schneller, weil er im Benutzermodus sperrt",
+        "Der Mutex kopiert die Daten für jeden Thread",
+        "Man muss den Mutex nie freigeben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Mutex **besitzt** die Daten. Wer sie lesen oder ändern will, ruft `lock()` auf und bekommt einen `MutexGuard`, über den er auf das `T` zugreift. Ohne Guard keine Daten. Welche Variable welcher Mutex schützt, steht damit im Typ, nicht in einem Kommentar.",
+      "begruendungen": [
+        "Richtig.",
+        "Beide nutzen unter Linux Futexe. Die Geschwindigkeit ist nicht der Punkt.",
+        "Es gibt genau eine Kopie der Daten, eben im Mutex.",
+        "Freigegeben wird schon, nur automatisch: wenn der Guard fallen gelassen wird."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "MutexGuard und RAII",
+      "text": "`m.lock()` blockiert, bis die Sperre frei ist, und liefert `LockResult<MutexGuard<T>>`. Der Guard implementiert `Deref` und `DerefMut` auf `T`. Sobald er fallen gelassen wird (Ende des Blocks oder `drop(guard)`), ist die Sperre frei.\n\nDaraus folgt die wichtigste Regel: **Guards kurz halten.** Kein I/O, kein `sleep`, kein Warten auf andere Sperren, während man einen Guard hält.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let messwerte = Mutex::new(Vec::new());",
+          "{",
+          "    let mut g = messwerte.lock().unwrap();",
+          "    g.push(42);",
+          "}",
+          "let anzahl = messwerte.lock().unwrap().len();"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Sperren. `unwrap` reicht die Panic weiter, falls der Mutex vergiftet ist." },
+          { "zeile": 5, "text": "Hier wird `g` fallen gelassen, die Sperre ist frei." },
+          { "zeile": 6, "text": "Der temporäre Guard lebt nur bis zum Ende dieser Anweisung." }
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "id": "poisoning",
+      "frage": "Ein Thread panict mitten in einer Buchung. Was gibt `main` aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let konto = Arc::new(Mutex::new(100));",
+          "let k = Arc::clone(&konto);",
+          "let _ = thread::spawn(move || {",
+          "    let mut g = k.lock().unwrap();",
+          "    *g -= 30;",
+          "    panic!(\"Abbruch mitten in der Buchung\");",
+          "}).join();",
+          "",
+          "println!(\"{:?}\", konto.lock());"
+        ]
+      },
+      "optionen": [
+        "`Err(PoisonError { .. })`",
+        "`Ok(100)`, die Änderung wird bei der Panic rückgängig gemacht",
+        "`Ok(70)`",
+        "Das Programm hängt, weil der Mutex nie freigegeben wurde"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Panict ein Thread, während er einen Guard hält, markiert der `Mutex` sich als **vergiftet** (*poisoned*): Die Daten könnten halb verändert sein. Jeder spätere `lock()` liefert `Err(PoisonError)`. Die Sperre selbst ist frei, denn auch beim Abwickeln der Panic wird der Guard fallen gelassen. Wer die Daten trotzdem will, holt sie mit `e.into_inner()` heraus, hier `70`.",
+      "begruendungen": [
+        "Richtig.",
+        "Rust hat keine Transaktionen. Die Subtraktion ist schon passiert.",
+        "Der Wert ist `70`, aber `lock()` liefert ihn nicht einfach als `Ok`.",
+        "Beim Abwickeln (*unwinding*) wird der Guard fallen gelassen und die Sperre freigegeben."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "lock-reihenfolge",
+      "frage": "Zwei Threads rufen gleichzeitig `ueberweise(&a, &b, 10)` und `ueberweise(&b, &a, 5)` auf. Ab und zu hängt das Programm. Welche Zeile ist die Ursache?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Konto { id: u32, stand: Mutex<i64> }",
+          "",
+          "fn ueberweise(von: &Konto, nach: &Konto, betrag: i64) {",
+          "    let mut quelle = von.stand.lock().unwrap();",
+          "    let mut ziel = nach.stand.lock().unwrap();",
+          "    *quelle -= betrag;",
+          "    *ziel += betrag;",
+          "}"
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "Thread 1 hält `a` und wartet in Zeile 5 auf `b`. Thread 2 hält `b` und wartet auf `a`. Keiner gibt nach: Deadlock. Die Standardlösung ist eine **feste Lock-Reihenfolge**, z. B. immer zuerst das Konto mit der kleineren `id` sperren. Dann kann kein Kreis aus Wartenden entstehen."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "sync-typen",
+      "frage": "Welcher Typ passt zu welcher Situation?",
+      "paare": [
+        { "links": "`Mutex<T>`", "rechts": "Daten werden häufig geändert, jeder Zugriff exklusiv" },
+        { "links": "`RwLock<T>`", "rechts": "Konfiguration wird oft gelesen und selten geschrieben" },
+        { "links": "`Condvar`", "rechts": "Ein Thread wartet schlafend, bis eine Bedingung wahr wird" },
+        { "links": "`OnceLock<T>`", "rechts": "Ein Wert wird einmal initialisiert und danach nur gelesen" },
+        { "links": "`parking_lot::Mutex<T>`", "rechts": "Kleiner, ohne Poisoning, `lock()` liefert direkt den Guard" }
+      ],
+      "erklaerung": "`RwLock` erlaubt viele gleichzeitige Leser (`read()`) oder einen Schreiber (`write()`). Er lohnt sich nur, wenn Lesezugriffe deutlich überwiegen und etwas dauern, sonst ist ein `Mutex` oft schneller. Das Crate `parking_lot` ist eine verbreitete Alternative zu den Std-Sperren und verzichtet bewusst auf Poisoning."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Warten mit Condvar",
+      "text": "Eine **Bedingungsvariable** (*condition variable*) lässt einen Thread schlafen, bis ein anderer ihn weckt. `cv.wait(guard)` gibt die Sperre frei, schläft und sperrt beim Aufwachen wieder. Weil Threads auch ohne Grund aufwachen können (*spurious wakeup*), prüft man die Bedingung immer in einer Schleife – oder nimmt `wait_while`, das die Schleife schon enthält.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let (bereit, cv) = &*paar; // Arc<(Mutex<bool>, Condvar)>",
+          "let g = cv",
+          "    .wait_while(bereit.lock().unwrap(), |b| !*b)",
+          "    .unwrap();",
+          "// hier gilt *g == true, und wir halten die Sperre",
+          "",
+          "// anderer Thread:",
+          "*bereit.lock().unwrap() = true;",
+          "cv.notify_one();"
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-condvar",
+      "frage": "Ergänze die klassische Warteschleife ohne `wait_while`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut g = bereit.lock().unwrap();",
+          "{{?}} !*g {",
+          "    g = cv.{{?}}(g).unwrap();",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["while"] },
+        { "loesungen": ["wait"] }
+      ],
+      "auswahl": ["while", "wait", "if", "lock", "notify_one"],
+      "erklaerung": "Mit `if` statt `while` würde ein Thread nach einem grundlosen Aufwachen weiterlaufen, obwohl die Bedingung noch falsch ist. `wait` nimmt den Guard als Wert, gibt die Sperre während des Schlafens frei und liefert beim Aufwachen einen neuen Guard zurück."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "reentrant",
+      "frage": "Ein Thread hält bereits `m.lock()` und ruft eine Funktion auf, die erneut `m.lock()` aufruft. Was passiert mit `std::sync::Mutex`?",
+      "optionen": [
+        "Laut Dokumentation nicht festgelegt: Es kann blockieren (Deadlock) oder panicken, aber nie gleichzeitig zwei Guards liefern",
+        "Der zweite `lock()` gelingt, weil es derselbe Thread ist",
+        "Compilerfehler E0499",
+        "`lock()` liefert `Err(PoisonError)`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`std::sync::Mutex` ist nicht reentrant. Zwei Guards hiessen zwei `&mut T` zugleich, das wäre unsound. In der Praxis blockiert der Thread unter Linux für immer. Der Compiler erkennt das nicht, weil `lock()` nur `&self` braucht. Abhilfe: Funktionen so schneiden, dass sie den Guard bzw. `&mut T` als Parameter bekommen, statt selbst zu sperren.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre ein reentranter Mutex. Den gibt es in der Std nicht öffentlich, weil er `&mut T` nicht sicher liefern könnte.",
+        "`lock()` braucht nur `&self`, der Borrow-Checker sieht kein Problem.",
+        "Poisoning entsteht nur durch eine Panic, während ein Guard gehalten wird."
+      ]
+    }
+  ],
+  "praxis": "Bei Hängern in nebenläufigen Programmen ist der erste Schritt ein Backtrace aller Threads (`thread apply all bt` in rust-gdb). Fast immer findest du einen Thread in `lock()`, der auf einen anderen wartet. Im Design hilft eine feste, dokumentierte Lock-Reihenfolge. Im Review fragst du bei jedem Guard: Was passiert, solange er lebt? Wird hier I/O gemacht oder eine zweite Sperre geholt?",
+  "labor": {
+    "titel": "Deadlock durch Lock-Reihenfolge",
+    "anleitung": "Baue `ueberweise` aus Schritt 4 nach und lass zwei Threads je 100 000 Mal in entgegengesetzter Richtung überweisen. Sortiere danach die Sperren nach `id` und wiederhole den Versuch.",
+    "befehle": [
+      "cargo new sperren && cd sperren",
+      "cargo run --release",
+      "rust-gdb -p $(pgrep sperren) -batch -ex 'thread apply all bt'",
+      "cargo add parking_lot"
+    ],
+    "beobachtung": "Die erste Variante bleibt nach kurzer Zeit stehen, der Backtrace zeigt beide Threads in `Mutex::lock`. Mit fester Reihenfolge läuft sie durch. `parking_lot` bietet zusätzlich eine optionale Deadlock-Erkennung (Feature `deadlock_detection`)."
+  },
+  "begriffe": [
+    {
+      "begriff": "Mutex",
+      "englisch": "mutual exclusion",
+      "erklaerung": "Sperre, die zu jedem Zeitpunkt höchstens einem Thread Zugriff gewährt. In Rust besitzt der `Mutex<T>` die geschützten Daten."
+    },
+    {
+      "begriff": "Guard",
+      "englisch": "guard",
+      "erklaerung": "Objekt, das eine Sperre hält und beim Fallenlassen automatisch freigibt (RAII)."
+    },
+    {
+      "begriff": "Poisoning",
+      "englisch": "poisoning",
+      "erklaerung": "Markierung eines Mutex, wenn ein Thread mit gehaltenem Guard panict. Spätere `lock()`-Aufrufe liefern `Err`."
+    },
+    {
+      "begriff": "Bedingungsvariable",
+      "englisch": "condition variable",
+      "erklaerung": "Lässt Threads schlafen, bis ein anderer Thread signalisiert, dass sich eine Bedingung geändert hat."
+    },
+    {
+      "begriff": "Lese-Schreib-Sperre",
+      "englisch": "reader-writer lock",
+      "erklaerung": "Erlaubt viele gleichzeitige Leser oder einen einzelnen Schreiber."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "std::sync::Mutex",
+      "url": "https://doc.rust-lang.org/std/sync/struct.Mutex.html"
+    },
+    {
+      "titel": "The Rust Book: Shared-State Concurrency",
+      "url": "https://doc.rust-lang.org/book/ch16-03-shared-state.html"
+    },
+    {
+      "titel": "parking_lot auf docs.rs",
+      "url": "https://docs.rs/parking_lot"
+    }
+  ]
+}

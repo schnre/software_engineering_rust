@@ -1,0 +1,232 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m3-l2",
+  "phase": 10,
+  "modul": "10.3 Ports & Adapters",
+  "titel": "Ports & Adapters im Workspace",
+  "lernziele": [
+    "Kern und Adapter als getrennte Crates in einem Cargo-Workspace anlegen",
+    "Die Abhängigkeitsrichtung mit Cargo und `#![no_std]` technisch erzwingen",
+    "Den Kern mit Fakes auf dem Host testen und Adapter dünn halten"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "warum-crates",
+      "frage": "Kern und Adapter liegen bisher als Module in einem einzigen Crate. Was bringt es, sie in eigene Crates eines Workspace aufzuteilen?",
+      "optionen": [
+        "Cargo erzwingt die Richtung: Der Kern kann nur benutzen, was in seiner eigenen `Cargo.toml` steht, und Zyklen zwischen Crates sind verboten",
+        "Module eines Crates können sich gegenseitig nicht aufrufen",
+        "Getrennte Crates machen das Programm zur Laufzeit schneller",
+        "Nur getrennte Crates dürfen Traits definieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Innerhalb eines Crates dürfen Module sich gegenseitig fast beliebig benutzen, die Architektur hält nur Disziplin. Zwischen Crates ist sie Teil des Builds: Steht `rusqlite` nicht in `kern/Cargo.toml`, kann der Kern es nicht verwenden, auch nicht aus Versehen. Ein Nebeneffekt: Ändert sich nur ein Adapter, muss der Kern nicht neu kompiliert werden.",
+      "begruendungen": [
+        "Richtig.",
+        "Module eines Crates können sich gegenseitig aufrufen, auch zyklisch. Genau das ist das Problem.",
+        "Mit Optimierung macht die Aufteilung zur Laufzeit kaum einen Unterschied.",
+        "Traits können in jedem Modul jedes Crates stehen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau des Workspace",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[workspace]",
+          "resolver = \"3\"",
+          "members = [\"kern\", \"adapter-sqlite\", \"app\"]",
+          "",
+          "# kern/Cargo.toml: [dependencies] bleibt leer",
+          "",
+          "# adapter-sqlite/Cargo.toml:",
+          "#   kern = { path = \"../kern\" }",
+          "#   rusqlite = { version = \"0.32\", features = [\"bundled\"] }",
+          "",
+          "# app/Cargo.toml:",
+          "#   kern = { path = \"../kern\" }",
+          "#   adapter-sqlite = { path = \"../adapter-sqlite\" }"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Resolver 3 ist der Standard für Edition 2024." },
+          { "zeile": 5, "text": "Der Kern hängt von nichts ab. Er ist das stabile Zentrum." },
+          { "zeile": 8, "text": "Ein Adapter kennt den Kern (für den Port) und seine eine Technik." },
+          { "zeile": 12, "text": "Nur `app` kennt alle Teile und verdrahtet sie: die Composition Root." }
+        ]
+      },
+      "text": "Für Embedded kommen weitere Adapter-Crates dazu, etwa `adapter-nrf` mit dem HAL. Eine Firmware-Binary und eine Host-Binary teilen sich dann denselben Kern."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "zyklus",
+      "frage": "Jemand trägt in `kern/Cargo.toml` die Abhängigkeit `adapter-sqlite` ein, um „schnell mal“ etwas zu speichern. Was passiert?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error: cyclic package dependency: package `adapter-sqlite v0.1.0 (/home/user/heizung/adapter-sqlite)` depends on itself. Cycle:",
+          "package `adapter-sqlite v0.1.0 (/home/user/heizung/adapter-sqlite)`",
+          "    ... which satisfies path dependency `adapter-sqlite` (locked to 0.1.0) of package `kern v0.1.0 (/home/user/heizung/kern)`",
+          "    ... which satisfies path dependency `kern` (locked to 0.1.0) of package `adapter-sqlite v0.1.0 (/home/user/heizung/adapter-sqlite)`"
+        ]
+      },
+      "optionen": [
+        "Cargo lehnt den Build ab: Kern und Adapter würden sich gegenseitig brauchen. Die Architektur schützt sich selbst",
+        "Es baut, aber mit einer Warnung über zyklische Abhängigkeiten",
+        "Der Fehler entsteht nur, weil `Cargo.lock` veraltet ist",
+        "Der Linker meldet doppelte Symbole"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo bricht ab, bevor überhaupt etwas kompiliert wird. Genau das wollen wir: Eine falsche Abhängigkeitsrichtung ist kein Review-Thema mehr, sondern ein Build-Fehler. Will der Kern etwas speichern, definiert er einen Port, und der Adapter implementiert ihn.",
+      "begruendungen": [
+        "Richtig.",
+        "Zyklen zwischen Paketen sind ein harter Fehler, keine Warnung.",
+        "`Cargo.lock` spielt keine Rolle. Der Zyklus steht in den `Cargo.toml`-Dateien selbst.",
+        "So weit kommt es nicht: Cargo prüft den Graphen vor dem Kompilieren."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "no-std",
+      "frage": "Der Kern beginnt mit `#![no_std]`. Was passiert bei `cargo build -p kern` mit dieser Funktion?",
+      "code": {
+        "sprache": "rust",
+        "datei": "kern/src/lib.rs",
+        "zeilen": [
+          "#![no_std]",
+          "",
+          "pub fn protokolliere(text: &str) {",
+          "    let _ = std::fs::write(\"log.txt\", text);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0433: `std` ist nicht verfügbar. Dateizugriff gehört hinter einen Port",
+        "Es kompiliert, `no_std` gilt nur für Mikrocontroller-Targets",
+        "Es kompiliert, schreibt aber zur Laufzeit nichts",
+        "Linkerfehler, weil `write` fehlt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Compiler meldet `cannot find module or crate std in this scope`, auch auf dem Host. `#![no_std]` ist damit ein zweiter Schutz: Der Kern kann weder Dateien, Netzwerk noch Threads direkt benutzen, weil es diese APIs in `core` nicht gibt. Gleichzeitig ist er so auf jedem Mikrocontroller lauffähig. Für Tests kann man `#![cfg_attr(not(test), no_std)]` schreiben, damit Testcode `std` nutzen darf.",
+      "begruendungen": [
+        "Richtig.",
+        "`no_std` gilt für jedes Target, auch beim Bauen auf dem PC.",
+        "Der Code kompiliert gar nicht erst.",
+        "Der Fehler entsteht schon bei der Namensauflösung im Compiler, nicht beim Linken."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "orphan",
+      "frage": "Im Adapter-Crate soll der Port direkt für `rusqlite::Connection` implementiert werden: `impl MesswertSpeicher for Connection`. Was ist die Lösung?",
+      "terminal": {
+        "befehl": "cargo build -p adapter-sqlite",
+        "ausgabe": [
+          "error[E0117]: only traits defined in the current crate can be implemented for types defined outside of the crate",
+          " --> adapter-sqlite/src/lib.rs:4:1",
+          "  |",
+          "4 | impl MesswertSpeicher for Connection {",
+          "  | ^^^^^^^^^^^^^^^^^^^^^^^^^^----------",
+          "  |                           |",
+          "  |                           `Connection` is not defined in the current crate",
+          "  |",
+          "  = note: impl doesn't have any local type before any uncovered type parameters",
+          "  = note: define and implement a trait or new type instead"
+        ]
+      },
+      "optionen": [
+        "Im Adapter einen eigenen Typ `struct SqliteSpeicher { verbindung: Connection }` anlegen und den Port dafür implementieren",
+        "Die Implementierung in das Kern-Crate verschieben",
+        "Mit `#[allow(orphan_rules)]` die Prüfung abschalten",
+        "`rusqlite` forken und den Trait dort implementieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **Orphan-Regel** (Waisenregel) verlangt, dass entweder der Trait oder der Typ aus dem eigenen Crate stammt. Hier sind beide fremd: der Port aus `kern`, `Connection` aus `rusqlite`. Ein eigener Struct im Adapter löst das, und er ist ohnehin besser: Er kann Tabellen beim Öffnen anlegen und versteckt `Connection` vor der App.",
+      "begruendungen": [
+        "Richtig.",
+        "Dann bräuchte der Kern `rusqlite` als Abhängigkeit, genau das soll verhindert werden.",
+        "Die Orphan-Regel ist kein Lint, sie lässt sich nicht abschalten.",
+        "Ein Fork eines fremden Crates nur dafür wäre enormer Wartungsaufwand und würde das Kern-Crate in `rusqlite` ziehen."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "fake",
+      "frage": "Ergänze den Test im Kern-Crate mit einem Fake-Speicher.",
+      "code": {
+        "sprache": "rust",
+        "datei": "kern/src/lib.rs",
+        "zeilen": [
+          "#[cfg({{?}})]",
+          "mod tests {",
+          "    use super::*;",
+          "",
+          "    struct FakeSpeicher {",
+          "        anzahl: usize,",
+          "    }",
+          "",
+          "    impl {{?}} for FakeSpeicher {",
+          "        type Fehler = ();",
+          "        fn speichere(&mut self, _m: Messwert) -> Result<(), ()> {",
+          "            self.anzahl += 1;",
+          "            Ok(())",
+          "        }",
+          "    }",
+          "",
+          "    #[test]",
+          "    fn verwirft_unplausible_werte() {",
+          "        let mut s = FakeSpeicher { anzahl: 0 };",
+          "        assert_eq!(erfasse(&mut s, Messwert { milligrad: 200_000 }), Ok(false));",
+          "        assert_eq!(s.anzahl, {{?}});",
+          "    }",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["test"] },
+        { "loesungen": ["MesswertSpeicher"] },
+        { "loesungen": ["0"] }
+      ],
+      "auswahl": ["test", "debug_assertions", "MesswertSpeicher", "SqliteSpeicher", "0", "1"],
+      "erklaerung": "200 °C liegt ausserhalb des plausiblen Bereichs, also darf nichts gespeichert werden. Der Fake zählt nur Aufrufe, ein Mock-Framework braucht es dafür nicht. `cargo test -p kern` baut dabei nur den Kern, ohne SQLite überhaupt zu kompilieren, und läuft in Millisekunden."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "tests-wo",
+      "frage": "Welche Tests gehören in welches Crate?",
+      "paare": [
+        { "links": "`kern`", "rechts": "Fachregeln mit Fakes, viele schnelle Unit-Tests" },
+        { "links": "`adapter-sqlite`", "rechts": "Wenige Integrationstests gegen eine echte SQLite-Datei" },
+        { "links": "`adapter-nrf`", "rechts": "Tests auf der Zielhardware, z. B. mit `probe-rs` auf dem Prüfstand" },
+        { "links": "`app`", "rechts": "Ein Ende-zu-Ende-Test, der alles verdrahtet startet" }
+      ],
+      "erklaerung": "Adapter hält man **bescheiden** (*humble object*): nur übersetzen und durchreichen, keine Entscheidungen. Dann reichen dort wenige, langsamere Tests, und die Masse der Logik ist im Kern schnell testbar. Das ist die Testpyramide aus Modul 4.2, getragen von der Crate-Struktur."
+    }
+  ],
+  "praxis": "Ein guter Lackmustest für die Architektur: Lässt sich `cargo test -p kern` ohne Datenbank, Netzwerk, Hardware und echte Uhr ausführen, und baut `cargo build -p kern --target thumbv7em-none-eabihf`? Wenn ja, ist der Kern sauber getrennt. In der CI kann man beides als eigenen Schritt laufen lassen, dann fällt jede neue technische Abhängigkeit im Kern sofort auf. Ein Senior achtet aber auch auf das Mass: Nicht jedes kleine Projekt braucht fünf Crates.",
+  "labor": {
+    "titel": "Einen Workspace mit Kern und Adapter bauen",
+    "anleitung": "Lege einen Workspace mit `kern` (`#![no_std]`, ohne Abhängigkeiten), `adapter-sqlite` und `app` an. Schreibe den Port `MesswertSpeicher`, einen Fake-Test im Kern und den SQLite-Adapter. Probiere danach den Zyklus und die Orphan-Regel aus. Weil zuerst die Workspace-`Cargo.toml` angelegt wird, trägt `cargo new` jedes neue Crate selbst unter `members` ein.",
+    "befehle": [
+      "mkdir heizung && cd heizung && printf '[workspace]\\nresolver = \"3\"\\n' > Cargo.toml",
+      "cargo new --lib kern && cargo new --lib adapter-sqlite && cargo new app",
+      "cargo add -p adapter-sqlite --path kern && cargo add -p adapter-sqlite rusqlite -F bundled",
+      "cargo test -p kern",
+      "cargo tree -p kern && cargo tree -i rusqlite"
+    ],
+    "beobachtung": "`cargo tree -p kern` zeigt nur den Kern selbst, ohne eine einzige Abhängigkeit. `cargo tree -i rusqlite` zeigt, dass nur der Adapter SQLite benutzt. Der Kern-Test kompiliert und läuft, ohne dass SQLite gebaut werden muss."
+  },
+  "begriffe": [
+    { "begriff": "Workspace", "englisch": "workspace", "erklaerung": "Mehrere Crates mit gemeinsamem `Cargo.lock` und Build-Verzeichnis, die zusammen entwickelt werden." },
+    { "begriff": "Orphan-Regel", "englisch": "orphan rule", "erklaerung": "Eine Trait-Implementierung ist nur erlaubt, wenn Trait oder Typ aus dem eigenen Crate stammt." },
+    { "begriff": "Humble Object", "englisch": "humble object", "erklaerung": "Möglichst logikfreier Adapter an einer schwer testbaren Grenze. Die Logik liegt testbar im Kern." },
+    { "begriff": "Fake", "englisch": "fake", "erklaerung": "Einfache, funktionierende Ersatzimplementierung eines Ports für Tests, z. B. ein Speicher im Arbeitsspeicher." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Cargo Book: Workspaces", "url": "https://doc.rust-lang.org/cargo/reference/workspaces.html" },
+    { "titel": "Rust Reference: Orphan rules", "url": "https://doc.rust-lang.org/reference/items/implementations.html#orphan-rules" }
+  ]
+}

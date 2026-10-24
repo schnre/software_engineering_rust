@@ -1,0 +1,248 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m1-l1",
+  "phase": 1,
+  "modul": "1.1 Vom Quellcode zum Object-File",
+  "titel": "Die Stufen von rustc",
+  "lernziele": [
+    "Die Stufen von rustc vom Quelltext bis zum gelinkten Programm in der richtigen Reihenfolge nennen",
+    "Mit `rustc --emit` Zwischenergebnisse wie MIR, LLVM IR, Assembler und Object-Files erzeugen",
+    "Erklären, warum in Rust ein ganzes Crate die Übersetzungseinheit ist"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "In C++ ist jede `.cpp`-Datei eine eigene Übersetzungseinheit. Was übersetzt `rustc` bei einem Aufruf?",
+      "optionen": [
+        "Ein ganzes Crate: die Wurzeldatei (`main.rs` oder `lib.rs`) samt allen eingebundenen Modulen",
+        "Genau eine `.rs`-Datei, die Module werden einzeln übersetzt und später gelinkt",
+        "Das ganze Projekt inklusive aller Abhängigkeiten aus `Cargo.toml` in einem Durchgang"
+      ],
+      "korrekt": 0,
+      "erklaerung": "In Rust ist das **Crate** die Übersetzungseinheit (compilation unit). `rustc` liest die Wurzeldatei, folgt jedem `mod xyz;` zu weiteren Dateien und analysiert alles gemeinsam. Abhängigkeiten sind eigene Crates, die Cargo vorher mit separaten `rustc`-Aufrufen baut.",
+      "begruendungen": [
+        "Richtig. Ein `rustc`-Aufruf sieht den ganzen Modulbaum eines Crates.",
+        "So arbeiten C und C++. Rust-Module sind keine eigenen Übersetzungseinheiten, `mod` bindet sie ins Crate ein.",
+        "Jede Abhängigkeit ist ein eigenes Crate mit eigenem `rustc`-Aufruf. Cargo orchestriert diese Aufrufe."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vom Text zum Programm",
+      "text": "`rustc` arbeitet das Crate in mehreren Stufen ab:\n\n1. **Lexer und Parser** machen aus Text einen Syntaxbaum (AST).\n2. **Makro-Expansion** und Namensauflösung: `println!`, `#[derive]` und `mod` werden aufgelöst.\n3. **HIR** (High-level IR): ein vereinfachter AST, auf dem die **Typprüfung** läuft.\n4. **MIR** (Mid-level IR): ein Kontrollflussgraph. Hier arbeitet der **Borrow-Checker**.\n5. **LLVM IR**: Übergabe an das Backend LLVM, das optimiert und Maschinencode erzeugt.\n6. **Object-Files** (`.o`) und zum Schluss der **Linker**.",
+      "diagramm": {
+        "knoten": [
+          "main.rs",
+          "AST",
+          "HIR (Typen)",
+          "MIR (Borrow-Check)",
+          "LLVM IR",
+          "main.o",
+          "Linker",
+          "main"
+        ],
+        "beschriftung": "Die ersten Stufen sind Rust-spezifisch, ab LLVM IR übernimmt dasselbe Backend wie bei Clang."
+      }
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe die Stufen in die Reihenfolge, in der `rustc` sie durchläuft.",
+      "elemente": [
+        "Parsen zum AST",
+        "Makro-Expansion",
+        "Typprüfung auf dem HIR",
+        "Borrow-Checker auf dem MIR",
+        "Codegenerierung mit LLVM",
+        "Linken"
+      ],
+      "erklaerung": "Makros müssen expandiert sein, bevor Typen geprüft werden können, denn erst dann steht der vollständige Code fest. Der Borrow-Checker braucht die Typen und den Kontrollfluss, deshalb arbeitet er auf dem MIR. LLVM sieht nur noch Code, der alle Prüfungen bestanden hat."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Datei erzeugt welche `--emit`-Option?",
+      "paare": [
+        {
+          "links": "`--emit=mir`",
+          "rechts": "`main.mir`: Kontrollflussgraph mit Basisblöcken `bb0`, `bb1` …"
+        },
+        {
+          "links": "`--emit=llvm-ir`",
+          "rechts": "`main.ll`: Code für das LLVM-Backend"
+        },
+        {
+          "links": "`--emit=asm`",
+          "rechts": "`main.s`: Assembler für die Ziel-CPU"
+        },
+        {
+          "links": "`--emit=obj`",
+          "rechts": "`main.o`: Maschinencode mit Symboltabelle, nicht gelinkt"
+        },
+        {
+          "links": "`--emit=link`",
+          "rechts": "`main`: das gelinkte, ausführbare Programm (Standard)"
+        }
+      ],
+      "erklaerung": "Mehrere Ausgaben lassen sich kombinieren: `rustc --emit=mir,llvm-ir,asm,obj,link main.rs` legt alle fünf Dateien nebeneinander. Das ist das Gegenstück zu `g++ -save-temps`."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "So sieht `fn quadrat(x: i32) -> i32 { x * x }` im MIR aus, erzeugt mit `rustc --emit=mir` im Debug-Modus. Wozu dient `assert` in `bb0`?",
+      "code": {
+        "sprache": "text",
+        "datei": "main.mir",
+        "zeilen": [
+          "fn quadrat(_1: i32) -> i32 {",
+          "    debug x => _1;",
+          "    let mut _0: i32;",
+          "    let mut _2: (i32, bool);",
+          "",
+          "    bb0: {",
+          "        _2 = MulWithOverflow(copy _1, copy _1);",
+          "        assert(!move (_2.1: bool), \"attempt to compute `{} * {}`, which would overflow\", copy _1, copy _1) -> [success: bb1, unwind continue];",
+          "    }",
+          "",
+          "    bb1: {",
+          "        _0 = move (_2.0: i32);",
+          "        return;",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Es löst eine Panik aus, wenn die Multiplikation überläuft",
+        "Es prüft zur Compilezeit, dass `x` nicht negativ ist",
+        "Es ist eine Prüfung des Borrow-Checkers, die im fertigen Programm entfernt wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Im Debug-Profil prüft Rust Ganzzahlüberläufe. Das MIR macht das sichtbar: `MulWithOverflow` liefert Ergebnis und Überlauf-Flag, `assert` springt bei gesetztem Flag in die Panik. Im Release-Profil fehlt diese Prüfung standardmässig, dann wird umgebrochen (wrapping).",
+      "begruendungen": [
+        "Richtig. `_2.1` ist das Überlauf-Flag, die Meldung ist die bekannte Panik-Nachricht.",
+        "Das MIR beschreibt Laufzeitverhalten. Ein Vorzeichen wird hier nirgends geprüft.",
+        "Der Borrow-Checker erzeugt keinen Code. Dieses `assert` landet als echter Vergleich im Maschinencode."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze den Befehl so, dass `rustc` nur das Object-File erzeugt und nicht linkt.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustc {{?}} main.rs"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "--emit=obj"
+          ]
+        }
+      ],
+      "auswahl": [
+        "--emit=obj",
+        "--emit=mir",
+        "-c",
+        "--crate-type=lib"
+      ],
+      "erklaerung": "`--emit=obj` ersetzt die Standardausgabe `link`, es entsteht nur `main.o`. `rustc` kennt kein `-c` wie `gcc`. `--crate-type=lib` erzeugt eine Bibliothek (`.rlib`), kein einzelnes Object-File.",
+      "hinweis": "rustc steuert die Ausgabeart über eine einzige Option mit Wertliste."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du brauchst für einen Bugreport die genaue Compiler-Version. Welche Information liefert diese Ausgabe **nicht**?",
+      "terminal": {
+        "befehl": "rustc -vV",
+        "ausgabe": [
+          "rustc 1.97.0 (2d8144b78 2026-07-07)",
+          "binary: rustc",
+          "commit-hash: 2d8144b7880597b6e6d3dfd63a9a9efae3f533d3",
+          "commit-date: 2026-07-07",
+          "host: x86_64-unknown-linux-gnu",
+          "release: 1.97.0",
+          "LLVM version: 22.1.6"
+        ]
+      },
+      "optionen": [
+        "Die Edition, mit der dein Crate übersetzt wird",
+        "Die LLVM-Version des Backends",
+        "Das Target-Triple des Rechners, auf dem rustc läuft",
+        "Den exakten Git-Commit des Compilers"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **Edition** (z. B. 2024) ist keine Eigenschaft des Compilers, sondern des Crates: Sie steht in `Cargo.toml` bzw. wird mit `--edition` übergeben. Ein Compiler beherrscht alle Editionen gleichzeitig. Alles andere zeigt `rustc -vV` direkt an.",
+      "begruendungen": [
+        "Richtig. Die Edition legt das Crate fest, nicht der Compiler.",
+        "Steht in der letzten Zeile: `LLVM version: 22.1.6`.",
+        "Steht unter `host:`. Das ist das Standard-Ziel, wenn du kein `--target` angibst.",
+        "Steht unter `commit-hash:`. Damit lässt sich der Compiler exakt reproduzieren."
+      ],
+      "fest": true
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wofür stehen `-C` und `-Z` bei `rustc`?",
+      "optionen": [
+        "`-C` sind stabile Codegen-Optionen wie `-C opt-level=3`, `-Z` sind instabile Optionen, die nur nightly akzeptiert",
+        "`-C` steuert den C-Compiler für FFI, `-Z` aktiviert Zero-Cost-Abstraktionen",
+        "Beide sind gleichwertig, `-Z` ist nur die ältere Schreibweise"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `rustc -C help` siehst du alle stabilen Codegen-Optionen (`opt-level`, `debuginfo`, `codegen-units`, `lto`, `linker` …). Ein stabiler Compiler lehnt `-Z` ab: `error: the option `Z` is only accepted on the nightly compiler`.",
+      "begruendungen": [
+        "Richtig. `-Z` ist für Experimente und Compiler-Entwicklung gedacht.",
+        "`-C` steht für codegen. Einen C-Compiler ruft rustc höchstens als Linker-Treiber auf.",
+        "Stabile Toolchains verweigern `-Z`. Die Optionen unterscheiden sich gerade in ihrer Stabilitätsgarantie."
+      ]
+    }
+  ],
+  "praxis": "Wenn ein Laufzeitverhalten überrascht, etwa ein Überlauf, der im Release-Build nicht mehr panikt, hilft der Blick ins MIR oder ins Assembler. Statt `rustc` von Hand aufzurufen, nimmst du im Cargo-Projekt `cargo rustc --release -- --emit=asm` und findest die Datei unter `target/release/deps/`. Für einzelne Funktionen ist der Compiler Explorer (godbolt.org) oft schneller, er unterstützt auch Rust.",
+  "labor": {
+    "titel": "Alle Zwischenstufen auf einmal",
+    "anleitung": "Lege eine `main.rs` mit einer kleinen Funktion `quadrat` und einem `println!` an und lass dir alle Zwischenergebnisse ausgeben.",
+    "befehle": [
+      "rustc --emit=mir,llvm-ir,asm,obj,link main.rs",
+      "ls -l main*",
+      "file main.o main",
+      "grep -n quadrat main.ll | head",
+      "rustc -O --emit=asm main.rs && grep -c quadrat main.s"
+    ],
+    "beobachtung": "`file` meldet bei `main.o` *relocatable* und bei `main` *pie executable*. In `main.ll` heisst die Funktion nicht `quadrat`, sondern etwa `_RNvCs…_4main7quadrat`. Das ist Name Mangling (nächstes Modul). Mit `-O` wird `quadrat` meist inline eingesetzt und taucht kaum noch auf."
+  },
+  "begriffe": [
+    {
+      "begriff": "Crate",
+      "englisch": "crate",
+      "erklaerung": "Übersetzungseinheit in Rust: eine Bibliothek oder ein Programm mit allen Modulen, die rustc in einem Aufruf übersetzt."
+    },
+    {
+      "begriff": "HIR",
+      "englisch": "high-level intermediate representation",
+      "erklaerung": "Vereinfachter Syntaxbaum nach der Makro-Expansion, auf dem rustc die Typen prüft."
+    },
+    {
+      "begriff": "MIR",
+      "englisch": "mid-level intermediate representation",
+      "erklaerung": "Kontrollflussgraph aus Basisblöcken. Grundlage für Borrow-Checker, Const-Auswertung und Miri."
+    },
+    {
+      "begriff": "LLVM IR",
+      "englisch": "LLVM intermediate representation",
+      "erklaerung": "Sprachunabhängige Zwischensprache des LLVM-Backends, das optimiert und Maschinencode erzeugt."
+    },
+    {
+      "begriff": "Borrow-Checker",
+      "englisch": "borrow checker",
+      "erklaerung": "Teil von rustc, der auf dem MIR prüft, dass Referenzen gültig sind und Aliasing-Regeln eingehalten werden."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustc book: Command-line Arguments",
+      "url": "https://doc.rust-lang.org/rustc/command-line-arguments.html"
+    },
+    {
+      "titel": "Rust Compiler Development Guide: Overview of the compiler",
+      "url": "https://rustc-dev-guide.rust-lang.org/overview.html"
+    }
+  ]
+}

@@ -1,0 +1,207 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m1-l3",
+  "phase": 5,
+  "modul": "5.1 Threads und Data Races",
+  "titel": "Fearless Concurrency – und ihre Grenzen",
+  "lernziele": [
+    "Data Race und Race Condition unterscheiden",
+    "Erklären, wie Ownership und `Send`/`Sync` Data Races in safe Rust verhindern",
+    "Fehler erkennen, die Rust nicht verhindert: logische Races und Deadlocks"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "was-verhindert-rust",
+      "frage": "Rust wirbt mit „Fearless Concurrency“. Was garantiert der Compiler für Code **ohne** `unsafe`?",
+      "optionen": [
+        "Es gibt keine Data Races",
+        "Es gibt keine Deadlocks",
+        "Das Programm liefert unabhängig von der Thread-Reihenfolge immer dasselbe Ergebnis",
+        "Kein Thread kann panicken"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Safe Rust garantiert Freiheit von **Data Races** – nicht mehr. Deadlocks, falsche Ergebnisse durch ungünstige Reihenfolgen und Panics bleiben möglich. Das ist immer noch sehr viel: In C und C++ ist ein Data Race Undefined Behavior, und alles kann passieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Zwei Mutexe in falscher Reihenfolge blockieren auch in Rust für immer.",
+        "Logische Race Conditions erkennt der Compiler nicht.",
+        "Panics sind in jedem Thread möglich, z. B. durch `unwrap` oder einen Indexfehler."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Data Race vs. Race Condition",
+      "text": "Ein **Data Race** liegt vor, wenn zwei Threads gleichzeitig auf dieselbe Speicherstelle zugreifen, mindestens einer schreibt und nichts die Zugriffe synchronisiert. Das ist auf Sprachebene undefiniert: Werte können zerrissen oder verloren sein, der Optimierer darf beliebige Annahmen treffen.\n\nEine **Race Condition** ist ein Logikfehler: Das Ergebnis hängt von der zeitlichen Reihenfolge ab, obwohl jeder einzelne Zugriff korrekt synchronisiert ist.\n\nRust verhindert Data Races mit derselben Regel wie beim Borrow-Checker: entweder viele `&T` **oder** ein `&mut T`. `Send` und `Sync` übertragen diese Regel auf Threads. Veränderung über geteilte Referenzen gibt es nur über Typen, die synchronisieren (`Mutex`, Atomics)."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "static-mut",
+      "frage": "Ein C-Entwickler portiert einen globalen Zähler. Was meldet `cargo build`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static mut ZAEHLER: u32 = 0;",
+          "",
+          "fn main() {",
+          "    std::thread::scope(|s| {",
+          "        s.spawn(|| ZAEHLER += 1);",
+          "    });",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0133: Zugriff auf ein `static mut` ist `unsafe`",
+        "Kompiliert, der Zähler ist danach `1`",
+        "Fehler E0277: `u32` cannot be shared between threads safely"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `static mut` kann jeder Thread jederzeit verändern. Der Compiler kann hier keine Ausleihregeln durchsetzen und verlangt deshalb `unsafe`. Die Meldung sagt es deutlich: „mutable statics can be mutated by multiple threads: aliasing violations or data races will cause undefined behavior“. Die sichere Variante ist `static ZAEHLER: AtomicU32 = AtomicU32::new(0);`.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne `unsafe` lässt Rust den Zugriff gar nicht zu.",
+        "`u32` ist `Send` und `Sync`. Das Problem ist das `mut` am `static`."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "check-then-act",
+      "frage": "Zwei Threads führen gleichzeitig `einzahlen(&konto)` aus. Startwert ist `100`. Welche Endstände sind möglich?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn einzahlen(konto: &Mutex<i64>) {",
+          "    let stand = *konto.lock().unwrap();",
+          "    // Sperre ist hier schon wieder frei",
+          "    *konto.lock().unwrap() = stand + 10;",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`120` oder `110`",
+        "Nur `120`, der Mutex schützt jeden Zugriff",
+        "Beliebige Werte, es ist ein Data Race",
+        "Der Code kompiliert nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jeder Zugriff ist geschützt, es gibt kein Data Race. Aber zwischen Lesen und Schreiben ist die Sperre frei. Lesen beide Threads `100`, schreiben beide `110`, und eine Einzahlung ist verloren. Das ist eine klassische **Race Condition** (Lesen-Prüfen-Schreiben, *check-then-act*). Abhilfe: einmal sperren, den Guard halten und darüber lesen und schreiben: `*konto.lock().unwrap() += 10;`.",
+      "begruendungen": [
+        "Richtig.",
+        "Der Mutex schützt nur die einzelnen Zugriffe, nicht die Lücke dazwischen.",
+        "Alle Zugriffe laufen über den Mutex. Die Werte sind immer gültig, nur die Logik ist falsch.",
+        "Der Code kompiliert problemlos. Genau das macht diesen Fehler tückisch."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "deadlock-match",
+      "frage": "Das Programm gibt `bearbeite 3` aus und hängt dann für immer (getestet mit Edition 2024). Welche Zeile blockiert?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use std::sync::Mutex;",
+          "",
+          "fn main() {",
+          "    let auftraege = Mutex::new(vec![1, 2, 3]);",
+          "    match auftraege.lock().unwrap().pop() {",
+          "        Some(a) => {",
+          "            println!(\"bearbeite {a}\");",
+          "            auftraege.lock().unwrap().push(a * 10);",
+          "        }",
+          "        None => {}",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 8,
+      "erklaerung": "Temporäre Werte im Ausdruck hinter `match` leben bis zum Ende des ganzen `match`. Der `MutexGuard` aus Zeile 5 hält die Sperre also noch, wenn Zeile 8 erneut sperrt. `std::sync::Mutex` ist nicht reentrant: Derselbe Thread blockiert sich selbst. Das ist ein Deadlock, kein Data Race, und kompiliert deshalb ohne Warnung. Abhilfe: zuerst `let naechster = auftraege.lock().unwrap().pop();`, dann `match naechster`."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "fehlerarten",
+      "frage": "Wer fängt welchen Fehler?",
+      "paare": [
+        { "links": "Zwei Threads schreiben ohne Sperre auf denselben `Vec`", "rechts": "Compiler, in safe Rust nicht formulierbar" },
+        { "links": "Zwei Mutexe werden in unterschiedlicher Reihenfolge gesperrt", "rechts": "Niemand automatisch, nur Design und Review" },
+        { "links": "Data Race in `unsafe`-Code mit Rohzeigern", "rechts": "ThreadSanitizer oder Miri zur Laufzeit" },
+        { "links": "Ein Thread panict, während er einen Mutex hält", "rechts": "Poisoning: der nächste `lock()` liefert `Err`" }
+      ],
+      "erklaerung": "Der Compiler deckt die häufigste und gefährlichste Fehlerklasse ab. Für den Rest braucht es weiterhin Werkzeuge (Miri, Sanitizer aus Phase 4) und klare Regeln, etwa eine feste Lock-Reihenfolge (Modul 5.2)."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Vergleich mit C++",
+      "tabelle": {
+        "kopf": ["Situation", "C++", "Rust"],
+        "zeilen": [
+          ["Geteilte Variable ohne Sperre", "kompiliert, Undefined Behavior", "Compilerfehler (E0277, E0499, E0133)"],
+          ["Mutex und geschützte Daten", "getrennt, Zuordnung per Kommentar", "Daten liegen *im* `Mutex<T>`"],
+          ["Referenz auf lokale Variable an Thread", "kompiliert, ggf. hängende Referenz", "E0373 bzw. `thread::scope`"],
+          ["Deadlock, Race Condition", "möglich", "möglich"]
+        ]
+      },
+      "text": "Der grösste Unterschied ist nicht ein einzelnes Feature, sondern wo Fehler auffallen: In C++ zur Laufzeit, oft nur unter Last oder auf dem Kundengerät. In Rust beim Kompilieren, also bevor der Code das erste Mal läuft."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "unsafe-sync",
+      "frage": "Ein Kollege schreibt `unsafe impl Sync for Puffer {}`, damit ein `Puffer` mit `Cell`-Feldern über `Arc` geteilt werden kann. Was sagst du im Review?",
+      "optionen": [
+        "Das macht Data Races wieder möglich. Besser `Mutex` oder Atomics statt `Cell` verwenden",
+        "In Ordnung, `unsafe impl` ist der übliche Weg für geteilte Daten",
+        "Unnötig, `Arc` macht den Inhalt ohnehin `Sync`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`Cell` ist bewusst nicht `Sync`: Ihre Änderungen sind nicht synchronisiert. Mit dem `unsafe impl` behauptet der Kollege das Gegenteil, und der Compiler glaubt ihm. Ab da können zwei Threads gleichzeitig `set` aufrufen: Undefined Behavior wie in C++. Ein `unsafe impl Sync` ist nur vertretbar, wenn der Typ intern selbst synchronisiert, und braucht dann eine `// SAFETY:`-Begründung.",
+      "begruendungen": [
+        "Richtig.",
+        "`unsafe impl` ist die Ausnahme für Typen mit eigener Synchronisation, nicht der Normalfall.",
+        "Umgekehrt: `Arc<T>` verlangt, dass `T` bereits `Sync` ist."
+      ]
+    }
+  ],
+  "praxis": "Rust nimmt dir die Angst vor Data Races, nicht das Nachdenken. In Reviews von nebenläufigem Code suchst du gezielt nach Lesen-Prüfen-Schreiben über mehrere `lock()`-Aufrufe, nach Guards, die in `match`- oder `if let`-Ausdrücken länger leben als gedacht, und nach jedem `unsafe impl Send/Sync`.",
+  "labor": {
+    "titel": "Einen Deadlock untersuchen",
+    "anleitung": "Baue das `match`-Beispiel aus Schritt 5 nach und lass es laufen. Hänge dich mit dem Debugger an den hängenden Prozess und sieh dir den Stack an. Behebe den Fehler dann, indem du das Ergebnis von `pop()` zuerst in einer Variablen speicherst.",
+    "befehle": [
+      "cargo new deadlock && cd deadlock",
+      "cargo run &",
+      "rust-gdb -p $(pgrep deadlock) -batch -ex 'thread apply all bt'"
+    ],
+    "beobachtung": "Der Backtrace zeigt `main` in `std::sync::Mutex::lock` bzw. in einem `futex`-Systemaufruf: Der Thread wartet auf eine Sperre, die er selbst hält. Clippy kennt übrigens den Lint `significant_drop_in_scrutinee` (Gruppe nursery), der genau dieses Muster meldet."
+  },
+  "begriffe": [
+    {
+      "begriff": "Data Race",
+      "englisch": "data race",
+      "erklaerung": "Gleichzeitiger, unsynchronisierter Zugriff mehrerer Threads auf denselben Speicher, mindestens einer schreibend. In safe Rust unmöglich."
+    },
+    {
+      "begriff": "Race Condition",
+      "englisch": "race condition",
+      "erklaerung": "Logikfehler, bei dem das Ergebnis von der zeitlichen Reihenfolge der Threads abhängt."
+    },
+    {
+      "begriff": "Deadlock",
+      "englisch": "deadlock",
+      "erklaerung": "Threads warten gegenseitig (oder ein Thread auf sich selbst) auf Sperren und kommen nie weiter."
+    },
+    {
+      "begriff": "Fearless Concurrency",
+      "englisch": "fearless concurrency",
+      "erklaerung": "Schlagwort für Rusts Ansatz, Nebenläufigkeitsfehler über das Typsystem bereits beim Kompilieren auszuschliessen."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Fearless Concurrency",
+      "url": "https://doc.rust-lang.org/book/ch16-00-concurrency.html"
+    },
+    {
+      "titel": "The Rustonomicon: Data Races and Race Conditions",
+      "url": "https://doc.rust-lang.org/nomicon/races.html"
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m5-l1",
+  "phase": 10,
+  "modul": "10.5 Statische vs. dynamische Polymorphie",
+  "titel": "Generics oder dyn Trait?",
+  "lernziele": [
+    "Monomorphisierung und dynamischen Dispatch über die vtable unterscheiden",
+    "Die Folgen für Binärgrösse, Laufzeit, Kompilierzeit und heterogene Sammlungen abwägen",
+    "Eine begründete Entscheidungsregel für das eigene Projekt formulieren"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Funktion `fn summe<S: Sensor>(s: &S)` wird mit `Temp` und mit `Druck` aufgerufen. Wie viele Maschinencode-Versionen von `summe` entstehen (ohne Inlining)?",
+      "optionen": [
+        "Zwei, je eine für `Temp` und `Druck`",
+        "Eine, die über eine vtable aufruft",
+        "Eine, die zur Laufzeit den Typ prüft",
+        "Keine, Generics werden immer geinlinet"
+      ],
+      "korrekt": 0,
+      "fest": false,
+      "erklaerung": "Bei **Monomorphisierung** (monomorphization) erzeugt der Compiler für jede verwendete Typkombination eine eigene Kopie der generischen Funktion. Das ist wie ein C++-Template: schnell, weil jeder Aufruf direkt und inlinebar ist, aber jede Kopie kostet Platz im Binary und Zeit beim Kompilieren.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre `&dyn Sensor`, also dynamischer Dispatch.",
+        "Rust prüft Typen nicht zur Laufzeit, ausser man nutzt ausdrücklich `Any`.",
+        "Ob geinlinet wird, entscheidet der Optimierer. Ohne Inlining bleiben die Kopien als eigene Funktionen sichtbar."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Programm hat `statisch<S: Sensor>(s: &S)` und `dynamisch(s: &dyn Sensor)`, beide mit `Temp` und `Druck` aufgerufen. Was zeigt die Symboltabelle des Debug-Builds?",
+      "terminal": {
+        "befehl": "nm -C target/debug/poly | grep -E ' poly::(statisch|dynamisch)'",
+        "ausgabe": [
+          "00000000000142a0 t poly::statisch::<poly::Temp>",
+          "00000000000142e0 t poly::statisch::<poly::Druck>",
+          "0000000000014220 t poly::dynamisch"
+        ]
+      },
+      "optionen": [
+        "Die generische Funktion existiert zweimal (eine Kopie pro Typ), die `dyn`-Funktion nur einmal",
+        "Beide Funktionen existieren je einmal, der Typ steht nur im Namen",
+        "Die `dyn`-Funktion wurde wegoptimiert",
+        "`statisch` wurde doppelt gelinkt, das ist ein Linkerfehler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`statisch::<Temp>` und `statisch::<Druck>` sind zwei verschiedene Funktionen an zwei Adressen. `dynamisch` gibt es einmal, sie ruft `lesen` über die vtable auf. Bei Dutzenden Typen und grossen generischen Funktionen kann das Binary dadurch merklich wachsen, was auf Mikrocontrollern mit wenig Flash zählt. `cargo bloat` zeigt, welche Funktionen am meisten Platz belegen.",
+      "begruendungen": [
+        "Richtig.",
+        "Es sind zwei Adressen, also zwei Kopien des Codes.",
+        "Sie steht in der Ausgabe.",
+        "Zwei verschiedene Instanzen sind normal, der Name unterscheidet sich im Typparameter."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was hinter &dyn Trait steckt",
+      "text": "Ein `&dyn Sensor` ist ein **Fat Pointer** (breiter Zeiger) aus zwei Wörtern: Zeiger auf die Daten und Zeiger auf die **vtable** (virtual method table) des konkreten Typs. Darin stehen Grösse, Ausrichtung, `drop` und die Trait-Methoden. Ein Aufruf liest die Adresse aus der vtable und springt indirekt.\n\nAuf x86-64 gilt deshalb `size_of::<&Temp>() == 8`, aber `size_of::<&dyn Sensor>() == 16`. Im Unterschied zu C++ steckt die vtable nicht im Objekt, sondern im Zeiger. `Temp` selbst bleibt so klein, wie es ist.",
+      "tabelle": {
+        "kopf": ["", "Generic `<S: Sensor>`", "`dyn Sensor`"],
+        "zeilen": [
+          ["Aufruf", "direkt, inlinebar", "indirekt über vtable"],
+          ["Binärgrösse", "eine Kopie pro Typ", "eine Kopie"],
+          ["Kompilierzeit", "steigt mit Anzahl Typen", "gering"],
+          ["Gemischte Typen in einer `Vec`", "nein", "ja"],
+          ["Typ zur Laufzeit wählbar", "nein", "ja"]
+        ]
+      }
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "`Temp` und `Druck` implementieren `Sensor`. Was passiert hier?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn summe<S: Sensor>(alle: &[S]) -> i32 {",
+          "    alle.iter().map(|s| s.lesen()).sum()",
+          "}",
+          "",
+          "fn main() {",
+          "    let v = [Temp, Druck];",
+          "    println!(\"{}\", summe(&v));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Gibt `1034` aus",
+        "Fehler `E0308`: erwartet `Temp`, gefunden `Druck`",
+        "Fehler `E0038`: `Sensor` ist nicht dyn-kompatibel",
+        "Fehler `E0277`: `Sensor` ist für `[Temp; 2]` nicht implementiert"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Ein Array (wie eine `Vec`) hat genau einen Elementtyp. Eine **heterogene Sammlung** braucht einen gemeinsamen Typ, z. B. `Vec<Box<dyn Sensor>>` oder ein `enum` mit einer Variante pro Sensor (nächste Lektion). Mit Generics geht das nicht, weil jedes `S` genau ein konkreter Typ ist.",
+      "begruendungen": [
+        "Das Array lässt sich gar nicht bilden.",
+        "Richtig.",
+        "`dyn` kommt hier gar nicht vor.",
+        "Der Fehler entsteht schon beim Array, bevor `summe` geprüft wird."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Kollege will `Vec<Box<dyn Sensor>>` verwenden, aber der Trait hat die Methode `fn kopie(&self) -> Self`. Was bedeutet die Meldung?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0038]: the trait `Sensor` is not dyn compatible",
+          " --> src/main.rs:5:24",
+          "  |",
+          "5 |     let v: Vec<Box<dyn Sensor>> = vec![Box::new(Temp)];",
+          "  |                        ^^^^^^ `Sensor` is not dyn compatible",
+          "  |",
+          "note: for a trait to be dyn compatible it needs to allow building a vtable",
+          "  |",
+          "1 | trait Sensor { fn lesen(&self) -> i32; fn kopie(&self) -> Self; }",
+          "  |       ------ this trait is not dyn compatible...          ^^^^ ...because method `kopie` references the `Self` type in its return type",
+          "  = help: consider moving `kopie` to another trait"
+        ]
+      },
+      "optionen": [
+        "Hinter `dyn` ist der konkrete Typ unbekannt, also auch die Grösse von `Self`. Eine Methode, die `Self` per Wert zurückgibt, passt nicht in eine vtable",
+        "`Box` darf keine Traits mit mehr als einer Methode enthalten",
+        "`Self` ist in Traits grundsätzlich verboten",
+        "Man muss `Temp` als `Clone` ableiten, dann geht es"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Dyn-Kompatibilität** (dyn compatibility, früher „object safety“) verlangt unter anderem: keine Methoden mit `Self` per Wert im Rückgabetyp, keine generischen Methoden, kein `Self: Sized` als Supertrait. Auswege: Die Methode mit `where Self: Sized` von `dyn` ausnehmen, in einen eigenen Trait verschieben oder `Box<dyn Sensor>` zurückgeben.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Anzahl Methoden spielt keine Rolle.",
+        "`Self` ist erlaubt, nur nicht in jeder Position, wenn der Trait als `dyn` benutzt werden soll.",
+        "`Clone` am Typ ändert nichts an der Signatur des Traits."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Form passt zu welcher Anforderung?",
+      "paare": [
+        { "links": "Generic `<S: Sensor>`", "rechts": "Treiber-Crate für `embedded-hal`, das auf jeder Plattform ohne Overhead laufen soll" },
+        { "links": "`Box<dyn Sensor>`", "rechts": "Plugins, die zur Laufzeit aus der Konfiguration geladen werden" },
+        { "links": "`&mut dyn Sensor`", "rechts": "Dynamischer Dispatch auf einem Mikrocontroller ohne Heap" },
+        { "links": "`impl Sensor` als Rückgabetyp", "rechts": "Konkreten Typ verbergen, aber trotzdem statisch dispatchen" }
+      ],
+      "erklaerung": "`dyn` braucht keinen Heap. `&dyn` und `&mut dyn` funktionieren mit Werten auf dem Stack oder in `static`. `impl Trait` in Rückgabeposition ist statisch: Es gibt genau einen konkreten Typ, der Aufrufer kennt ihn nur nicht."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Entscheidungsregel ist für die meisten Projekte vernünftig?",
+      "optionen": [
+        "Standardmässig Generics. `dyn` dort, wo man gemischte Typen, Laufzeitwahl oder kleinere Binaries und kürzere Buildzeiten braucht, und wo der indirekte Aufruf nicht im heissen Pfad liegt",
+        "Immer `dyn`, weil es dem Denken aus C++ und Java am nächsten ist",
+        "Immer Generics, weil `dyn` langsam ist",
+        "Immer `enum`, weil es das Beste aus beiden Welten ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein indirekter Aufruf kostet wenige Nanosekunden, verhindert aber Inlining. In einer Regelschleife mit hoher Frequenz kann das zählen, an einer Modulgrenze mit wenigen Aufrufen pro Sekunde nicht. Monomorphisierung kostet dagegen Flash und Buildzeit. Wichtig ist, die Entscheidung zu begründen und im Zweifel zu messen (Phase 5).",
+      "begruendungen": [
+        "Richtig.",
+        "Das verschenkt Inlining und Typprüfung, wo man sie gratis hätte.",
+        "„Immer“ ist falsch: Bei gemischten Sammlungen geht es gar nicht anders, und der Unterschied ist oft nicht messbar.",
+        "Enums sind eine gute dritte Option, aber nur für eine geschlossene Menge von Typen."
+      ]
+    }
+  ],
+  "praxis": "Die Frage „Generic oder `dyn`?“ kommt in fast jedem Rust-Review. Gute Antworten nennen den konkreten Grund: „Der Treiber soll mit jedem `I2c` funktionieren, ohne Overhead“ oder „Wir laden Protokoll-Handler aus der Konfiguration“. Auf Mikrocontrollern lohnt sich `cargo bloat --release`, um zu sehen, ob eine generische Funktion in zehn Kopien im Flash liegt. Dann kann eine kleine, nicht-generische innere Funktion helfen (das „inner function“-Muster).",
+  "labor": {
+    "titel": "Monomorphisierung sichtbar machen",
+    "anleitung": "Schreibe einen Trait `Sensor` mit zwei Implementierungen und je eine Funktion mit Generic und mit `&dyn Sensor`. Markiere beide mit `#[inline(never)]`, damit sie im Binary sichtbar bleiben. Gib ausserdem die Grössen der Zeiger aus.",
+    "befehle": [
+      "cargo new poly && cd poly",
+      "cargo run",
+      "nm -C target/debug/poly | grep -E ' poly::(statisch|dynamisch)'"
+    ],
+    "beobachtung": "`nm` zeigt `statisch::<poly::Temp>` und `statisch::<poly::Druck>` als getrennte Funktionen, `dynamisch` nur einmal. Das Programm meldet `8 16 16` für `&Temp`, `&dyn Sensor` und `Box<dyn Sensor>`."
+  },
+  "begriffe": [
+    {
+      "begriff": "Monomorphisierung",
+      "englisch": "monomorphization",
+      "erklaerung": "Der Compiler erzeugt für jeden verwendeten Typ eine eigene Kopie einer generischen Funktion."
+    },
+    {
+      "begriff": "Dynamischer Dispatch",
+      "englisch": "dynamic dispatch",
+      "erklaerung": "Die aufzurufende Methode wird zur Laufzeit über die vtable bestimmt."
+    },
+    {
+      "begriff": "Fat Pointer",
+      "englisch": "fat pointer, wide pointer",
+      "erklaerung": "Zeiger aus zwei Wörtern, bei `dyn Trait` Datenzeiger plus vtable-Zeiger."
+    },
+    {
+      "begriff": "Dyn-Kompatibilität",
+      "englisch": "dyn compatibility (früher object safety)",
+      "erklaerung": "Bedingungen, unter denen ein Trait als `dyn Trait` verwendet werden kann."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Reference: Traits (Dyn compatibility)",
+      "url": "https://doc.rust-lang.org/reference/items/traits.html"
+    },
+    {
+      "titel": "The Rust Programming Language",
+      "url": "https://doc.rust-lang.org/book/"
+    }
+  ]
+}

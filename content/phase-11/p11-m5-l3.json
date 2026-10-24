@@ -1,0 +1,155 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m5-l3",
+  "phase": 11,
+  "modul": "11.5 Automotive und Robotik",
+  "titel": "DDS, QoS und Echtzeit-Kommunikation",
+  "lernziele": [
+    "Das datenzentrierte Modell von DDS mit Discovery und RTPS verstehen",
+    "Die wichtigsten QoS-Einstellungen und ihre Kompatibilitätsregeln anwenden",
+    "DDS-Optionen in Rust (RustDDS, Cyclone-DDS-Bindings) und die Rolle der Zeitsynchronisation einordnen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was unterscheidet **DDS** von einem einfachen Message-Broker wie MQTT?",
+      "optionen": [
+        "DDS ist datenzentriert und dezentral: Teilnehmer finden sich selbst (Discovery) und tauschen Daten direkt aus, gesteuert über Quality-of-Service-Einstellungen",
+        "DDS braucht immer einen zentralen Server",
+        "DDS überträgt nur Text",
+        "DDS ist ein Rust-Crate von Tokio"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**DDS** (*Data Distribution Service*) ist ein Standard der Object Management Group (OMG). Das Wire-Protokoll heisst **RTPS** (*Real-Time Publish-Subscribe*) und läuft meist über UDP. Ohne zentralen Broker gibt es keinen Single Point of Failure. DDS wird in Verteidigung, Luftfahrt, Industrie und als Standard-Middleware in ROS 2 eingesetzt.",
+      "begruendungen": [
+        "Richtig.",
+        "Genau das vermeidet DDS.",
+        "Daten sind typisiert und binär kodiert (CDR).",
+        "DDS ist ein sprachunabhängiger Standard mit vielen Implementierungen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die QoS-Einstellungen zu.",
+      "paare": [
+        { "links": "Reliability: RELIABLE", "rechts": "Verlorene Pakete werden erneut gesendet" },
+        { "links": "Reliability: BEST_EFFORT", "rechts": "Keine Wiederholung, der nächste Wert ersetzt den verlorenen" },
+        { "links": "History: KEEP_LAST(n)", "rechts": "Nur die letzten n Werte pro Instanz werden gepuffert" },
+        { "links": "Durability: TRANSIENT_LOCAL", "rechts": "Spät startende Subscriber erhalten die letzten Werte nachgeliefert" },
+        { "links": "Deadline", "rechts": "Erwartete maximale Zeit zwischen zwei Werten, Verletzung wird gemeldet" }
+      ],
+      "erklaerung": "**QoS** (*Quality of Service*) beschreibt den Vertrag zwischen Sender und Empfänger. Typisch: Sensordaten BEST_EFFORT mit KEEP_LAST(1), Befehle RELIABLE, Karten oder Konfiguration TRANSIENT_LOCAL, damit neue Nodes sie sofort erhalten."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Publisher sendet mit BEST_EFFORT, ein Subscriber verlangt RELIABLE. Was passiert?",
+      "optionen": [
+        "Die beiden werden nicht verbunden, der Subscriber erhält nichts. Ein Subscriber darf nicht mehr verlangen, als der Publisher anbietet",
+        "Die Middleware wechselt automatisch auf RELIABLE",
+        "Der Subscriber erhält alle Daten, nur langsamer",
+        "Es kommt zu einem Absturz beider Programme"
+      ],
+      "korrekt": 0,
+      "erklaerung": "DDS prüft QoS nach dem Muster *Angebot gegen Anforderung* (requested vs. offered). Passt es nicht, gibt es ein Ereignis „incompatible QoS“, aber keine Daten. Das ist eine der häufigsten Ursachen für „ich sehe das Topic, bekomme aber nichts“. Umgekehrt (RELIABLE angeboten, BEST_EFFORT verlangt) funktioniert es.",
+      "begruendungen": [
+        "Richtig.",
+        "QoS wird nicht automatisch angepasst.",
+        "Ohne Übereinstimmung fliessen gar keine Daten.",
+        "Die Programme laufen weiter, nur ohne Verbindung."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein Rust-Node veröffentlicht `/scan`, ein anderer Node empfängt nichts. Was zeigt diese Ausgabe?",
+      "terminal": {
+        "befehl": "ros2 topic info /scan --verbose",
+        "ausgabe": [
+          "Type: sensor_msgs/msg/LaserScan",
+          "",
+          "Publisher count: 1",
+          "  Node name: lidar_treiber",
+          "  QoS profile:",
+          "    Reliability: BEST_EFFORT",
+          "    History (Depth): KEEP_LAST (5)",
+          "",
+          "Subscription count: 1",
+          "  Node name: kartierung",
+          "  QoS profile:",
+          "    Reliability: RELIABLE",
+          "    History (Depth): KEEP_LAST (10)"
+        ]
+      },
+      "optionen": [
+        "Die Reliability passt nicht: Der Subscriber verlangt RELIABLE, der Publisher bietet nur BEST_EFFORT",
+        "Die History-Tiefe ist verschieden, das verhindert die Verbindung",
+        "Es gibt keinen Publisher",
+        "Der Nachrichtentyp ist falsch"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die Ausgabe ist gekürzt auf die relevanten Zeilen. Die Lösung ist meist, den Subscriber auf BEST_EFFORT zu stellen. In ROS 2 gibt es dafür das vordefinierte Profil für Sensordaten. Unterschiedliche History-Tiefen sind dagegen kompatibel, sie betreffen nur den eigenen Puffer.",
+      "begruendungen": [
+        "Richtig.",
+        "History ist lokal und kein Kompatibilitätskriterium.",
+        "Publisher count ist 1.",
+        "Es gibt nur einen Typ, beide Seiten nutzen ihn."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "DDS in Rust",
+      "text": "Für Rust gibt es zwei Wege:\n\n- **RustDDS** (Atostek): eine reine Rust-Implementierung von DDS und RTPS, mit serde für die Nutzdaten. Laut Projektdokumentation sind u. a. Discovery, Reliability und History umgesetzt, einige QoS-Policies wie Deadline oder Partition noch nicht. Das Crate `ros2-client` baut darauf eine ROS-2-Schnittstelle ganz ohne C-Bibliotheken.\n- **Bindings an Eclipse Cyclone DDS**, eine verbreitete C-Implementierung: z. B. `cyclors` (Low-Level) oder Wrapper-Crates darüber.\n\nAbwägung: Reine Rust-Implementierung bedeutet einfacheres Bauen und Speichersicherheit, eine etablierte C-Implementierung bringt mehr Funktionen und Praxiserfahrung. Prüfe vor dem Einsatz immer, welche QoS-Policies du brauchst."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Fahrzeug fusioniert Lidar- und Kameradaten aus zwei Rechnern. Die Zeitstempel weichen um 40 ms voneinander ab. Was fehlt?",
+      "optionen": [
+        "Eine gemeinsame Zeitbasis: Die Uhren müssen synchronisiert werden, z. B. mit PTP (IEEE 1588) oder gPTP (IEEE 802.1AS) über Ethernet",
+        "Ein schnelleres Netzwerk",
+        "RELIABLE statt BEST_EFFORT",
+        "Grössere Puffer im Subscriber"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Sensordaten tragen den Zeitpunkt der Messung, nicht den des Empfangs. Weichen die Uhren ab, werden Messungen falsch zugeordnet, bei 20 m/s entsprechen 40 ms schon 80 cm. **PTP** (*Precision Time Protocol*) erreicht mit Hardware-Zeitstempeln Genauigkeiten im Mikrosekundenbereich. Unter Linux erledigt das z. B. `linuxptp`, die Anwendung nutzt dann einfach die Systemuhr.",
+      "begruendungen": [
+        "Richtig.",
+        "Bandbreite ändert nichts an falschen Uhren.",
+        "Zuverlässige Zustellung korrigiert keine Zeitstempel.",
+        "Puffer lösen kein Uhrenproblem."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe den Ablauf in DDS in die richtige Reihenfolge, bis die erste Nachricht ankommt.",
+      "elemente": [
+        "Participants kündigen sich per Multicast an (Participant Discovery)",
+        "Publisher und Subscriber tauschen Topic, Typ und QoS aus (Endpoint Discovery)",
+        "Die Middleware prüft, ob Typ und QoS kompatibel sind",
+        "Der Publisher sendet Daten per RTPS direkt an den passenden Subscriber"
+      ],
+      "erklaerung": "Discovery braucht Zeit und erzeugt bei vielen Teilnehmern spürbaren Netzverkehr. Darum sind Daten direkt nach dem Start oft noch nicht da, und grosse Systeme setzen auf Discovery-Server oder, wie Zenoh, auf Router."
+    }
+  ],
+  "praxis": "Wenn ein Topic „da ist, aber nichts ankommt“, prüfe zuerst QoS und Domain-ID, dann Netzwerk und Firewall (UDP-Multicast). Dokumentiere QoS pro Topic wie eine Schnittstelle. Für zeitkritische Fusion gehört die Zeitsynchronisation in die Systemarchitektur, nicht in die einzelne Anwendung.",
+  "labor": {
+    "titel": "RustDDS-Beispiele ansehen",
+    "anleitung": "Lade das RustDDS-Repository und sieh dir die mitgelieferten Beispiele an. Starte ein Beispiel zweimal und beobachte, wie sich die Teilnehmer finden.",
+    "befehle": [
+      "git clone --depth 1 https://github.com/Atostek/RustDDS.git",
+      "cd RustDDS && ls examples",
+      "cargo build --examples"
+    ],
+    "beobachtung": "Die Beispiele nutzen einen `QosPolicyBuilder`, um Reliability, History und Durability festzulegen. Vergleiche das mit den QoS-Methoden von `rclrs` aus der vorigen Lektion: Die Begriffe sind dieselben, weil beide auf dem DDS-Standard beruhen."
+  },
+  "begriffe": [
+    { "begriff": "DDS", "englisch": "Data Distribution Service", "erklaerung": "OMG-Standard für datenzentriertes Publish-Subscribe ohne zentralen Broker." },
+    { "begriff": "RTPS", "englisch": "Real-Time Publish-Subscribe", "erklaerung": "Wire-Protokoll von DDS, meist über UDP." },
+    { "begriff": "QoS", "englisch": "quality of service", "erklaerung": "Einstellungen wie Reliability, History, Durability und Deadline, die den Vertrag zwischen Sender und Empfänger festlegen." },
+    { "begriff": "PTP", "englisch": "Precision Time Protocol", "erklaerung": "Protokoll zur genauen Synchronisation von Uhren über Ethernet (IEEE 1588)." }
+  ],
+  "weiterlesen": [
+    { "titel": "RustDDS", "url": "https://docs.rs/rustdds/latest/rustdds/" },
+    { "titel": "ros2-client", "url": "https://docs.rs/ros2-client/latest/ros2_client/" },
+    { "titel": "OMG: Data Distribution Service", "url": "https://www.omg.org/spec/DDS/" }
+  ]
+}

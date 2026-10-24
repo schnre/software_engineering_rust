@@ -1,0 +1,159 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p8-m4-l2",
+  "phase": 8,
+  "modul": "8.4 Jenkins Shared Libraries",
+  "titel": "Shared Libraries versionieren und ausrollen",
+  "lernziele": [
+    "Eine Shared Library mit Tags nach SemVer versionieren",
+    "Breaking Changes ohne Stillstand auf viele Repositories ausrollen",
+    "Typische Sicherheitsfehler in Library-Schritten erkennen und Schritte testen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Du willst in `rustPipeline()` den Parameter `features` in `cargoFeatures` umbenennen. 30 Repositories verwenden die Library. Wie rollst du das aus?",
+      "optionen": [
+        "Neuen Namen einführen, alten weiter akzeptieren und eine Warnung ins Log schreiben. Als Minor-Version taggen. Später, wenn alle umgestellt sind, den alten Namen in einer neuen Major-Version entfernen",
+        "Umbenennen, als `v2.0.0` taggen und alle 30 Teams per Mail bitten, am selben Tag umzustellen",
+        "Umbenennen und den bestehenden Tag `v1.4.0` auf den neuen Commit verschieben"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine Library mit vielen Nutzern ändert man wie eine öffentliche API: erst **erweitern**, dann **migrieren**, zuletzt **entfernen**. Zwischen den Schritten bleibt jede Pipeline grün. Dasselbe Muster kennst du von `#[deprecated]` in Rust-Bibliotheken.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Stichtag für 30 Teams klappt in der Praxis nie gleichzeitig.",
+        "Ein verschobener Tag bricht alle, die sich auf `v1.4.0` verlassen, ohne Vorwarnung, und zerstört die Reproduzierbarkeit."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Versionen für Pipeline-Code",
+      "text": "SemVer gilt auch hier, die „API“ sind Schrittnamen und Parameter:\n\n- **Patch** (`v1.4.1`): Fehler behoben, Verhalten wie dokumentiert\n- **Minor** (`v1.5.0`): neuer Schritt oder neuer optionaler Parameter\n- **Major** (`v2.0.0`): Parameter entfernt, Standardwert geändert, neue Pflichtprüfung wie `cargo deny`, die bestehende Projekte rot machen kann\n\nTags werden nie verschoben. Viele Teams pflegen zusätzlich einen Branch `v1`, der immer auf den neuesten 1.x-Stand zeigt. Projekte mit `@Library('rust-lib@v1')` bekommen dann Patches und Minor-Versionen automatisch, aber keine Breaking Changes."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Änderung an der Library ist welche Versionsstufe?",
+      "paare": [
+        { "links": "Tippfehler in einer Log-Meldung von `rustPipeline()` behoben", "rechts": "Patch" },
+        { "links": "Neuer optionaler Parameter `msrv:` für einen zusätzlichen Check", "rechts": "Minor" },
+        { "links": "`cargo deny check` läuft neu immer und lässt Projekte mit GPL-Abhängigkeit scheitern", "rechts": "Major" }
+      ],
+      "erklaerung": "Der dritte Fall ist tückisch: Kein Parameter ändert sich, das Jenkinsfile bleibt gleich, und trotzdem werden Projekte rot. Für Nutzer ist das ein Bruch. Eine neue Pflichtprüfung führt man deshalb zuerst als Opt-in oder nur als Warnung ein."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Jenkins warnt bei diesem Schritt vor einem möglichen Leck von Geheimnissen. Welche Zeile ist das Problem?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "vars/cratePublish.groovy",
+        "zeilen": [
+          "def call(String credentialsId = 'crates-io') {",
+          "    withCredentials([string(credentialsId: credentialsId, variable: 'TOKEN')]) {",
+          "        sh \"cargo publish --locked --token ${TOKEN}\"",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 3,
+      "erklaerung": "Die doppelten Anführungszeichen lassen **Groovy** `${TOKEN}` einsetzen. Der Token landet so im Klartext im Befehl, der an die Shell geht, und kann in Prozesslisten und Logs sichtbar werden. Richtig: einfache Anführungszeichen, damit die Shell die Umgebungsvariable liest, oder gleich `variable: 'CARGO_REGISTRY_TOKEN'` und `sh 'cargo publish --locked'`, denn Cargo liest diese Variable selbst."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Library-Code testen",
+      "text": "Ein Fehler in der Library trifft alle Projekte gleichzeitig. Deshalb testet man sie auf zwei Ebenen:\n\n- **Unit-Tests** mit *JenkinsPipelineUnit*: Die Schritte laufen in einer simulierten Umgebung, `sh` wird abgefangen. Ein Test prüft z. B., dass `rustPipeline(features: '--no-default-features')` genau diesen Clippy-Befehl erzeugt.\n- **Integrationstests**: Ein paar echte Beispiel-Repositories (ein Bibliotheks-Crate, ein Workspace, eine Firmware) bauen gegen einen Branch der Library, bevor er getaggt wird.\n\nEin Jenkinsfile kann dafür gezielt einen Branch laden: `@Library('rust-lib@feature/msrv') _`."
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe den Rollout einer neuen Major-Version `v2.0.0` in eine sinnvolle Reihenfolge.",
+      "elemente": [
+        "Änderung auf einem Branch der Library umsetzen, Unit-Tests ergänzen",
+        "Beispiel-Repositories gegen den Branch bauen lassen",
+        "`v2.0.0` taggen und Migrationsanleitung im Changelog veröffentlichen",
+        "Pilotteams stellen auf `@v2.0.0` um",
+        "Restliche Repositories migrieren; `v1` erhält nur noch Sicherheitsfixes"
+      ],
+      "erklaerung": "Weil jedes Projekt seine Version selbst wählt, kann der Wechsel schrittweise erfolgen. Pilotteams finden die Probleme, die kein Test vorhergesehen hat. Ein Werkzeug wie Renovate kann die Pull Requests für die Umstellung in allen Repositories automatisch öffnen."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Jenkinsfile ruft `cratePackage()` ohne Parameter auf. Was passiert?",
+      "code": {
+        "sprache": "groovy",
+        "datei": "vars/cratePackage.groovy",
+        "zeilen": [
+          "def call(Map cfg = [:]) {",
+          "    def paket = cfg.paket ?: error('cratePackage: Parameter paket fehlt')",
+          "    sh \"cargo package --locked -p ${paket}\"",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Der Build schlägt mit „cratePackage: Parameter paket fehlt“ fehl, bevor `cargo` aufgerufen wird",
+        "`cargo package` läuft für das Paket `null`",
+        "`cargo package` läuft für alle Pakete im Workspace"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cfg.paket` ist `null`, der Elvis-Operator `?:` wählt die rechte Seite, und `error(…)` beendet den Build mit einer klaren Meldung. Gute Library-Schritte prüfen ihre Parameter früh und sagen genau, was fehlt. Sonst sucht jemand im Log nach einem unverständlichen Fehler von `cargo`.",
+      "begruendungen": [
+        "Richtig.",
+        "`error` beendet den Build, bevor `sh` erreicht wird.",
+        "Der Schritt verlangt ausdrücklich ein Paket."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Begriffe.",
+      "text": "Ein Projekt, das automatisch alle 1.x-Fixes bekommen will, lädt `@Library('rust-lib@{{?}}')`. Einen veröffentlichten Tag darf man nie {{?}}. Eine neue Pflichtprüfung, die Projekte rot machen kann, ist eine {{?}}-Änderung.",
+      "luecken": [
+        { "loesungen": ["v1"] },
+        { "loesungen": ["verschieben"] },
+        { "loesungen": ["Major"] }
+      ],
+      "auswahl": ["v1", "main", "verschieben", "lesen", "Major", "Patch"],
+      "erklaerung": "Der Branch `v1` ist ein bewusster Kompromiss zwischen Reproduzierbarkeit und Komfort. Wer exakt reproduzieren muss, etwa für zertifizierte Firmware, pinnt einen vollständigen Tag wie `v1.4.0`."
+    }
+  ],
+  "praxis": "Eine Shared Library ist ein internes Produkt mit vielen Nutzern. Gib ihr einen Changelog, halte SemVer ein, teste sie mit JenkinsPipelineUnit und echten Beispiel-Repositories, und rolle Breaking Changes in Stufen aus. Prüfe im Review besonders die Anführungszeichen in `sh`-Aufrufen, sobald Credentials im Spiel sind.",
+  "labor": {
+    "titel": "Einen Library-Schritt testen",
+    "anleitung": "Lege in deinem Library-Repository ein Gradle- oder Maven-Projekt mit der Abhängigkeit `com.lesfurets:jenkins-pipeline-unit` an. Schreibe einen Test, der `vars/cargo.groovy` lädt, `cargo('test')` aufruft und prüft, welcher `sh`-Befehl entstand.",
+    "befehle": [
+      "./gradlew test",
+      "git tag v1.1.0 && git push origin v1.1.0"
+    ],
+    "beobachtung": "Der Test läuft in Sekunden ohne Jenkins-Server. In der Aufrufliste (`helper.callStack`) steht der erzeugte Befehl `cargo test --locked`. So fallen Fehler in der Library auf, bevor 30 Projekte sie bemerken."
+  },
+  "begriffe": [
+    {
+      "begriff": "Breaking Change",
+      "englisch": "breaking change",
+      "erklaerung": "Änderung, nach der bestehende Nutzer ohne Anpassung nicht mehr funktionieren."
+    },
+    {
+      "begriff": "Elvis-Operator",
+      "englisch": "Elvis operator",
+      "erklaerung": "Groovy-Operator `a ?: b`: liefert `a`, falls es wahr ist, sonst `b`."
+    },
+    {
+      "begriff": "JenkinsPipelineUnit",
+      "englisch": "JenkinsPipelineUnit",
+      "erklaerung": "Test-Framework, das Pipeline- und Library-Code ohne Jenkins-Server ausführt und Aufrufe aufzeichnet."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Jenkins: Extending with Shared Libraries",
+      "url": "https://www.jenkins.io/doc/book/pipeline/shared-libraries/"
+    },
+    {
+      "titel": "Jenkins: String interpolation",
+      "url": "https://www.jenkins.io/doc/book/pipeline/jenkinsfile/#string-interpolation"
+    },
+    {
+      "titel": "JenkinsPipelineUnit",
+      "url": "https://github.com/jenkinsci/JenkinsPipelineUnit"
+    }
+  ]
+}

@@ -1,0 +1,728 @@
+{
+  "titel": "Vom Junior zum Senior Rust- und Embedded-Entwickler",
+  "phasen": [
+    {
+      "nummer": 1,
+      "titel": "Unter der Haube",
+      "beschreibung": "Was zwischen deinem Quellcode und dem laufenden Programm passiert: rustc, LLVM, Linker, Crates und Bibliotheken, Toolchains und Cargo.",
+      "module": [
+        {
+          "id": "1.1",
+          "titel": "Vom Quellcode zum Object-File",
+          "lektionen": [
+            "p1-m1-l1",
+            "p1-m1-l2",
+            "p1-m1-l3"
+          ]
+        },
+        {
+          "id": "1.2",
+          "titel": "Der Linker",
+          "lektionen": [
+            "p1-m2-l1",
+            "p1-m2-l2",
+            "p1-m2-l3",
+            "p1-m2-l4"
+          ]
+        },
+        {
+          "id": "1.3",
+          "titel": "Bibliotheken",
+          "lektionen": [
+            "p1-m3-l1",
+            "p1-m3-l2",
+            "p1-m3-l3"
+          ]
+        },
+        {
+          "id": "1.4",
+          "titel": "Speicherlayout des Binaries",
+          "lektionen": [
+            "p1-m4-l1",
+            "p1-m4-l2"
+          ]
+        },
+        {
+          "id": "1.5",
+          "titel": "Toolchains und Cross-Kompilierung",
+          "lektionen": [
+            "p1-m5-l1",
+            "p1-m5-l2"
+          ]
+        },
+        {
+          "id": "1.6",
+          "titel": "Build-Systeme",
+          "lektionen": [
+            "p1-m6-l1",
+            "p1-m6-l2",
+            "p1-m6-l3",
+            "p1-m6-l4"
+          ]
+        }
+      ],
+      "icon": "🔧",
+      "farbe": 215
+    },
+    {
+      "nummer": 2,
+      "titel": "Rust-Fundamente",
+      "beschreibung": "Wie Rust Speicher, Ownership, Lebenszeiten und Polymorphie umsetzt – und was unsafe wirklich bedeutet.",
+      "module": [
+        {
+          "id": "2.1",
+          "titel": "Speicherlayout zur Laufzeit",
+          "lektionen": [
+            "p2-m1-l1",
+            "p2-m1-l2"
+          ]
+        },
+        {
+          "id": "2.2",
+          "titel": "Ownership und Borrowing",
+          "lektionen": [
+            "p2-m2-l1",
+            "p2-m2-l2",
+            "p2-m2-l3"
+          ]
+        },
+        {
+          "id": "2.3",
+          "titel": "Move, Copy und Lebenszeiten",
+          "lektionen": [
+            "p2-m3-l1",
+            "p2-m3-l2",
+            "p2-m3-l3"
+          ]
+        },
+        {
+          "id": "2.4",
+          "titel": "Polymorphie unter der Haube",
+          "lektionen": [
+            "p2-m4-l1",
+            "p2-m4-l2"
+          ]
+        },
+        {
+          "id": "2.5",
+          "titel": "Generics, inline und const im Binary",
+          "lektionen": [
+            "p2-m5-l1",
+            "p2-m5-l2"
+          ]
+        },
+        {
+          "id": "2.6",
+          "titel": "unsafe und Undefined Behavior",
+          "lektionen": [
+            "p2-m6-l1",
+            "p2-m6-l2"
+          ]
+        },
+        {
+          "id": "2.7",
+          "titel": "Fehlerbehandlung",
+          "lektionen": [
+            "p2-m7-l1",
+            "p2-m7-l2"
+          ]
+        },
+        {
+          "id": "2.8",
+          "titel": "Eine fremde Codebase lesen",
+          "lektionen": [
+            "p2-m8-l1",
+            "p2-m8-l2"
+          ]
+        }
+      ],
+      "icon": "🧱",
+      "farbe": 250
+    },
+    {
+      "nummer": 3,
+      "titel": "Fortgeschrittenes Rust",
+      "beschreibung": "Traits und Generics für Fortgeschrittene, Closures und Iteratoren, Smart Pointers, Pin, Makros und async – das Werkzeug für Bibliotheken und anspruchsvollen Code.",
+      "module": [
+        {
+          "id": "3.1",
+          "titel": "Traits und Generics für Fortgeschrittene",
+          "lektionen": [
+            "p3-m1-l1",
+            "p3-m1-l2",
+            "p3-m1-l3"
+          ]
+        },
+        {
+          "id": "3.2",
+          "titel": "Closures und Iteratoren",
+          "lektionen": [
+            "p3-m2-l1",
+            "p3-m2-l2"
+          ]
+        },
+        {
+          "id": "3.3",
+          "titel": "Wertsemantik und Operatoren",
+          "lektionen": [
+            "p3-m3-l1",
+            "p3-m3-l2"
+          ]
+        },
+        {
+          "id": "3.4",
+          "titel": "Moderne Bibliothekstypen",
+          "lektionen": [
+            "p3-m4-l1",
+            "p3-m4-l2"
+          ]
+        },
+        {
+          "id": "3.5",
+          "titel": "Speicher für Fortgeschrittene",
+          "lektionen": [
+            "p3-m5-l1",
+            "p3-m5-l2"
+          ]
+        },
+        {
+          "id": "3.6",
+          "titel": "Neue Sprachmittel",
+          "lektionen": [
+            "p3-m6-l1",
+            "p3-m6-l2",
+            "p3-m6-l3"
+          ]
+        }
+      ],
+      "icon": "🦀",
+      "farbe": 20
+    },
+    {
+      "nummer": 4,
+      "titel": "Testen, Debuggen, Analysieren",
+      "beschreibung": "Fehler finden, bevor sie beim Kunden landen: cargo test, Mocks, Property-Tests, Debugger, Miri, Sanitizer, Clippy und rustfmt.",
+      "module": [
+        {
+          "id": "4.1",
+          "titel": "Unit-Tests mit cargo test",
+          "lektionen": [
+            "p4-m1-l1",
+            "p4-m1-l2",
+            "p4-m1-l3"
+          ]
+        },
+        {
+          "id": "4.2",
+          "titel": "Teststrategie",
+          "lektionen": [
+            "p4-m2-l1",
+            "p4-m2-l2"
+          ]
+        },
+        {
+          "id": "4.3",
+          "titel": "Debugging",
+          "lektionen": [
+            "p4-m3-l1",
+            "p4-m3-l2",
+            "p4-m3-l3"
+          ]
+        },
+        {
+          "id": "4.4",
+          "titel": "Miri und Sanitizer",
+          "lektionen": [
+            "p4-m4-l1",
+            "p4-m4-l2"
+          ]
+        },
+        {
+          "id": "4.5",
+          "titel": "Statische Analyse",
+          "lektionen": [
+            "p4-m5-l1",
+            "p4-m5-l2"
+          ]
+        }
+      ],
+      "icon": "🧪",
+      "farbe": 160
+    },
+    {
+      "nummer": 5,
+      "titel": "Nebenläufigkeit und Performance",
+      "beschreibung": "Threads, Send und Sync, Kanäle, Atomics und das Speichermodell – und wie man Performance misst statt rät.",
+      "module": [
+        {
+          "id": "5.1",
+          "titel": "Threads und Data Races",
+          "lektionen": [
+            "p5-m1-l1",
+            "p5-m1-l2",
+            "p5-m1-l3"
+          ]
+        },
+        {
+          "id": "5.2",
+          "titel": "Synchronisation",
+          "lektionen": [
+            "p5-m2-l1",
+            "p5-m2-l2"
+          ]
+        },
+        {
+          "id": "5.3",
+          "titel": "Atomics und Speichermodell",
+          "lektionen": [
+            "p5-m3-l1",
+            "p5-m3-l2"
+          ]
+        },
+        {
+          "id": "5.4",
+          "titel": "Performance verstehen",
+          "lektionen": [
+            "p5-m4-l1",
+            "p5-m4-l2",
+            "p5-m4-l3"
+          ]
+        }
+      ],
+      "icon": "⚡",
+      "farbe": 35
+    },
+    {
+      "nummer": 6,
+      "titel": "Embedded: Hardware verstehen",
+      "beschreibung": "Wie ein Mikrocontroller aufgebaut ist und wie Rust ihn steuert: no_std, Register über PACs, embedded-hal, Interrupts, Schnittstellen, ADC, DMA und der Weg vom Reset bis #[entry].",
+      "module": [
+        {
+          "id": "6.1",
+          "titel": "Der Mikrocontroller",
+          "lektionen": [
+            "p6-m1-l1",
+            "p6-m1-l2"
+          ]
+        },
+        {
+          "id": "6.2",
+          "titel": "Register und Bits",
+          "lektionen": [
+            "p6-m2-l1",
+            "p6-m2-l2"
+          ]
+        },
+        {
+          "id": "6.3",
+          "titel": "Takt, GPIO und Timer",
+          "lektionen": [
+            "p6-m3-l1",
+            "p6-m3-l2"
+          ]
+        },
+        {
+          "id": "6.4",
+          "titel": "Interrupts",
+          "lektionen": [
+            "p6-m4-l1",
+            "p6-m4-l2"
+          ]
+        },
+        {
+          "id": "6.5",
+          "titel": "Kommunikationsschnittstellen",
+          "lektionen": [
+            "p6-m5-l1",
+            "p6-m5-l2"
+          ]
+        },
+        {
+          "id": "6.6",
+          "titel": "Analoge Werte und DMA",
+          "lektionen": [
+            "p6-m6-l1",
+            "p6-m6-l2"
+          ]
+        },
+        {
+          "id": "6.7",
+          "titel": "Start, Updates und Zuverlässigkeit",
+          "lektionen": [
+            "p6-m7-l1",
+            "p6-m7-l2",
+            "p6-m7-l3"
+          ]
+        }
+      ],
+      "icon": "🔌",
+      "farbe": 190
+    },
+    {
+      "nummer": 7,
+      "titel": "Embedded-Software und RTOS",
+      "beschreibung": "Echtzeit, Superloop, RTIC und Embassy, Speicher ohne Heap, Rust auf Mikrocontrollern, Embedded Linux und Debugging direkt auf der Zielhardware.",
+      "module": [
+        {
+          "id": "7.1",
+          "titel": "Ablaufmodelle und Echtzeit",
+          "lektionen": [
+            "p7-m1-l1",
+            "p7-m1-l2"
+          ]
+        },
+        {
+          "id": "7.2",
+          "titel": "RTOS und Frameworks in Rust",
+          "lektionen": [
+            "p7-m2-l1",
+            "p7-m2-l2",
+            "p7-m2-l3"
+          ]
+        },
+        {
+          "id": "7.3",
+          "titel": "Speicher ohne Heap",
+          "lektionen": [
+            "p7-m3-l1",
+            "p7-m3-l2"
+          ]
+        },
+        {
+          "id": "7.4",
+          "titel": "Rust auf Mikrocontrollern",
+          "lektionen": [
+            "p7-m4-l1",
+            "p7-m4-l2"
+          ]
+        },
+        {
+          "id": "7.5",
+          "titel": "Embedded Linux",
+          "lektionen": [
+            "p7-m5-l1",
+            "p7-m5-l2"
+          ]
+        },
+        {
+          "id": "7.6",
+          "titel": "Debugging auf der Zielhardware",
+          "lektionen": [
+            "p7-m6-l1",
+            "p7-m6-l2"
+          ]
+        }
+      ],
+      "icon": "⏱️",
+      "farbe": 130
+    },
+    {
+      "nummer": 8,
+      "titel": "CI/CD",
+      "beschreibung": "Wie Rust-Code automatisch gebaut, geprüft und ausgeliefert wird – mit Jenkins und GitHub Actions.",
+      "module": [
+        {
+          "id": "8.1",
+          "titel": "Continuous Integration und Deployment",
+          "lektionen": [
+            "p8-m1-l1",
+            "p8-m1-l2"
+          ]
+        },
+        {
+          "id": "8.2",
+          "titel": "Pipeline-Stufen und Quality Gates",
+          "lektionen": [
+            "p8-m2-l1",
+            "p8-m2-l2"
+          ]
+        },
+        {
+          "id": "8.3",
+          "titel": "Jenkins",
+          "lektionen": [
+            "p8-m3-l1",
+            "p8-m3-l2",
+            "p8-m3-l3"
+          ]
+        },
+        {
+          "id": "8.4",
+          "titel": "Jenkins Shared Libraries",
+          "lektionen": [
+            "p8-m4-l1",
+            "p8-m4-l2"
+          ]
+        },
+        {
+          "id": "8.5",
+          "titel": "GitHub Actions im Vergleich",
+          "lektionen": [
+            "p8-m5-l1",
+            "p8-m5-l2"
+          ]
+        },
+        {
+          "id": "8.6",
+          "titel": "Git im Team",
+          "lektionen": [
+            "p8-m6-l1",
+            "p8-m6-l2"
+          ]
+        }
+      ],
+      "icon": "🚀",
+      "farbe": 10
+    },
+    {
+      "nummer": 9,
+      "titel": "Architektur in grossen Projekten",
+      "beschreibung": "Wie man grosse Rust-Codebasen in Crates und Module schneidet, öffentliche APIs stabil hält und Abhängigkeiten im Griff behält.",
+      "module": [
+        {
+          "id": "9.1",
+          "titel": "Modularisierung und Separation of Concerns",
+          "lektionen": [
+            "p9-m1-l1",
+            "p9-m1-l2"
+          ]
+        },
+        {
+          "id": "9.2",
+          "titel": "Traits und öffentliche APIs als Verträge",
+          "lektionen": [
+            "p9-m2-l1",
+            "p9-m2-l2",
+            "p9-m2-l3"
+          ]
+        },
+        {
+          "id": "9.3",
+          "titel": "Abhängigkeiten managen",
+          "lektionen": [
+            "p9-m3-l1",
+            "p9-m3-l2",
+            "p9-m3-l3"
+          ]
+        },
+        {
+          "id": "9.4",
+          "titel": "Code-Reviews",
+          "lektionen": [
+            "p9-m4-l1",
+            "p9-m4-l2"
+          ]
+        }
+      ],
+      "icon": "🏗️",
+      "farbe": 230
+    },
+    {
+      "nummer": 10,
+      "titel": "Architektur-Konzepte in Rust",
+      "beschreibung": "Prinzipien und Muster, die du als Senior kennen, in Rust idiomatisch anwenden und begründen musst.",
+      "module": [
+        {
+          "id": "10.1",
+          "titel": "Prinzipien",
+          "lektionen": [
+            "p10-m1-l1",
+            "p10-m1-l2",
+            "p10-m1-l3"
+          ]
+        },
+        {
+          "id": "10.2",
+          "titel": "Schichten und Hardware Abstraction Layer",
+          "lektionen": [
+            "p10-m2-l1",
+            "p10-m2-l2"
+          ]
+        },
+        {
+          "id": "10.3",
+          "titel": "Ports & Adapters",
+          "lektionen": [
+            "p10-m3-l1",
+            "p10-m3-l2"
+          ]
+        },
+        {
+          "id": "10.4",
+          "titel": "Entwurfsmuster",
+          "lektionen": [
+            "p10-m4-l1",
+            "p10-m4-l2",
+            "p10-m4-l3",
+            "p10-m4-l4"
+          ]
+        },
+        {
+          "id": "10.5",
+          "titel": "Statische vs. dynamische Polymorphie",
+          "lektionen": [
+            "p10-m5-l1",
+            "p10-m5-l2"
+          ]
+        },
+        {
+          "id": "10.6",
+          "titel": "Starke Typen und Kapselung",
+          "lektionen": [
+            "p10-m6-l1",
+            "p10-m6-l2"
+          ]
+        },
+        {
+          "id": "10.7",
+          "titel": "Coding-Standards und ADRs",
+          "lektionen": [
+            "p10-m7-l1",
+            "p10-m7-l2"
+          ]
+        }
+      ],
+      "icon": "🧩",
+      "farbe": 300
+    },
+    {
+      "nummer": 11,
+      "titel": "Architekturstile und Systemarchitektur",
+      "beschreibung": "Ereignisgesteuerte Systeme, Actors, Plugins, IPC und Serialisierung mit serde, Rust in Automotive und Robotik, datenorientiertes Design und wie man Architektur dokumentiert und bewertet.",
+      "module": [
+        {
+          "id": "11.1",
+          "titel": "Architekturstile im Überblick",
+          "lektionen": [
+            "p11-m1-l1"
+          ]
+        },
+        {
+          "id": "11.2",
+          "titel": "Ereignisgesteuerte Architekturen",
+          "lektionen": [
+            "p11-m2-l1",
+            "p11-m2-l2"
+          ]
+        },
+        {
+          "id": "11.3",
+          "titel": "Komponenten, Plugins und Pipelines",
+          "lektionen": [
+            "p11-m3-l1",
+            "p11-m3-l2"
+          ]
+        },
+        {
+          "id": "11.4",
+          "titel": "Kommunikation zwischen Prozessen",
+          "lektionen": [
+            "p11-m4-l1",
+            "p11-m4-l2"
+          ]
+        },
+        {
+          "id": "11.5",
+          "titel": "Automotive und Robotik",
+          "lektionen": [
+            "p11-m5-l1",
+            "p11-m5-l2",
+            "p11-m5-l3"
+          ]
+        },
+        {
+          "id": "11.6",
+          "titel": "Datenorientiertes Design",
+          "lektionen": [
+            "p11-m6-l1"
+          ]
+        },
+        {
+          "id": "11.7",
+          "titel": "Architektur dokumentieren und bewerten",
+          "lektionen": [
+            "p11-m7-l1",
+            "p11-m7-l2"
+          ]
+        }
+      ],
+      "icon": "🗺️",
+      "farbe": 265
+    },
+    {
+      "nummer": 12,
+      "titel": "Funktionale Sicherheit und Security",
+      "beschreibung": "Normen wie ISO 26262 und IEC 61508, qualifizierte Rust-Toolchains, V-Modell, fehlertolerantes Design, Bedrohungsmodelle, Supply-Chain-Sicherheit und Speichersicherheit durch Rust.",
+      "module": [
+        {
+          "id": "12.1",
+          "titel": "Normen und Prozesse",
+          "lektionen": [
+            "p12-m1-l1",
+            "p12-m1-l2"
+          ]
+        },
+        {
+          "id": "12.2",
+          "titel": "Sicher entwerfen",
+          "lektionen": [
+            "p12-m2-l1",
+            "p12-m2-l2"
+          ]
+        },
+        {
+          "id": "12.3",
+          "titel": "Security für Embedded-Systeme",
+          "lektionen": [
+            "p12-m3-l1",
+            "p12-m3-l2",
+            "p12-m3-l3"
+          ]
+        }
+      ],
+      "icon": "🛡️",
+      "farbe": 0
+    },
+    {
+      "nummer": 13,
+      "titel": "Senior-Kompetenzen",
+      "beschreibung": "Was Seniors über Technik hinaus ausmacht: Trade-offs abwägen, technische Schulden steuern, Rust einführen, schätzen und andere weiterbringen.",
+      "module": [
+        {
+          "id": "13.1",
+          "titel": "Technische Schulden und Refactoring",
+          "lektionen": [
+            "p13-m1-l1",
+            "p13-m1-l2"
+          ]
+        },
+        {
+          "id": "13.2",
+          "titel": "Entscheidungen und Trade-offs",
+          "lektionen": [
+            "p13-m2-l1",
+            "p13-m2-l2"
+          ]
+        },
+        {
+          "id": "13.3",
+          "titel": "Schätzen und Planen",
+          "lektionen": [
+            "p13-m3-l1",
+            "p13-m3-l2"
+          ]
+        },
+        {
+          "id": "13.4",
+          "titel": "Kommunikation und Mentoring",
+          "lektionen": [
+            "p13-m4-l1",
+            "p13-m4-l2"
+          ]
+        }
+      ],
+      "icon": "🎓",
+      "farbe": 45
+    }
+  ]
+}

@@ -1,0 +1,265 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p2-m5-l1",
+  "phase": 2,
+  "modul": "2.5 Generics, inline und const im Binary",
+  "titel": "Monomorphisierung und Code-Bloat",
+  "lernziele": [
+    "Vorhersagen, wie viele Kopien einer generischen Funktion im Binary entstehen",
+    "Code-Bloat mit `cargo llvm-lines` messen und mit einer nicht-generischen inneren Funktion verringern",
+    "Erklären, wann `#[inline]` über Crate-Grenzen nötig ist"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Wie viele Kopien von `zeige` erzeugt der Compiler? (`#[inline(never)]` verhindert, dass sie im Aufrufer verschwinden.)",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "use std::fmt::Display;",
+          "",
+          "#[inline(never)]",
+          "fn zeige<T: Display>(x: T) -> String {",
+          "    format!(\"[{x}]\")",
+          "}",
+          "",
+          "fn main() {",
+          "    println!(\"{}\", zeige(1u8));",
+          "    println!(\"{}\", zeige(2u32));",
+          "    println!(\"{}\", zeige(3u32));",
+          "    println!(\"{}\", zeige(\"vier\"));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "1",
+        "3",
+        "4"
+      ],
+      "korrekt": 1,
+      "fest": true,
+      "erklaerung": "Es zählen die Typen, nicht die Aufrufe: `zeige::<u8>`, `zeige::<u32>` (zweimal benutzt, einmal erzeugt) und `zeige::<&str>`. `nm -C` auf das Binary zeigt genau diese drei Symbole.",
+      "begruendungen": [
+        "Generische Funktionen gibt es im Binary nicht als eine einzige Funktion, sondern als Kopie pro Typ.",
+        "Richtig: `u8`, `u32` und `&str`.",
+        "Die beiden `u32`-Aufrufe teilen sich dieselbe Kopie."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Monomorphisierung",
+      "text": "Rust übersetzt Generics durch **Monomorphisierung** (monomorphization): Für jede konkrete Typkombination erzeugt rustc eine eigene, voll optimierbare Kopie. Das ist der Grund, warum Generics so schnell sind wie handgeschriebener Code, und entspricht der Template-Instanziierung in C++.\n\nDer Preis: Jede Kopie kostet Kompilierzeit und Platz im Binary (*code bloat*). Anders als in C++ landen die Kopien nicht in Headern, sondern werden in dem Crate erzeugt, das den konkreten Typ einsetzt. Eine generische Funktion aus einer Bibliothek wird also im **aufrufenden** Crate übersetzt.",
+      "terminal": {
+        "befehl": "nm -C target/release/mono | grep zeige",
+        "ausgabe": [
+          "0000000000013fa0 t mono::zeige::<&str>",
+          "0000000000013ff0 t mono::zeige::<u8>",
+          "0000000000014030 t mono::zeige::<u32>"
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "`lade<P: AsRef<Path>>(pfad: P)` wird mit `&str`, `String`, `&Path` und `PathBuf` aufgerufen. Was zeigt `cargo llvm-lines`?",
+      "terminal": {
+        "befehl": "cargo llvm-lines | grep -E 'TOTAL|lade'",
+        "ausgabe": [
+          "  963                44                (TOTAL)",
+          "   75 (7.8%, 17.5%)   1 (2.3%,  4.5%)  bloat::lade::<alloc::string::String>",
+          "   75 (7.8%, 25.3%)   1 (2.3%,  6.8%)  bloat::lade::<std::path::PathBuf>",
+          "   74 (7.7%, 33.0%)   1 (2.3%,  9.1%)  bloat::lade::<&std::path::Path>",
+          "   74 (7.7%, 40.7%)   1 (2.3%, 11.4%)  bloat::lade::<&str>"
+        ]
+      },
+      "optionen": [
+        "Der ganze Funktionskörper von `lade` wurde viermal in LLVM IR übersetzt, obwohl er nach `as_ref()` für alle Typen gleich ist",
+        "`lade` wurde viermal aufgerufen, die Zahlen sind Laufzeitmessungen",
+        "`lade` ist rekursiv und hat vier Ebenen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo llvm-lines` zählt, wie viele Zeilen LLVM IR jede Funktion erzeugt, und wie viele Kopien (*Copies*) es davon gibt. Vier fast gleich grosse Kopien sind ein typisches Bloat-Muster: Nur die erste Zeile (`as_ref()`) hängt vom Typ ab, der Rest wird unnötig vervielfacht. LLVM IR ist auch das, was LLVM optimieren muss, also kosten die Kopien vor allem **Kompilierzeit**.",
+      "begruendungen": [
+        "Richtig.",
+        "`cargo llvm-lines` misst nichts zur Laufzeit, es zählt erzeugten Zwischencode.",
+        "Die Kopien entstehen durch vier verschiedene Typen für `P`, nicht durch Rekursion."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Trick mit der inneren Funktion",
+      "text": "Man trennt den typabhängigen Teil vom Rest: Die äussere, generische Funktion wandelt nur um und ruft eine **nicht-generische** innere Funktion auf. Diese existiert genau einmal. Die Standardbibliothek macht das z. B. bei `std::fs::read` so.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn lade<P: AsRef<Path>>(pfad: P) -> usize {",
+          "    fn inner(p: &Path) -> usize {",
+          "        let mut summe = 0;",
+          "        for teil in p.components() {",
+          "            summe += teil.as_os_str().len();",
+          "        }",
+          "        if p.is_absolute() { summe * 2 } else { summe }",
+          "    }",
+          "    inner(pfad.as_ref())",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 2,
+            "text": "Kein Typparameter: wird genau einmal übersetzt."
+          },
+          {
+            "zeile": 9,
+            "text": "Nur diese eine Zeile wird pro Typ kopiert."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Dasselbe Programm nach dem Umbau. Was hat sich verändert?",
+      "terminal": {
+        "befehl": "cargo llvm-lines | grep -E 'TOTAL|lade'",
+        "ausgabe": [
+          "  813                45                (TOTAL)",
+          "   54 (6.6%, 39.9%)   1 (2.2%, 11.1%)  bloat::lade::inner",
+          "   24 (3.0%, 56.9%)   1 (2.2%, 20.0%)  bloat::lade::<alloc::string::String>",
+          "   24 (3.0%, 59.9%)   1 (2.2%, 22.2%)  bloat::lade::<std::path::PathBuf>",
+          "   23 (2.8%, 62.7%)   1 (2.2%, 24.4%)  bloat::lade::<&std::path::Path>",
+          "   23 (2.8%, 65.6%)   1 (2.2%, 26.7%)  bloat::lade::<&str>"
+        ]
+      },
+      "optionen": [
+        "Die Logik steckt einmal in `inner`, die vier generischen Hüllen sind klein. Insgesamt sinkt die IR-Menge von 963 auf 813 Zeilen",
+        "Es gibt jetzt fünf grosse Kopien, der Umbau hat alles verschlimmert",
+        "`inner` wird pro Typ einmal kopiert, weil sie innerhalb einer generischen Funktion steht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei vier Typen ist der Gewinn klein, bei einer viel benutzten Bibliotheksfunktion mit Dutzenden Typen und grossem Körper ist er deutlich. Eine innere `fn` ist ein eigenständiges Item: Sie sieht die Typparameter der äusseren Funktion nicht und wird deshalb nicht mitkopiert.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Zahl der *Copies* steigt zwar um eins, aber die vier Hüllen sind nur noch ein Drittel so gross.",
+        "Eine verschachtelte `fn` kann die äusseren Typparameter gar nicht benutzen und ist daher nicht generisch."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Wende den Trick auf eine Funktion an, die alles annimmt, was sich in `&[u8]` umwandeln lässt.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "pub fn pruefsumme<B: AsRef<[u8]>>(daten: B) -> u32 {",
+          "    fn inner(d: {{?}}) -> u32 {",
+          "        d.iter().map(|&b| b as u32).sum()",
+          "    }",
+          "    inner(daten.{{?}}())",
+          "}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "&[u8]"
+          ]
+        },
+        {
+          "loesungen": [
+            "as_ref"
+          ]
+        }
+      ],
+      "auswahl": [
+        "&[u8]",
+        "B",
+        "as_ref",
+        "into",
+        "Vec<u8>"
+      ],
+      "erklaerung": "Die innere Funktion nimmt den konkreten Typ `&[u8]`, die Umwandlung mit `as_ref()` ist der einzige typabhängige Teil. Mit `B` als Parametertyp wäre `inner` wieder generisch (und würde gar nicht kompilieren, weil `B` dort unbekannt ist)."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Eine Bibliothek exportiert die kleine, **nicht-generische** Funktion `pub fn skaliere(x: u32) -> u32`. Ein Binary-Crate ruft sie in einer heissen Schleife auf. Was gilt ohne LTO?",
+      "optionen": [
+        "rustc kann sie im Binary-Crate meist nicht inlinen, weil dort nur ihre Signatur bekannt ist. `#[inline]` macht den Körper für andere Crates verfügbar",
+        "Sie wird immer inlined, weil Rust alle Crates gemeinsam optimiert",
+        "Sie wird im Binary-Crate neu monomorphisiert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Jeder Crate ist eine eigene Übersetzungseinheit. Generische Funktionen werden beim Aufrufer übersetzt und sind daher automatisch inline-fähig. Bei nicht-generischen legt `#[inline]` den Körper in die Metadaten, damit andere Crates ihn einbauen können. Für sehr kleine Funktionen macht rustc das inzwischen teilweise selbst, und LTO (Phase 1) hebt die Grenze ebenfalls auf. `#[inline(always)]` ist selten nötig und kann Code eher aufblähen.",
+      "begruendungen": [
+        "Richtig.",
+        "Ohne LTO werden Crates getrennt optimiert.",
+        "Monomorphisiert werden nur generische Funktionen."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welche Massnahme passt zu welchem Ziel?",
+      "paare": [
+        {
+          "links": "Nicht-generische innere Funktion",
+          "rechts": "Grossen Funktionskörper nur einmal übersetzen"
+        },
+        {
+          "links": "`&dyn Trait` statt Typparameter",
+          "rechts": "Gar keine Kopien, dafür ein indirekter Aufruf über die vtable"
+        },
+        {
+          "links": "`#[inline]` an einer kleinen `pub fn`",
+          "rechts": "Inlining in anderen Crates ermöglichen"
+        },
+        {
+          "links": "`cargo llvm-lines`",
+          "rechts": "Herausfinden, welche generischen Funktionen am meisten Code erzeugen"
+        }
+      ],
+      "erklaerung": "Generics und `dyn Trait` sind ein Tauschgeschäft zwischen Geschwindigkeit und Codegrösse (Modul 2.4). Auf Mikrocontrollern mit wenig Flash lohnt es sich, gezielt zu messen, bevor man umbaut."
+    }
+  ],
+  "praxis": "Wenn ein Rust-Projekt langsam baut oder das Firmware-Image zu gross wird, ist Monomorphisierung oft ein Hauptgrund: Serialisierung mit `serde`, viele `impl AsRef`/`impl Into`-Parameter oder generische Treiber für jedes Pin-Objekt. Ein Senior misst zuerst mit `cargo llvm-lines` (Kompilierzeit) und `cargo bloat` (Binary-Grösse), statt auf Verdacht alles auf `dyn` umzubauen.",
+  "labor": {
+    "titel": "Kopien zählen",
+    "anleitung": "Lege ein Projekt mit der generischen Funktion `lade` an, rufe sie mit vier Typen auf und miss vor und nach dem Umbau auf eine innere Funktion.",
+    "befehle": [
+      "cargo install cargo-llvm-lines",
+      "cargo new bloat && cd bloat",
+      "cargo llvm-lines | head -20",
+      "cargo build --release && nm -C target/release/bloat | grep lade"
+    ],
+    "beobachtung": "`cargo llvm-lines` zeigt vier grosse Kopien vor dem Umbau und vier kleine Hüllen plus ein `lade::inner` danach. Im Release-Build mit `nm` siehst du oft weniger Kopien, weil kleine Hüllen inlined wurden."
+  },
+  "begriffe": [
+    {
+      "begriff": "Monomorphisierung",
+      "englisch": "monomorphization",
+      "erklaerung": "Der Compiler erzeugt aus einer generischen Funktion eine eigene Kopie für jede konkret verwendete Typkombination."
+    },
+    {
+      "begriff": "Code-Bloat",
+      "englisch": "code bloat",
+      "erklaerung": "Unnötig grosser Maschinen- oder Zwischencode, z. B. durch viele fast gleiche Kopien generischer Funktionen."
+    },
+    {
+      "begriff": "LLVM IR",
+      "englisch": "LLVM intermediate representation",
+      "erklaerung": "Zwischencode, den rustc an LLVM übergibt. `cargo llvm-lines` zählt seine Zeilen pro Funktion."
+    },
+    {
+      "begriff": "#[inline]",
+      "englisch": "inline attribute",
+      "erklaerung": "Hinweis an den Compiler, dass sich Inlining lohnt. Macht den Funktionskörper auch für andere Crates verfügbar."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Generic Data Types (Abschnitt „Performance of Code Using Generics“)",
+      "url": "https://doc.rust-lang.org/book/ch10-01-syntax.html"
+    },
+    {
+      "titel": "Rust Reference: Code generation attributes (inline)",
+      "url": "https://doc.rust-lang.org/reference/attributes/codegen.html"
+    }
+  ]
+}

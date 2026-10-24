@@ -1,0 +1,165 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m2-l1",
+  "phase": 7,
+  "modul": "7.2 RTOS und Frameworks in Rust",
+  "titel": "RTIC: Interrupts als Scheduler",
+  "lernziele": [
+    "Den Aufbau einer RTIC-2-Anwendung mit `#[shared]`, `#[local]`, `#[init]` und Tasks lesen",
+    "Erklären, wie RTIC mit dem Prioritäts-Ceiling gemeinsame Ressourcen schützt",
+    "Begründen, warum RTIC-Anwendungen deadlockfrei sind"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "RTIC (*Real-Time Interrupt-driven Concurrency*) braucht keinen eigenen Scheduler mit Kontextwechsel. Wer übernimmt das Scheduling?",
+      "optionen": [
+        "Der Interrupt-Controller (NVIC): Jede Task ist ein Interrupt-Handler mit einer Hardware-Priorität",
+        "Ein Timer-Interrupt, der alle 1 ms die nächste Task auswählt",
+        "Ein Thread des Host-Betriebssystems",
+        "Der Executor von Embassy"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Hardware-Tasks sind an einen Interrupt gebunden (`binds = ...`). Software-Tasks laufen in einem freien Interrupt, den du als **Dispatcher** angibst. Die Präemption macht der NVIC selbst, so wie bei verschachtelten Interrupts. Alle Tasks teilen sich **einen** Stack, es gibt keinen Kontextwechsel in Software und keinen Tick.",
+      "begruendungen": [
+        "Richtig.",
+        "Einen Scheduler-Tick wie bei FreeRTOS gibt es in RTIC nicht.",
+        "RTIC läuft bare metal auf dem Mikrocontroller.",
+        "Embassy ist ein eigenständiges Framework mit eigenem Executor."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Aufbau einer RTIC-2-Anwendung",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#[rtic::app(device = stm32f4xx_hal::pac, dispatchers = [EXTI1])]",
+          "mod app {",
+          "    #[shared]",
+          "    struct Shared { zaehler: u32 }",
+          "",
+          "    #[local]",
+          "    struct Local { taster: Taster, led: Led }",
+          "",
+          "    #[init]",
+          "    fn init(cx: init::Context) -> (Shared, Local) {",
+          "        let (taster, led) = hardware_einrichten(cx.device);",
+          "        blinken::spawn().ok();",
+          "        (Shared { zaehler: 0 }, Local { taster, led })",
+          "    }",
+          "",
+          "    #[task(binds = EXTI0, priority = 2, shared = [zaehler], local = [taster])]",
+          "    fn gedrueckt(mut cx: gedrueckt::Context) {",
+          "        cx.local.taster.clear_interrupt();",
+          "        cx.shared.zaehler.lock(|z| *z += 1);",
+          "    }",
+          "",
+          "    #[task(priority = 1, shared = [zaehler], local = [led])]",
+          "    async fn blinken(mut cx: blinken::Context) {",
+          "        loop {",
+          "            let n = cx.shared.zaehler.lock(|z| *z);",
+          "            cx.local.led.toggle();",
+          "            Mono::delay((100 * (n + 1)).millis()).await;",
+          "        }",
+          "    }",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "`dispatchers`: freie Interrupts, in denen Software-Tasks laufen" },
+          { "zeile": 3, "text": "Ressourcen, die mehrere Tasks teilen" },
+          { "zeile": 6, "text": "Ressourcen, die genau einer Task gehören" },
+          { "zeile": 16, "text": "Hardware-Task: läuft, wenn der EXTI0-Interrupt kommt" },
+          { "zeile": 22, "text": "Async Software-Task, gestartet mit `spawn()`" }
+        ]
+      },
+      "text": "Die Anwendung ist ein Modul mit Attribut `#[rtic::app]`. `init` läuft mit gesperrten Interrupts und gibt die Startwerte aller Ressourcen zurück. Jede Task gibt im Attribut an, welche Ressourcen sie benutzt. Daraus berechnet das Makro zur Übersetzungszeit, wer wen unterbrechen kann und welche Sperren nötig sind. Die Zeitbasis `Mono` kommt aus `rtic-monotonics` (z. B. `systick_monotonic!(Mono, 1_000)`)."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Bausteine einer RTIC-Anwendung zu.",
+      "paare": [
+        { "links": "`#[local]`", "rechts": "Gehört genau einer Task, Zugriff direkt als `&mut` ohne Sperre" },
+        { "links": "`#[shared]`", "rechts": "Von mehreren Tasks genutzt, Zugriff über `lock`" },
+        { "links": "`binds = EXTI0`", "rechts": "Macht eine Funktion zur Hardware-Task für diesen Interrupt" },
+        { "links": "`dispatchers = [...]`", "rechts": "Freie Interrupts, in denen Software-Tasks ausgeführt werden" },
+        { "links": "`#[init]`", "rechts": "Läuft einmal mit gesperrten Interrupts und liefert die Ressourcen" }
+      ],
+      "erklaerung": "Ownership wird in RTIC auf Tasks übertragen: Eine lokale Ressource ist wie eine Variable, die nur einer Task gehört. Geteilte Ressourcen sind nur über den Proxy mit `lock` erreichbar."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Prioritäts-Ceiling",
+      "text": "RTIC nutzt die **Stack Resource Policy** (SRP). Jede geteilte Ressource bekommt ein **Ceiling**: die höchste Priorität aller Tasks, die sie benutzen. `lock` hebt die aktuelle Priorität für die Dauer der Closure auf dieses Ceiling, auf Cortex-M3 und neuer über das `BASEPRI`-Register.\n\nFolgen:\n- Nur Tasks, die die Ressource **nicht** brauchen und höher priorisiert sind, können noch unterbrechen.\n- Eine Task kann nie blockieren, weil eine andere die Ressource hält. Wer sie halten könnte, ist gerade verdrängt und kommt erst nach dem `lock` wieder dran.\n- Darum sind **Deadlocks unmöglich**, und die Blockierzeit ist auf einen einzigen kritischen Abschnitt begrenzt."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Im Beispiel oben benutzen `gedrueckt` (Priorität 2) und `blinken` (Priorität 1) die Ressource `zaehler`. Warum braucht `gedrueckt` trotzdem `lock`, obwohl sie die höchste Priorität hat?",
+      "optionen": [
+        "Der Zugriff ist immer über den Proxy formuliert. Für die Task mit Priorität gleich dem Ceiling ist `lock` aber praktisch kostenlos, weil sich die Priorität nicht ändern muss",
+        "Weil `blinken` sie sonst unterbrechen könnte",
+        "Weil `lock` alle Interrupts global sperrt",
+        "Weil sonst ein Deadlock droht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Ceiling von `zaehler` ist 2. `gedrueckt` läuft bereits auf 2, niemand mit Zugriff auf `zaehler` kann sie unterbrechen. Der generierte Code erkennt das und sperrt nichts. `blinken` dagegen hebt im `lock` kurz auf Priorität 2 an, damit `gedrueckt` nicht mitten im Lesen dazwischenfunkt. Andere Interrupts mit Priorität 3 und höher laufen ungehindert.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Task mit Priorität 1 kann eine Task mit Priorität 2 nicht unterbrechen.",
+        "RTIC sperrt nur bis zum Ceiling, nicht global (ausser auf Cortex-M0, wo es kein `BASEPRI` gibt).",
+        "Deadlocks sind mit SRP grundsätzlich ausgeschlossen."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese Task kompiliert nicht. In welcher Zeile liegt der Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[task(priority = 1, shared = [zaehler], local = [led])]",
+          "async fn blinken(mut cx: blinken::Context) {",
+          "    loop {",
+          "        *cx.shared.zaehler += 1;",
+          "        cx.local.led.toggle();",
+          "        Mono::delay(500.millis()).await;",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "`cx.shared.zaehler` ist kein `&mut u32`, sondern ein Proxy-Typ, der nur `lock` anbietet. Der direkte Zugriff ist ein Typfehler. So erzwingt RTIC den kritischen Abschnitt zur Übersetzungszeit. Korrekt: `cx.shared.zaehler.lock(|z| *z += 1);`. Ausnahme: Ressourcen mit `#[lock_free]`, die nur von (nicht async) Tasks gleicher Priorität benutzt werden."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze.",
+      "text": "Das Ceiling einer geteilten Ressource ist die {{?}} Priorität aller Tasks, die sie benutzen. Während `lock` läuft die Task auf diesem Ceiling, auf Cortex-M3/M4 umgesetzt mit dem Register {{?}}. Weil eine Task nie auf eine gehaltene Ressource warten muss, sind {{?}} ausgeschlossen.",
+      "luecken": [{ "loesungen": ["höchste"] }, { "loesungen": ["BASEPRI"] }, { "loesungen": ["Deadlocks"] }],
+      "auswahl": ["höchste", "niedrigste", "BASEPRI", "PRIMASK", "Deadlocks", "Interrupts"],
+      "erklaerung": "`PRIMASK` würde alle Interrupts sperren, also auch die, die mit der Ressource nichts zu tun haben. `BASEPRI` sperrt nur bis zu einer Priorität. Darum ist RTIC auf Cortex-M0 (ohne `BASEPRI`) weniger fein: Dort maskiert es einzelne Interrupt-Quellen im NVIC."
+    }
+  ],
+  "praxis": "RTIC eignet sich besonders für Anwendungen mit harten Fristen, bei denen man Prioritäten und Blockierzeiten analysieren will: Motorsteuerungen, Messtechnik, Sicherheitsfunktionen. Weil alle Ressourcen und Prioritäten im Quelltext stehen, kann man die maximale Blockierzeit jeder Task direkt ablesen. Für ein neues Projekt lohnt sich ein Blick in das Repository `rtic-rs/rtic-examples` mit fertigen Projekten für verbreitete Boards.",
+  "labor": {
+    "titel": "RTIC-Abhängigkeiten ansehen",
+    "anleitung": "Lege ein Projekt an und füge RTIC mit dem Backend für Cortex-M4 und die SysTick-Zeitbasis hinzu. Sieh dir in der Dokumentation an, welche Features es gibt. Ohne Board und Embedded-Target kannst du das Projekt nicht bauen, aber die APIs lokal mit `cargo doc` erkunden.",
+    "befehle": [
+      "cargo new --bin rtic-demo && cd rtic-demo",
+      "cargo add rtic --features thumbv7-backend",
+      "cargo add rtic-monotonics --features cortex-m-systick",
+      "cargo doc --open -p rtic-monotonics"
+    ],
+    "beobachtung": "`rtic` wählt sein Backend über ein Feature (`thumbv6-backend`, `thumbv7-backend`, `thumbv8main-backend`, RISC-V-Backends). Das Makro `systick_monotonic!` erzeugt einen Typ mit `start`, `now` und `delay`."
+  },
+  "begriffe": [
+    { "begriff": "RTIC", "englisch": "Real-Time Interrupt-driven Concurrency", "erklaerung": "Rust-Framework, das Tasks auf Interrupt-Handler abbildet und Ressourcen mit SRP schützt." },
+    { "begriff": "Stack Resource Policy", "englisch": "stack resource policy", "erklaerung": "Protokoll, bei dem Sperren die Priorität auf das Ceiling der Ressource heben. Alle Tasks teilen einen Stack." },
+    { "begriff": "Prioritäts-Ceiling", "englisch": "priority ceiling", "erklaerung": "Höchste Priorität aller Tasks, die eine Ressource benutzen." },
+    { "begriff": "Dispatcher", "englisch": "dispatcher", "erklaerung": "Ungenutzter Interrupt, in dem RTIC Software-Tasks einer Prioritätsstufe ausführt." }
+  ],
+  "weiterlesen": [
+    { "titel": "RTIC Book", "url": "https://rtic.rs/" },
+    { "titel": "docs.rs: rtic", "url": "https://docs.rs/rtic" }
+  ]
+}

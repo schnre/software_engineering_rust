@@ -1,0 +1,222 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m2-l2",
+  "phase": 5,
+  "modul": "5.2 Synchronisation",
+  "titel": "Kanäle, Rayon und die Wahl des Modells",
+  "lernziele": [
+    "Daten mit `mpsc`-Kanälen zwischen Threads austauschen und das Ende eines Kanals erkennen",
+    "Begrenzte und unbegrenzte Kanäle unterscheiden und Gegendruck erklären",
+    "Zwischen Kanälen, Rayon und async für eine Aufgabe abwägen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "mpsc-summe",
+      "frage": "Was gibt das Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let (tx, rx) = mpsc::channel();",
+          "for id in 0..3 {",
+          "    let tx = tx.clone();",
+          "    thread::spawn(move || tx.send(id * 10).unwrap());",
+          "}",
+          "drop(tx);",
+          "",
+          "let mut summe = 0;",
+          "for wert in rx {",
+          "    summe += wert;",
+          "}",
+          "println!(\"{summe}\");"
+        ]
+      },
+      "optionen": [
+        "`30`",
+        "`0`, weil `main` nicht auf die Threads wartet",
+        "Das Programm hängt in der `for`-Schleife",
+        "Ein zufälliger Wert zwischen `0` und `30`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`for wert in rx` empfängt, bis **alle** Sender fallen gelassen wurden. Jeder Thread besitzt einen Klon von `tx`, der mit dem Thread endet. Das `drop(tx)` in Zeile 6 entfernt den letzten Sender in `main`. Ohne diese Zeile wartet die Schleife für immer auf eine Nachricht, die nie kommt. Die Reihenfolge der Werte ist zufällig, die Summe nicht.",
+      "begruendungen": [
+        "Richtig: 0 + 10 + 20.",
+        "Die Schleife über `rx` wartet, solange noch ein Sender existiert.",
+        "Das würde ohne `drop(tx)` in Zeile 6 passieren.",
+        "Jede Nachricht kommt genau einmal an. Nur die Reihenfolge ist zufällig."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Message Passing",
+      "text": "„Teile Speicher, indem du kommunizierst, statt zu kommunizieren, indem du Speicher teilst.“ Ein **Kanal** (*channel*) besteht aus Sender und Empfänger. `send` **verschiebt** den Wert: Danach gehört er dem Empfänger, der Sender kommt nicht mehr dran. Das verhindert geteilten Zustand ganz ohne Sperre im eigenen Code.\n\n`std::sync::mpsc` heisst *multi-producer, single-consumer*: `Sender` lässt sich klonen, `Receiver` nicht. Für mehrere Empfänger und `select!` über mehrere Kanäle nimmt man das Crate `crossbeam-channel`.",
+      "tabelle": {
+        "kopf": ["Aufruf", "Ergebnis, wenn die Gegenseite weg ist"],
+        "zeilen": [
+          ["`tx.send(x)`", "`Err(SendError(x))`, der Wert kommt zurück"],
+          ["`rx.recv()`", "`Err(RecvError)`, sobald alle Sender weg und der Kanal leer ist"],
+          ["`for x in rx`", "Schleife endet"]
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "sync-channel",
+      "frage": "Ein begrenzter Kanal mit Kapazität 1. Was zeigt die Ausgabe?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let (tx, rx) = mpsc::sync_channel::<i32>(1);",
+          "tx.send(1).unwrap();",
+          "println!(\"{:?}\", tx.try_send(2));",
+          "drop(tx);",
+          "println!(\"{:?} {:?}\", rx.recv(), rx.recv());"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "Err(TrySendError::Full(..))",
+          "Ok(1) Err(RecvError)"
+        ]
+      },
+      "optionen": [
+        "Der Puffer ist mit einem Wert voll. `try_send` gibt sofort auf, ein normales `send` hätte gewartet",
+        "Der zweite Wert ging verloren, weil der Kanal überlief",
+        "`recv` meldet einen Fehler, weil der Kanal beschädigt ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`sync_channel(n)` puffert höchstens `n` Werte. Ist der Puffer voll, **blockiert** `send`, bis der Empfänger etwas abholt. Das ist **Gegendruck** (*backpressure*): Ein schneller Produzent wird automatisch auf das Tempo des Konsumenten gebremst. `try_send` blockiert nie und meldet `Full`. Das zweite `recv` liefert `RecvError`, weil der Kanal leer ist und kein Sender mehr existiert.",
+      "begruendungen": [
+        "Richtig.",
+        "Kanäle verlieren keine Werte stillschweigend. `try_send` meldet `Full`, der Wert `2` wurde gar nicht übernommen.",
+        "`RecvError` ist das normale Kanalende, nachdem alle Sender weg sind."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "unbounded-gefahr",
+      "frage": "Ein Sensor-Thread schickt 10 000 Messungen pro Sekunde über `mpsc::channel()` an einen Logger, der nur 8 000 pro Sekunde schreibt. Was passiert auf Dauer?",
+      "optionen": [
+        "Der Speicherverbrauch wächst ohne Grenze, bis der Prozess aus Speichermangel abstürzt",
+        "Der Sensor-Thread wird automatisch gebremst",
+        "Überzählige Messungen werden verworfen",
+        "`send` liefert ab einer festen Grösse `Err`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`mpsc::channel()` ist **unbegrenzt** (*unbounded*): `send` blockiert nie, die Warteschlange wächst bei jedem Ungleichgewicht weiter. Mit `sync_channel(1000)` würde der Sensor-Thread warten. Ob Warten, Verwerfen (`try_send`) oder Zusammenfassen richtig ist, ist eine Designentscheidung. Unbegrenztes Wachstum ist fast nie die richtige Antwort.",
+      "begruendungen": [
+        "Richtig.",
+        "Das macht nur ein begrenzter Kanal.",
+        "Verwerfen müsste man selbst programmieren, etwa mit `try_send`.",
+        "Ein unbegrenzter Kanal kennt keine solche Grenze."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-rayon",
+      "frage": "Ergänze: Rayon verteilt die Berechnung auf alle Kerne. Es reicht, einen Methodennamen zu ändern.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use rayon::{{?}}::*;",
+          "",
+          "let v: Vec<u64> = (1..=1000).collect();",
+          "let summe: u64 = v.{{?}}().map(|x| x * x).sum();"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["prelude"] },
+        { "loesungen": ["par_iter"] }
+      ],
+      "auswahl": ["prelude", "par_iter", "iter", "spawn", "thread"],
+      "erklaerung": "Rayon (Datenparallelität, *data parallelism*) teilt den Vektor rekursiv auf und lässt einen Thread-Pool die Teile per *work stealing* bearbeiten. Der Borrow-Checker gilt weiter: Eine Closure, die in `par_iter` eine gemeinsame Variable verändern will, kompiliert nicht. Rayon lohnt sich bei rechenintensiver Arbeit pro Element. Für ein paar tausend Additionen ist der Verwaltungsaufwand grösser als der Gewinn."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "modell-waehlen",
+      "frage": "Welches Werkzeug passt zu welcher Aufgabe?",
+      "paare": [
+        { "links": "Eine Million Bilder skalieren, alle Kerne nutzen", "rechts": "Rayon mit `par_iter`" },
+        { "links": "10 000 gleichzeitige Netzwerkverbindungen, die meist warten", "rechts": "async/await mit einer Runtime wie Tokio" },
+        { "links": "Pipeline: Einlesen → Parsen → Speichern in eigenen Threads", "rechts": "Threads mit begrenzten Kanälen dazwischen" },
+        { "links": "Ein globaler Zähler für Statistiken", "rechts": "Ein Atomic" }
+      ],
+      "erklaerung": "Faustregel: Rechenarbeit (*CPU-bound*) → Threads bzw. Rayon, ungefähr so viele wie Kerne. Warten auf I/O (*I/O-bound*) mit sehr vielen gleichzeitigen Vorgängen → async, weil ein wartender Future nur ein paar hundert Byte braucht, ein Thread dagegen einen eigenen Stack. Async in Rust und auf Mikrocontrollern (Embassy) ist Thema in Phase 7."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "async ist kein schnelleres Threading",
+      "text": "Ein `async fn` liefert einen **Future**: eine Zustandsmaschine, die erst läuft, wenn eine Runtime sie abfragt (*poll*). Wartet sie auf I/O, gibt sie den Thread frei, und die Runtime arbeitet an einem anderen Future weiter. So bedienen wenige Threads sehr viele gleichzeitige Vorgänge.\n\nRechenarbeit wird dadurch nicht schneller. Im Gegenteil: Eine lange Berechnung in einem Future blockiert alle anderen Futures auf demselben Thread. Für so etwas gibt es z. B. `tokio::task::spawn_blocking` oder eben Rayon."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "kanal-statt-mutex",
+      "frage": "Mehrere Worker-Threads liefern Ergebnisse an einen Thread, der sie in eine Datei schreibt. Warum ist ein Kanal hier meist besser als ein `Arc<Mutex<File>>`?",
+      "optionen": [
+        "Nur ein Thread besitzt die Datei. Die Worker warten nie auf langsames I/O eines anderen",
+        "Kanäle sind immer schneller als Mutexe",
+        "`File` ist nicht `Send` und kann nicht in einen `Mutex`",
+        "Mit einem Mutex kompiliert der Code nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beim Mutex hält jeder Worker die Sperre, während er schreibt. Langsames I/O bremst damit alle aus. Mit einem Kanal übergeben die Worker nur einen Wert und arbeiten weiter. Der Besitz der Datei ist eindeutig, Reihenfolge und Fehlerbehandlung liegen an einer Stelle. Dieses Muster (ein Thread besitzt eine Ressource, andere schicken Aufträge) heisst oft *Actor*.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Kanal synchronisiert intern ebenfalls. Der Vorteil liegt in der Struktur, nicht in der Geschwindigkeit.",
+        "`File` ist `Send` und `Sync`, das wäre kein Hindernis.",
+        "`Arc<Mutex<File>>` kompiliert problemlos."
+      ]
+    }
+  ],
+  "praxis": "In Rust-Firmware auf Linux-Gateways und in Backends sieht man oft dieselbe Struktur: ein Thread pro Hardware-Schnittstelle oder Verbindung, begrenzte Kanäle dazwischen, Rayon für rechenintensive Stapelverarbeitung. Im Review fragst du bei jedem `mpsc::channel()`: Was passiert, wenn der Empfänger langsamer ist? Und bei jeder `for x in rx`-Schleife: Wann werden alle Sender fallen gelassen?",
+  "labor": {
+    "titel": "Gegendruck sichtbar machen",
+    "anleitung": "Baue einen Produzenten, der so schnell wie möglich Zahlen sendet, und einen Konsumenten, der pro Wert 1 ms schläft. Beobachte den Speicher einmal mit `mpsc::channel()` und einmal mit `mpsc::sync_channel(100)`. Probiere danach Rayon an einer rechenintensiven Funktion aus.",
+    "befehle": [
+      "cargo new kanal && cd kanal",
+      "cargo run --release &",
+      "ps -o rss,comm -p $!",
+      "cargo add rayon crossbeam-channel"
+    ],
+    "beobachtung": "Mit dem unbegrenzten Kanal wächst der RSS-Wert ständig. Mit dem begrenzten bleibt er konstant, und der Produzent läuft im Takt des Konsumenten."
+  },
+  "begriffe": [
+    {
+      "begriff": "Kanal",
+      "englisch": "channel",
+      "erklaerung": "Warteschlange zwischen Threads: Sender verschieben Werte hinein, Empfänger holen sie heraus."
+    },
+    {
+      "begriff": "Gegendruck",
+      "englisch": "backpressure",
+      "erklaerung": "Ein begrenzter Puffer bremst den Produzenten, wenn der Konsument nicht nachkommt."
+    },
+    {
+      "begriff": "Datenparallelität",
+      "englisch": "data parallelism",
+      "erklaerung": "Dieselbe Operation wird parallel auf viele Datenelemente angewendet, z. B. mit Rayons `par_iter`."
+    },
+    {
+      "begriff": "Future",
+      "englisch": "future",
+      "erklaerung": "Wert, der eine noch nicht abgeschlossene Berechnung darstellt. Wird von einer async-Runtime abgefragt, bis er fertig ist."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Book: Using Message Passing to Transfer Data Between Threads",
+      "url": "https://doc.rust-lang.org/book/ch16-02-message-passing.html"
+    },
+    {
+      "titel": "rayon auf docs.rs",
+      "url": "https://docs.rs/rayon"
+    },
+    {
+      "titel": "crossbeam-channel auf docs.rs",
+      "url": "https://docs.rs/crossbeam-channel"
+    }
+  ]
+}

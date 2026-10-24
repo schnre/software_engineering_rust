@@ -1,0 +1,201 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p9-m2-l3",
+  "phase": 9,
+  "modul": "9.2 Traits und öffentliche APIs als Verträge",
+  "titel": "ABI-Grenzen und FFI-Schichten",
+  "lernziele": [
+    "Erklären, warum Rust kein stabiles ABI hat und was das für Plugins und Bibliotheken bedeutet",
+    "Eine C-ABI-Grenze mit `extern \"C\"`, `#[repr(C)]` und `#[unsafe(no_mangle)]` sauber gestalten",
+    "FFI-Code nach der `-sys`-Konvention in eigene Crates trennen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Team baut eine Rust-Anwendung, die Plugins als `.so`-Dateien lädt. Die Plugins sind ebenfalls in Rust geschrieben und tauschen `Vec<Messwert>` und `Box<dyn Filter>` mit der Anwendung aus. Nach einem Compiler-Update der Anwendung stürzen alte Plugins ab. Warum?",
+      "optionen": [
+        "Rust hat kein stabiles ABI: Layout von `Vec`, vtables und Aufrufkonventionen dürfen sich zwischen Compilerversionen und sogar Builds ändern",
+        "Plugins dürfen in Rust grundsätzlich nur statisch gelinkt werden",
+        "`Vec` ist nicht `Send` und darf deshalb keine Bibliotheksgrenze überqueren",
+        "Das Compiler-Update hat die Edition des Projekts automatisch geändert"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rust garantiert Layout und Aufrufkonvention nur innerhalb **eines** Builds mit **einem** Compiler. `repr(Rust)` darf Felder umordnen, und die Reihenfolge der vtable-Einträge ist nicht festgelegt. Wer getrennt gebaute Binaries koppelt, braucht eine Schnittstelle mit festem ABI, praktisch also das C-ABI.",
+      "begruendungen": [
+        "Richtig. Das ABI ist ein Implementierungsdetail von rustc.",
+        "Dynamisches Laden geht, aber nur über eine stabile Schnittstelle wie das C-ABI.",
+        "`Vec<T>` ist `Send`, wenn `T` es ist. Das Problem ist das Layout, nicht die Thread-Sicherheit.",
+        "Die Edition steht in `Cargo.toml` und ändert sich nie durch ein Compiler-Update."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "API, ABI und die C-Grenze",
+      "text": "Die **API** ist der Vertrag im Quelltext: Kompiliert mein Code noch? Das **ABI** (application binary interface) ist der Vertrag auf Maschinenebene: Passen getrennt kompilierte Teile noch zusammen? Dazu gehören Grösse und Layout von Typen, Symbolnamen und Aufrufkonvention.\n\nIn reinen Rust-Projekten baut Cargo alles aus Quelltext und linkt statisch. Das ABI spielt dort kaum eine Rolle. Sobald Binaries getrennt ausgeliefert werden (C-Bibliothek, Plugin, Firmware-Bootloader mit Anwendung), braucht es eine feste Grenze. In Rust heisst das:\n\n- `extern \"C\"` für die Aufrufkonvention\n- `#[repr(C)]` für das Layout\n- `#[unsafe(no_mangle)]` für einen festen Symbolnamen"
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Was will dir rustc mit dieser Warnung sagen?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "pub struct Messung {",
+          "    pub wert: u16,",
+          "    pub kanal: u8,",
+          "}",
+          "",
+          "#[unsafe(no_mangle)]",
+          "pub extern \"C\" fn messung_neu(kanal: u8) -> Messung {",
+          "    Messung { wert: 0, kanal }",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "warning: `extern` fn uses type `Messung`, which is not FFI-safe",
+          " --> src/lib.rs:7:45",
+          "  |",
+          "7 | pub extern \"C\" fn messung_neu(kanal: u8) -> Messung {",
+          "  |                                             ^^^^^^^ not FFI-safe",
+          "  |",
+          "  = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct",
+          "  = note: this struct has unspecified layout",
+          "  = note: `#[warn(improper_ctypes_definitions)]` on by default"
+        ]
+      },
+      "optionen": [
+        "`Messung` hat das Rust-Layout, das C nicht kennt. Mit `#[repr(C)]` liegen die Felder in der Reihenfolge und mit dem Padding, das ein C-Compiler erwartet",
+        "`u16` gibt es in C nicht, das Feld muss `i32` heissen",
+        "Strukturen dürfen nie als Wert über eine C-Grenze gehen, nur als Zeiger",
+        "Die Warnung verschwindet, wenn man die Funktion nicht `pub` macht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ohne `#[repr(C)]` darf rustc die Felder umordnen. Ein C-Programm, das den Header von Hand oder mit cbindgen erzeugt hat, würde `wert` und `kanal` dann an falschen Stellen lesen. Diese Lint ist an FFI-Grenzen Gold wert. In CI sollte sie mit `-D warnings` als Fehler gelten.",
+      "begruendungen": [
+        "Richtig. `#[repr(C)]` macht das Layout vorhersagbar und C-kompatibel.",
+        "`u16` entspricht `uint16_t` und ist FFI-sicher.",
+        "Strukturen mit `#[repr(C)]` dürfen als Wert übergeben werden, das ist im C-ABI festgelegt.",
+        "Die Sichtbarkeit in Rust ändert nichts am Layout. Mit `#[unsafe(no_mangle)]` wird das Symbol ohnehin exportiert."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welcher Rust-Typ eignet sich wofür an einer C-Grenze?",
+      "paare": [
+        { "links": "`*const u8` plus `usize` für die Länge", "rechts": "Ersatz für `&[u8]`, das C nicht kennt" },
+        { "links": "`Option<extern \"C\" fn(u8)>`", "rechts": "Callback, der in C auch `NULL` sein darf" },
+        { "links": "`*mut Puffer` auf einen opaken Typ", "rechts": "Handle auf ein Rust-Objekt, dessen Inneres C nicht sieht" },
+        { "links": "`String` oder `Vec<u8>`", "rechts": "Nicht FFI-sicher, Layout gehört Rust" }
+      ],
+      "erklaerung": "Slices und `String` haben kein C-Gegenstück, rustc warnt mit `improper_ctypes_definitions`. Für Objekte mit innerem Zustand ist ein **opaker Zeiger** (opaque pointer) üblich: C bekommt nur einen Zeiger und ruft Funktionen wie `puffer_neu` und `puffer_freigeben` auf. Das ist das Gegenstück zu PIMPL in C++ und hält das Layout aus dem ABI heraus."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Rust-Crate deklariert eine Funktion aus der C-Bibliothek. Was passiert in Edition 2024?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "extern \"C\" {",
+          "    fn abs(x: i32) -> i32;",
+          "}",
+          "",
+          "pub fn betrag(x: i32) -> i32 {",
+          "    unsafe { abs(x) }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert ohne Fehler",
+        "Fehler: `extern blocks must be unsafe`, ab Edition 2024 heisst es `unsafe extern \"C\" { … }`",
+        "Linkerfehler: `undefined reference to abs`",
+        "Fehler: Aufrufe in `extern`-Blöcke brauchen kein `unsafe`"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Wer einen `extern`-Block schreibt, verspricht, dass die Signaturen zur C-Seite passen. Prüfen kann der Compiler das nicht. Edition 2024 macht dieses Versprechen mit `unsafe extern` sichtbar. Ebenso heisst `#[no_mangle]` dort `#[unsafe(no_mangle)]`, weil zwei gleichnamige Symbole Undefined Behavior auslösen können.",
+      "begruendungen": [
+        "In Edition 2024 ist das ein harter Fehler, in Edition 2021 noch erlaubt.",
+        "Richtig. Das `unsafe` am Block macht die Annahme über die Fremdseite sichtbar.",
+        "Soweit kommt es nicht. Und `abs` steckt in der libc, die ohnehin gelinkt wird.",
+        "Der Aufruf einer Fremdfunktion bleibt `unsafe`, ausser sie wird im Block ausdrücklich als `safe fn` deklariert."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die -sys-Konvention",
+      "text": "Für die Anbindung einer C-Bibliothek trennt man zwei Crates:\n\n- **`foo-sys`**: nur die rohen Deklarationen (oft mit bindgen erzeugt), `build.rs` zum Finden oder Bauen der Bibliothek und `links = \"foo\"` in `Cargo.toml`. Alles `unsafe`, keine Logik.\n- **`foo`**: die sichere Rust-API darüber, mit Ownership, `Result` und `Drop`.\n\nDer `links`-Schlüssel sorgt dafür, dass im ganzen Abhängigkeitsgraphen nur **ein** Crate dieselbe native Bibliothek linkt. So entstehen keine doppelten Symbole. Und der `unsafe`-Code bleibt an einer Stelle, die man gezielt reviewen kann.",
+      "diagramm": {
+        "knoten": ["app", "foo (sichere API)", "foo-sys (extern-Deklarationen, build.rs)", "libfoo (C-Bibliothek)"],
+        "beschriftung": "Nur foo-sys berührt die C-Seite"
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Das Crate ist als `crate-type = [\"cdylib\"]` gebaut und enthält ausser `messung_neu` noch die normale Rust-Funktion `pub fn intern()`. Was zeigt die Symboltabelle?",
+      "terminal": {
+        "befehl": "nm -D --defined-only target/debug/libffi.so",
+        "ausgabe": [
+          "0000000000011840 T messung_neu"
+        ]
+      },
+      "optionen": [
+        "Ein `cdylib` exportiert nur die Funktionen mit festem C-Symbol. `pub fn intern` ist für Rust sichtbar, aber kein Teil der C-Schnittstelle",
+        "`intern` fehlt, weil der Build fehlgeschlagen ist",
+        "`intern` wurde vom Linker entfernt, weil es nie aufgerufen wurde, in einem Release-Build wäre es da",
+        "`nm` zeigt Rust-Symbole grundsätzlich nicht an"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rusts `pub` und die exportierten Symbole eines `cdylib` sind zwei verschiedene Dinge. Die C-Schnittstelle besteht genau aus den `#[unsafe(no_mangle)] extern \"C\"`-Funktionen. Das ist erwünscht: Die exportierte Oberfläche ist klein und bewusst gewählt.",
+      "begruendungen": [
+        "Richtig.",
+        "Dann gäbe es keine `.so`-Datei, die `nm` lesen könnte.",
+        "Auch im Release-Build wird `intern` nicht exportiert. Das liegt am Crate-Typ, nicht am Profil.",
+        "`nm` zeigt gemangelte Rust-Symbole durchaus an, etwa in einem `rlib` oder Binary (Modul 1.2)."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein C-Programm ruft einen Rust-Callback `extern \"C\" fn rueckruf(x: u8) -> u8` auf. Im Callback steht `panic!(\"ungueltiger Kanal\")`. Was passiert seit Rust 1.81?",
+      "optionen": [
+        "Der Prozess bricht mit „panic in a function that cannot unwind“ ab. Fehler sollten an der Grenze als Rückgabewert übergeben werden",
+        "Die Panik wird als C++-Exception an das C-Programm weitergereicht",
+        "Die Panik wird still verschluckt und der Callback gibt 0 zurück",
+        "Das Programm kompiliert nicht, `panic!` ist in `extern \"C\"`-Funktionen verboten"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Stack Unwinding über eine `extern \"C\"`-Grenze war früher Undefined Behavior. Heute fängt Rust es ab und bricht den Prozess kontrolliert ab. Wer Abbrüche vermeiden will, fängt Paniken mit `std::panic::catch_unwind` an der Grenze ab und gibt einen Fehlercode zurück. `extern \"C-unwind\"` ist nur für den seltenen Fall gedacht, dass beide Seiten Unwinding wirklich unterstützen.",
+      "begruendungen": [
+        "Richtig. Beim Ausprobieren endet das Programm mit Exit-Code 134 (SIGABRT).",
+        "C kennt keine Exceptions. Ein Durchreichen ginge nur mit `extern \"C-unwind\"` und einem Gegenüber, das Unwinding versteht.",
+        "Rust verschluckt Paniken nie still.",
+        "Es kompiliert. Der Abbruch passiert erst zur Laufzeit."
+      ]
+    }
+  ],
+  "praxis": "C-Grenzen sind im Embedded-Alltag überall: Hersteller-SDKs, RTOS-Kerne, Bootloader, Bibliotheken für Funkstacks. Plane sie bewusst: ein `-sys`-Crate mit den rohen Deklarationen, darüber eine kleine sichere Schicht, `#[repr(C)]` an jeder geteilten Struktur, keine Paniken über die Grenze. Und wenn ein Rust-Plugin-System gefragt ist, prüfe Alternativen wie das C-ABI mit opaken Zeigern oder Crates wie `abi_stable`, statt Rust-Typen direkt zu tauschen.",
+  "labor": {
+    "titel": "Eine C-Schnittstelle bauen und prüfen",
+    "anleitung": "Baue ein `cdylib` mit einer `#[repr(C)]`-Struktur und einer exportierten Funktion. Entferne dann `#[repr(C)]` und schau dir die Warnung an. Vergleiche die exportierten Symbole mit den `pub`-Funktionen.",
+    "befehle": [
+      "cargo new --lib ffi && cd ffi",
+      "printf '\\n[lib]\\ncrate-type = [\"cdylib\"]\\n' >> Cargo.toml",
+      "cargo build",
+      "nm -D --defined-only target/debug/libffi.so"
+    ],
+    "beobachtung": "Nur Funktionen mit `#[unsafe(no_mangle)] pub extern \"C\"` erscheinen in der Symboltabelle. Ohne `#[repr(C)]` meldet rustc `improper_ctypes_definitions`. Mit dem Werkzeug cbindgen kannst du aus dem Crate einen passenden C-Header erzeugen (Modul 1.3)."
+  },
+  "begriffe": [
+    { "begriff": "ABI", "englisch": "application binary interface", "erklaerung": "Vertrag auf Maschinenebene: Layout von Typen, Symbolnamen, Aufrufkonvention. Rust hat keins, das über Compilerversionen stabil ist." },
+    { "begriff": "Opaker Zeiger", "englisch": "opaque pointer", "erklaerung": "Zeiger auf ein Objekt, dessen Aufbau die andere Seite nicht kennt. Hält Layout-Änderungen aus dem ABI heraus." },
+    { "begriff": "-sys-Crate", "englisch": "sys crate", "erklaerung": "Crate, das nur die rohen FFI-Deklarationen einer nativen Bibliothek und deren Build-Logik enthält." },
+    { "begriff": "Unwinding", "englisch": "stack unwinding", "erklaerung": "Abbau des Stacks bei einer Panik. Über eine `extern \"C\"`-Grenze führt es in Rust zum Prozessabbruch." }
+  ],
+  "weiterlesen": [
+    { "titel": "The Rustonomicon: Foreign Function Interface", "url": "https://doc.rust-lang.org/nomicon/ffi.html" },
+    { "titel": "The Cargo Book: The links manifest key", "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html#the-links-manifest-key" },
+    { "titel": "Rust Reference: Type layout", "url": "https://doc.rust-lang.org/reference/type-layout.html" }
+  ]
+}

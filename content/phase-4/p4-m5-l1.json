@@ -1,0 +1,241 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m5-l1",
+  "phase": 4,
+  "modul": "4.5 Statische Analyse",
+  "titel": "Lints und Clippy",
+  "lernziele": [
+    "Die Lint-Stufen `allow`, `warn`, `deny`, `forbid` und `expect` unterscheiden",
+    "Clippy-Meldungen lesen und die Lint-Gruppen gezielt einsetzen",
+    "Lints projektweit über `[lints]` in `Cargo.toml` und `clippy.toml` konfigurieren"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "id": "clippy-ausgabe",
+      "frage": "`cargo clippy` meldet sieben Warnungen und einen Fehler. Warum bricht der Build ab, obwohl Clippy fast nur Stilfragen meldet?",
+      "terminal": {
+        "befehl": "cargo clippy",
+        "ausgabe": [
+          "warning: unneeded `return` statement",
+          " --> src/main.rs:6:5",
+          "  = note: `#[warn(clippy::needless_return)]` on by default",
+          "",
+          "warning: length comparison to zero",
+          "  --> src/main.rs:10:5",
+          "10 |     v.len() == 0",
+          "   |     ^^^^^^^^^^^^ help: using `is_empty` is clearer and more explicit: `v.is_empty()`",
+          "",
+          "error: approximate value of `f{32, 64}::consts::PI` found",
+          "  --> src/main.rs:14:13",
+          "14 |     let x = 3.14;",
+          "   |             ^^^^",
+          "   = help: consider using the constant directly",
+          "   = note: `#[deny(clippy::approx_constant)]` on by default",
+          "",
+          "warning: `lint` (bin \"lint\") generated 7 warnings",
+          "error: could not compile `lint` (bin \"lint\") due to 1 previous error; 7 warnings emitted"
+        ]
+      },
+      "optionen": [
+        "`approx_constant` gehört zur Gruppe `correctness` und steht standardmässig auf `deny`: `3.14` ist sehr wahrscheinlich ein Fehler",
+        "Clippy bricht immer ab, sobald es mehr als fünf Warnungen gibt",
+        "`3.14` ist in Rust kein gültiges Literal",
+        "Der Fehler kommt vom Compiler, nicht von Clippy"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**Clippy** ist eine Sammlung von über 700 zusätzlichen **Lints** (Prüfregeln). Jede Meldung nennt ihren Namen (`clippy::approx_constant`), ihre Stufe und meist einen konkreten Vorschlag (`help:`). Lints der Gruppe `correctness` deuten auf echte Fehler hin und brechen den Build standardmässig ab. Ein ungenaues π ist ein typischer solcher Fall: Richtig wäre `std::f64::consts::PI`.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Anzahl spielt keine Rolle, nur die Stufe der einzelnen Lints.",
+        "`3.14` ist ein gültiges `f64`-Literal, nur als π zu ungenau.",
+        "Der Lint-Name beginnt mit `clippy::`, er stammt also von Clippy."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Lint-Stufen",
+      "text": "Jeder Lint, egal ob von rustc oder Clippy, hat eine Stufe:\n\n- `allow`: still\n- `warn`: Warnung, Build läuft weiter\n- `deny`: Fehler, darf in einem inneren Bereich wieder gelockert werden\n- `forbid`: Fehler, kann **nicht** mehr gelockert werden\n- `expect`: wie `allow`, warnt aber, wenn der Lint gar nicht auslöst. So veraltet ein Ausnahmevermerk nicht unbemerkt.\n\nGesetzt wird die Stufe als Attribut am Item (`#[allow(…)]`), für das ganze Crate (`#![deny(…)]` in `lib.rs`), auf der Kommandozeile (`-D warnings`) oder in `Cargo.toml` unter `[lints]`."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "forbid",
+      "frage": "Was meldet rustc?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![forbid(unsafe_code)]",
+          "",
+          "#[allow(unsafe_code)]",
+          "fn lies(p: *const u8) -> u8 {",
+          "    unsafe { *p }",
+          "}",
+          "",
+          "fn main() {",
+          "    let x = 7u8;",
+          "    println!(\"{}\", lies(&x));",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Fehler E0453: `allow(unsafe_code)` incompatible with previous forbid, dazu ein Fehler für den `unsafe`-Block",
+        "Das Programm kompiliert, weil `#[allow]` am Item Vorrang vor dem Crate-Attribut hat",
+        "Nur eine Warnung, weil `unsafe_code` ein Clippy-Lint ist"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Genau das unterscheidet `forbid` von `deny`: Mit `deny` hätte das `#[allow]` an der Funktion gewonnen. `#![forbid(unsafe_code)]` ist ein gängiges Versprechen in sicherheitsbewussten Crates, dass nirgends `unsafe` vorkommt. Tools wie `cargo geiger` werten das aus.",
+      "begruendungen": [
+        "Richtig.",
+        "Das gilt für `deny`, nicht für `forbid`.",
+        "`unsafe_code` ist ein Lint von rustc selbst. Clippy-Lints beginnen mit `clippy::`."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "deny-warnings-falle",
+      "frage": "Eine Bibliothek auf crates.io hat `#![deny(warnings)]` in `lib.rs`. Warum gilt das als Falle?",
+      "optionen": [
+        "Eine neue Rust-Version kann neue Warnungen einführen, dann bricht der Build der Bibliothek ohne Codeänderung ab",
+        "`deny(warnings)` macht den Code langsamer",
+        "Warnungen werden damit komplett unterdrückt",
+        "`deny(warnings)` gilt nur für Clippy-Lints, nicht für rustc-Lints"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Neue Compilerversionen fügen regelmässig Lints hinzu oder machen bestehende strenger. Steht `deny(warnings)` im Code, scheitert plötzlich der Build bei allen, die die Version aktualisieren. Für Abhängigkeiten dämpft Cargo das mit `--cap-lints`, im eigenen Workspace aber nicht. Besser: Warnungen nur in der **CI** zu Fehlern machen, mit `cargo clippy -- -D warnings` oder `RUSTFLAGS=\"-D warnings\"`. Dann ist der Code streng geprüft, und lokale Builds mit neuerer Toolchain funktionieren weiter.",
+      "begruendungen": [
+        "Richtig.",
+        "Lints wirken nur beim Kompilieren, nicht zur Laufzeit.",
+        "Im Gegenteil: Jede Warnung wird zum Fehler.",
+        "`warnings` umfasst alle Lints auf Stufe `warn`, auch die von rustc."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "clippy-gruppen",
+      "frage": "Ordne die Clippy-Gruppen ihrem Zweck zu.",
+      "paare": [
+        { "links": "`clippy::correctness`", "rechts": "Code, der sehr wahrscheinlich falsch ist. Standard: `deny`" },
+        { "links": "`clippy::style`", "rechts": "Idiomatischere Schreibweise, z. B. `is_empty()`. Standard: `warn`" },
+        { "links": "`clippy::pedantic`", "rechts": "Strenge Regeln mit gelegentlichen Fehlalarmen. Standard: `allow`" },
+        { "links": "`clippy::nursery`", "rechts": "Neue Lints, die noch reifen. Standard: `allow`" },
+        { "links": "`clippy::restriction`", "rechts": "Einzelne Verbote für besondere Projekte, z. B. `unwrap_used`. Nie als ganze Gruppe einschalten" }
+      ],
+      "erklaerung": "Weitere Gruppen sind `complexity`, `perf` und `suspicious`, alle standardmässig auf `warn`. Für Firmware sind einzelne Lints aus `restriction` interessant: `clippy::unwrap_used`, `clippy::panic` oder `clippy::indexing_slicing` helfen, Panics im Gerät zu vermeiden. Die ganze Gruppe widerspricht sich teilweise selbst."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "lints-tabelle",
+      "frage": "Ergänze die `Cargo.toml`: `pedantic` soll warnen, aber mit niedrigerer Priorität, damit einzelne Lints daraus eine eigene Stufe bekommen können.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[{{?}}]",
+          "unsafe_code = \"forbid\"",
+          "",
+          "[lints.clippy]",
+          "pedantic = { level = \"warn\", {{?}} = -1 }",
+          "cast_possible_truncation = \"deny\"",
+          "module_name_repetitions = \"allow\""
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["lints.rust"] },
+        { "loesungen": ["priority"] }
+      ],
+      "auswahl": ["lints.rust", "priority", "lints.rustc", "order", "profile.lints"],
+      "erklaerung": "Die Tabelle `[lints]` (seit Rust 1.74) ersetzt verstreute Crate-Attribute. In einem Workspace definiert man sie einmal unter `[workspace.lints]` und übernimmt sie in jedem Paket mit `[lints] workspace = true`. Gruppen und Einzellints werden nach `priority` sortiert angewendet, niedrigere zuerst. Ohne `priority = -1` bricht Clippy mit dem Lint `lint_groups_priority` ab, weil Gruppe und Einzellint dieselbe Priorität hätten und die Reihenfolge in der Tabelle von Cargo ignoriert wird."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "pedantic-cast",
+      "frage": "Mit der Konfiguration aus dem letzten Schritt meldet Clippy für `(roh / 16) as u16` Folgendes. Was ist die bessere Lösung?",
+      "terminal": {
+        "befehl": "cargo clippy",
+        "ausgabe": [
+          "error: casting `u32` to `u16` may truncate the value",
+          " --> src/main.rs:2:5",
+          "  |",
+          "2 |     (roh / 16) as u16",
+          "  |     ^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...",
+          "help: ... or use `try_from` and handle the error accordingly",
+          "  |",
+          "2 -     (roh / 16) as u16",
+          "2 +     u16::try_from(roh / 16)"
+        ]
+      },
+      "optionen": [
+        "`u16::try_from(roh / 16)` verwenden und den Fehlerfall bewusst behandeln, z. B. mit `unwrap_or(u16::MAX)`",
+        "Den Lint im ganzen Crate mit `#![allow(clippy::pedantic)]` abschalten",
+        "Statt `as u16` den Typ `as u32` verwenden",
+        "Nichts tun, `as` prüft zur Laufzeit auf Überlauf"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`as` zwischen Ganzzahltypen schneidet die oberen Bits stillschweigend ab, ohne Panic. Bei einem 16-Bit-Registerwert aus einem 32-Bit-ADC-Ergebnis ist das ein klassischer Fehler. `try_from` macht den Fall sichtbar. Ist das Abschneiden wirklich gewollt, setzt man `#[expect(clippy::cast_possible_truncation, reason = \"…\")]` direkt an die Stelle.",
+      "begruendungen": [
+        "Richtig.",
+        "Damit verschwinden alle strengen Prüfungen, nicht nur diese eine.",
+        "Dann passt der Typ nicht mehr zum Rückgabewert `u16`.",
+        "`as` prüft nie. Es schneidet ab bzw. sättigt bei Gleitkommazahlen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "clippy.toml und cargo clippy --fix",
+      "text": "Manche Lints haben Schwellwerte. Diese stehen in `clippy.toml` im Projektverzeichnis, z. B. `too-many-arguments-threshold = 3` oder `msrv = \"1.75\"`, damit Clippy keine Vorschläge macht, die die minimal unterstützte Rust-Version nicht kennt. Die Stufe eines Lints gehört dagegen in `[lints]`.\n\n`cargo clippy --fix` wendet alle maschinell sicheren Vorschläge automatisch an. Das ist ideal, um ein bestehendes Projekt in einem ersten Schritt aufzuräumen. Danach den Diff wie jeden anderen Code im Review prüfen."
+    }
+  ],
+  "praxis": "Ein gut geführtes Rust-Projekt baut in der CI mit `cargo clippy --all-targets --all-features -- -D warnings` und hat seine Lint-Konfiguration zentral in `[workspace.lints]`. Für Firmware lohnt es sich, Panic-Quellen wie `unwrap_used` und `indexing_slicing` mindestens auf `warn` zu setzen. Im Review fragst du bei jedem `#[allow]` nach dem Grund und schlägst `#[expect(…, reason = \"…\")]` vor, damit die Ausnahme verschwindet, sobald sie nicht mehr nötig ist.",
+  "labor": {
+    "titel": "Ein Projekt durch Clippy schicken",
+    "anleitung": "Nimm ein eigenes Projekt oder das Beispiel aus der Lektion. Lass Clippy laufen, wende die automatischen Korrekturen an und schalte danach `pedantic` ein.",
+    "befehle": [
+      "cargo clippy --all-targets",
+      "cargo clippy --fix --allow-dirty",
+      "cargo clippy -- -W clippy::pedantic",
+      "cargo clippy -- -D warnings; echo \"exit=$?\""
+    ],
+    "beobachtung": "Die meisten Stil-Warnungen behebt `--fix` selbst. `pedantic` findet vor allem Casts und fehlende Dokumentation. Mit `-D warnings` ist der Exit-Code ungleich 0, sobald eine Warnung übrig bleibt, genau das, was die CI braucht."
+  },
+  "begriffe": [
+    {
+      "begriff": "Lint",
+      "englisch": "lint",
+      "erklaerung": "Prüfregel, die verdächtigen oder unidiomatischen Code meldet, ohne dass er falsch kompilieren würde."
+    },
+    {
+      "begriff": "Clippy",
+      "englisch": "Clippy",
+      "erklaerung": "Offizielle Sammlung zusätzlicher Lints für Rust, aufgerufen mit `cargo clippy`."
+    },
+    {
+      "begriff": "Lint-Stufe",
+      "englisch": "lint level",
+      "erklaerung": "Reaktion auf einen Lint: `allow`, `expect`, `warn`, `deny` oder `forbid`."
+    },
+    {
+      "begriff": "MSRV",
+      "englisch": "minimum supported Rust version",
+      "erklaerung": "Älteste Rust-Version, mit der ein Crate garantiert kompiliert."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Clippy Documentation",
+      "url": "https://doc.rust-lang.org/clippy/"
+    },
+    {
+      "titel": "The Cargo Book: The [lints] section",
+      "url": "https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section"
+    },
+    {
+      "titel": "The rustc Book: Lint Levels",
+      "url": "https://doc.rust-lang.org/rustc/lints/levels.html"
+    }
+  ]
+}

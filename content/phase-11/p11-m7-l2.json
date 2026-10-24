@@ -1,0 +1,167 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p11-m7-l2",
+  "phase": 11,
+  "modul": "11.7 Architektur dokumentieren und bewerten",
+  "titel": "Architektur bewerten und in CI absichern",
+  "lernziele": [
+    "Qualitätsanforderungen als überprüfbare Szenarien formulieren",
+    "Eine Architektur mit einer leichtgewichtigen ATAM-Bewertung prüfen",
+    "Architekturregeln als Fitness Functions mit cargo-deny und Tests absichern"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "zuordnen",
+      "frage": "Ein **Qualitätsszenario** hat feste Bestandteile. Ordne sie für das Szenario „Fällt der CAN-Bus aus, geht der Motorregler innerhalb von 50 ms in den sicheren Zustand“ zu.",
+      "paare": [
+        { "links": "Auslöser", "rechts": "CAN-Bus fällt aus" },
+        { "links": "Quelle", "rechts": "Defekte Leitung oder gestörtes Steuergerät" },
+        { "links": "Betroffener Teil", "rechts": "Motorregler-Firmware" },
+        { "links": "Reaktion", "rechts": "Wechsel in den sicheren Zustand" },
+        { "links": "Messgrösse", "rechts": "Innerhalb von 50 ms" }
+      ],
+      "erklaerung": "Aus „das System soll robust sein“ wird so eine prüfbare Aussage. Man kann sie testen (Fehlerinjektion im HIL-Test) und an der Architektur nachvollziehen: Gibt es einen Timeout, der den Ausfall erkennt? Ist der sichere Zustand ohne Bus erreichbar?"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was ist das Ziel einer Bewertung nach **ATAM** (*Architecture Tradeoff Analysis Method*)?",
+      "optionen": [
+        "Für die wichtigsten Qualitätsszenarien prüfen, wie die Architektur sie erfüllt, und dabei Risiken, Kompromisse und Sensitivitätspunkte aufdecken",
+        "Eine Note für die Architektur vergeben",
+        "Die Lines of Code zählen",
+        "Den Code automatisch auf Clippy-Warnungen prüfen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Bei ATAM gehen Architekten und Stakeholder gemeinsam die priorisierten Szenarien durch. Ein **Kompromiss** (*trade-off*) ist eine Entscheidung, die eine Qualität fördert und eine andere schwächt. Ein **Sensitivitätspunkt** ist eine Stelle, an der eine kleine Änderung eine Qualität stark beeinflusst, etwa die Grösse einer Mailbox. Eine leichtgewichtige Variante passt in einen halben Tag.",
+      "begruendungen": [
+        "Richtig.",
+        "Es geht um Erkenntnisse und Risiken, nicht um Noten.",
+        "Codegrösse sagt wenig über Architekturqualität.",
+        "Das ist statische Analyse auf Code-Ebene, keine Architekturbewertung."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Team nutzt `tokio::sync::broadcast` mit Kapazität 16 für alle Sensorereignisse. Welche Aussage beschreibt einen **Kompromiss**?",
+      "optionen": [
+        "Der Sender wird nie blockiert (gut für Latenz), dafür können langsame Empfänger Ereignisse verlieren (schlecht für Vollständigkeit)",
+        "Die Kapazität ist 16",
+        "Tokio ist ein bekanntes Crate",
+        "Ereignisse sind `Clone`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein Kompromiss nennt immer zwei Qualitäten, die gegeneinander stehen. Die Kapazität selbst ist ein Sensitivitätspunkt: Wird sie zu klein gewählt, steigt der Verlust stark. Beides gehört ins Ergebnis der Bewertung und, wenn es eine bewusste Entscheidung ist, in einen ADR.",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist ein Parameter, ein Sensitivitätspunkt, aber noch kein Kompromiss.",
+        "Das ist eine Technologie, keine Abwägung.",
+        "Das ist eine technische Voraussetzung."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Fitness Functions",
+      "text": "Eine **Fitness Function** ist eine automatische Prüfung, ob die Architektur eine Eigenschaft noch erfüllt. Sie läuft in CI und verhindert, dass Regeln schleichend erodieren.\n\nBeispiele in Rust:\n\n- **Abhängigkeitsregeln**: Das Domänen-Crate darf weder `tokio` noch Hardware-Crates benutzen. Prüfbar mit `cargo deny check bans` oder einem Test über `cargo metadata`.\n- **`no_std`-Regel**: Ein Crate muss für ein Embedded-Target bauen, z. B. `cargo build -p domaene --target thumbv7em-none-eabihf` in CI.\n- **Grösse und Zeit**: Die Firmware darf nicht über 256 KB wachsen, ein Benchmark nicht langsamer werden.\n- **Öffentliche API**: `cargo semver-checks` erkennt brechende Änderungen."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "In `deny.toml` steht `deny = [{ crate = \"tokio\", wrappers = [\"adapter\"] }]`. Was meldet `cargo deny`?",
+      "terminal": {
+        "befehl": "cargo deny check bans",
+        "ausgabe": [
+          "warning[unmatched-wrapper]: direct parent 'domaene = 0.1.0' of banned crate 'tokio = 1.54.1' was not marked as a wrapper",
+          "  ┌─ /home/user/projekt/deny.toml:3:16",
+          "  │",
+          "3 │     { crate = \"tokio\", wrappers = [\"adapter\"] },",
+          "  │                ━━━━━ banned here",
+          "  │",
+          "  ├ tokio v1.54.1",
+          "    ├── adapter v0.1.0",
+          "    └── domaene v0.1.0",
+          "        └── adapter v0.1.0 (*)",
+          "",
+          "error[banned]: crate 'tokio = 1.54.1' is explicitly banned",
+          "",
+          "bans FAILED"
+        ]
+      },
+      "optionen": [
+        "Die Regel „nur `adapter` darf `tokio` benutzen“ ist verletzt, weil auch `domaene` direkt von `tokio` abhängt. Die Prüfung schlägt fehl",
+        "`tokio` ist im ganzen Projekt verboten, auch in `adapter`",
+        "Die Meldung ist nur eine Warnung, die Prüfung besteht",
+        "`cargo deny` hat eine Sicherheitslücke in `tokio` gefunden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Mit `wrappers` erlaubt man ein Crate nur über bestimmte direkte Eltern. So wird die Ports-&-Adapters-Regel aus Phase 10 maschinell geprüft: Die Domäne bleibt frei von Laufzeit und I/O. Das Beispiel wurde mit cargo-deny 0.20 in einem Workspace mit zwei Crates erzeugt.",
+      "begruendungen": [
+        "Richtig.",
+        "`adapter` ist als Wrapper erlaubt, beanstandet wird `domaene`.",
+        "Am Ende stehen `error[banned]` und `bans FAILED`.",
+        "Sicherheitslücken prüft `cargo deny check advisories`, hier geht es um `bans`."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieser Architekturtest soll sicherstellen, dass `domaene` keine Laufzeit-Crates nutzt. Welche Zeile macht den Test wirkungslos?",
+      "code": {
+        "sprache": "rust",
+        "datei": "tests/architektur.rs",
+        "zeilen": [
+          "use cargo_metadata::MetadataCommand;",
+          "",
+          "const VERBOTEN: &[&str] = &[\"tokio\", \"async-std\", \"embassy-executor\"];",
+          "",
+          "#[test]",
+          "fn domaene_bleibt_frei_von_laufzeiten() {",
+          "    let meta = MetadataCommand::new().exec().unwrap();",
+          "    let domaene = meta.packages.iter().find(|p| p.name.as_str() == \"domaene\").unwrap();",
+          "    for dep in &domaene.dependencies {",
+          "        if VERBOTEN.contains(&dep.name.as_str()) {",
+          "            println!(\"verbotene Abhängigkeit: {}\", dep.name);",
+          "        }",
+          "    }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 11,
+      "erklaerung": "Der Test gibt nur eine Zeile aus und besteht trotzdem. Eine Fitness Function muss **fehlschlagen**, sonst bemerkt niemand die Verletzung. Richtig wäre z. B. `panic!` oder besser: die Treffer sammeln und mit `assert!(treffer.is_empty(), \"...\")` prüfen.",
+      "hinweis": "Was passiert mit dem Testergebnis, wenn eine verbotene Abhängigkeit gefunden wird?"
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Bringe eine leichtgewichtige Architekturbewertung in die richtige Reihenfolge.",
+      "elemente": [
+        "Geschäfts- und Qualitätsziele vorstellen",
+        "Architektur und wichtigste Entscheidungen vorstellen",
+        "Qualitätsszenarien sammeln und priorisieren",
+        "Die wichtigsten Szenarien an der Architektur durchspielen",
+        "Risiken, Kompromisse und Sensitivitätspunkte festhalten",
+        "Massnahmen ableiten, z. B. ADRs, Prototypen oder Fitness Functions"
+      ],
+      "erklaerung": "Die Bewertung ist kein Selbstzweck: Ihr Ergebnis sind konkrete Massnahmen. Viele davon lassen sich als Fitness Functions in CI verankern, damit das Ergebnis nicht nur in einem Protokoll steht."
+    }
+  ],
+  "praxis": "Starte klein: eine `deny.toml` mit den wichtigsten `bans`-Regeln, ein CI-Schritt, der die Kern-Crates für ein `no_std`-Target baut, und eine Grössenprüfung der Firmware. Halte für jede Regel fest, aus welcher Architekturentscheidung sie folgt. Eine halbtägige Bewertung mit dem Team vor einem grossen Umbau deckt mehr Risiken auf als jedes Werkzeug.",
+  "labor": {
+    "titel": "Eine Abhängigkeitsregel prüfen",
+    "anleitung": "Lege einen Workspace mit den Crates `domaene` und `adapter` an. Füge `tokio` zu beiden hinzu, schreibe die `deny.toml` aus der Lektion und lass `cargo deny` laufen. Entferne danach `tokio` aus `domaene`.",
+    "befehle": [
+      "cargo install cargo-deny --locked",
+      "cargo new --lib domaene && cargo new --lib adapter",
+      "cargo deny check bans",
+      "cargo tree -i tokio"
+    ],
+    "beobachtung": "Mit `tokio` in `domaene` endet die Prüfung mit `bans FAILED`. Nach dem Entfernen ist sie grün. `cargo tree -i tokio` zeigt dir jederzeit, welche Crates ein Paket hereinziehen."
+  },
+  "begriffe": [
+    { "begriff": "Qualitätsszenario", "englisch": "quality attribute scenario", "erklaerung": "Konkrete, messbare Beschreibung einer Qualitätsanforderung mit Auslöser, Reaktion und Messgrösse." },
+    { "begriff": "ATAM", "englisch": "Architecture Tradeoff Analysis Method", "erklaerung": "Methode zur Bewertung einer Architektur anhand priorisierter Qualitätsszenarien." },
+    { "begriff": "Sensitivitätspunkt", "englisch": "sensitivity point", "erklaerung": "Entwurfsparameter, dessen Änderung eine Qualität stark beeinflusst." },
+    { "begriff": "Fitness Function", "englisch": "fitness function", "erklaerung": "Automatisierte Prüfung, ob die Architektur eine gewünschte Eigenschaft noch erfüllt." }
+  ],
+  "weiterlesen": [
+    { "titel": "cargo-deny: bans", "url": "https://embarkstudios.github.io/cargo-deny/checks/bans/index.html" },
+    { "titel": "cargo_metadata", "url": "https://docs.rs/cargo_metadata/latest/cargo_metadata/" }
+  ]
+}

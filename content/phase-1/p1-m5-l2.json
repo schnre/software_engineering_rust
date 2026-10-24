@@ -1,0 +1,213 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m5-l2",
+  "phase": 1,
+  "modul": "1.5 Toolchains und Cross-Kompilierung",
+  "titel": "Cross-Kompilieren mit Target-Triples",
+  "lernziele": [
+    "Target-Triples wie `thumbv7em-none-eabihf` lesen",
+    "Ein Target mit rustup installieren und den Linker fürs Ziel in `.cargo/config.toml` festlegen",
+    "Einordnen, wann `cross` oder `cargo-zigbuild` helfen und warum `no_std`-Targets kein `std` haben"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Du baust ein `#![no_std]`-Projekt zum ersten Mal für einen Cortex-M4F. Was fehlt?",
+      "terminal": {
+        "befehl": "cargo build --target thumbv7em-none-eabihf",
+        "ausgabe": [
+          "   Compiling bare v0.1.0 (/home/user/bare)",
+          "error[E0463]: can't find crate for `core`",
+          "  |",
+          "  = note: the `thumbv7em-none-eabihf` target may not be installed",
+          "  = help: consider downloading the target with `rustup target add thumbv7em-none-eabihf`"
+        ]
+      },
+      "optionen": [
+        "Das vorkompilierte `core` für dieses Target. rustc selbst kann bereits ARM-Code erzeugen",
+        "Ein ARM-Cross-Compiler wie `arm-none-eabi-gcc`, ohne den rustc keinen ARM-Code erzeugen kann",
+        "Die Zeile `#![no_main]`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Anders als GCC ist rustc von Haus aus ein **Cross-Compiler**: Dank LLVM kennt jeder rustc alle Targets (`rustc --print target-list` listet über 300). Was fehlt, sind die für das Ziel vorkompilierten Bibliotheken `core` (und je nach Target `alloc`, `std`). `rustup target add` lädt genau diese herunter.",
+      "begruendungen": [
+        "Richtig. Fehler E0463 heisst: Crate nicht gefunden.",
+        "rustc braucht keinen separaten Compiler. Höchstens ein Linker kann fürs Ziel nötig sein.",
+        "Dann käme ein anderer Fehler. Hier scheitert schon das Laden von `core`."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Target-Triples lesen",
+      "text": "Ein **Target-Triple** beschreibt die Zielplattform: Architektur, Hersteller, Betriebssystem und Umgebung/ABI. Trotz des Namens hat es oft vier Teile.",
+      "tabelle": {
+        "kopf": ["Triple", "Architektur", "OS", "Umgebung / ABI"],
+        "zeilen": [
+          ["`x86_64-unknown-linux-gnu`", "x86-64", "Linux", "glibc"],
+          ["`aarch64-unknown-linux-musl`", "64-Bit-ARM", "Linux", "musl, gut für statische Binaries"],
+          ["`x86_64-pc-windows-msvc`", "x86-64", "Windows", "MSVC-Linker und -Laufzeit"],
+          ["`thumbv7em-none-eabihf`", "Cortex-M4/M7 (Thumb-2)", "keines", "EABI mit Hardware-FPU"],
+          ["`riscv32imc-unknown-none-elf`", "RISC-V 32 Bit, Erweiterungen I, M, C", "keines", "ELF"]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Target passt zu welcher Hardware?",
+      "paare": [
+        { "links": "Cortex-M0+ (z. B. RP2040)", "rechts": "`thumbv6m-none-eabi`" },
+        { "links": "Cortex-M4F mit FPU (z. B. STM32F4, nRF52840)", "rechts": "`thumbv7em-none-eabihf`" },
+        { "links": "Raspberry Pi 4 mit 64-Bit-Linux", "rechts": "`aarch64-unknown-linux-gnu`" },
+        { "links": "ESP32-C3 (RISC-V)", "rechts": "`riscv32imc-unknown-none-elf`" }
+      ],
+      "erklaerung": "`none` heisst: kein Betriebssystem. Für diese Targets gibt es nur `core` (und optional `alloc`), kein `std`, denn `std` braucht Dateien, Threads und Speicherverwaltung vom OS. Das `hf` (hard float) übergibt Gleitkommazahlen in FPU-Registern. Ohne FPU-Nutzung nimmt man `thumbv7em-none-eabi`."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Was meldet rustc für diese Bibliothek?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/lib.rs",
+        "zeilen": [
+          "#![no_std]",
+          "",
+          "use std::vec::Vec;",
+          "",
+          "pub fn leer() -> Vec<u8> {",
+          "    Vec::new()",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, `Vec` stammt ja aus der Standardbibliothek",
+        "`error[E0433]: cannot find module or crate `std` in this scope`",
+        "Linkerfehler: `undefined reference to malloc`"
+      ],
+      "korrekt": 1,
+      "fest": true,
+      "erklaerung": "Mit `#![no_std]` ist nur `core` eingebunden. `Vec` braucht einen Heap und lebt in `alloc`. In `no_std` bindet man es mit `extern crate alloc;` und `use alloc::vec::Vec;` ein, braucht dann aber einen globalen Allocator (Phase 7). Auf Mikrocontrollern nimmt man oft lieber `heapless::Vec` mit fester Kapazität.",
+      "begruendungen": [
+        "`std` steht in einem `no_std`-Crate gar nicht zur Verfügung.",
+        "Richtig. Der Fehler kommt schon bei der Namensauflösung, sogar auf dem Host-Target.",
+        "So weit kommt es nicht: Die Namensauflösung scheitert vor dem Linken."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Linker fürs Ziel",
+      "text": "rustc erzeugt Object-Files für jedes Target, aber **linken** muss ein Linker, der das Zielformat kennt. Für `none`-Targets bringt Rust `rust-lld` mit, dort ist nichts zu tun. Für Linux-Ziele mit `std` braucht der Linker zusätzlich die C-Bibliothek des Ziels. Deshalb trägt man einen passenden Cross-Linker ein:",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[target.aarch64-unknown-linux-gnu]",
+          "linker = \"aarch64-linux-gnu-gcc\"",
+          "",
+          "[target.thumbv7em-none-eabihf]",
+          "runner = \"probe-rs run --chip STM32F407VGTx\"",
+          "rustflags = [\"-C\", \"link-arg=-Tlink.x\"]"
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "GCC als Linker-Treiber findet die glibc und Startdateien des Ziels." },
+          { "zeile": 5, "text": "`cargo run` flasht und startet die Firmware über probe-rs (Phase 7)." }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Befehle, um einen Server-Dienst für einen 64-Bit-ARM-Linux-Rechner zu bauen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustup {{?}} add aarch64-unknown-linux-gnu",
+          "cargo build --release --target {{?}}",
+          "ls target/aarch64-unknown-linux-gnu/release/"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["target"] },
+        { "loesungen": ["aarch64-unknown-linux-gnu"] }
+      ],
+      "auswahl": ["target", "aarch64-unknown-linux-gnu", "component", "thumbv7em-none-eabihf"],
+      "erklaerung": "Mit `--target` legt Cargo die Ergebnisse unter `target/<triple>/<profil>/` ab, getrennt vom Host-Build. Build-Skripte und Proc-Macros werden trotzdem für den Host gebaut, denn sie laufen ja während des Builds auf deinem Rechner."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Dein Crate hängt von `openssl-sys` ab, das C-Code und Header des Ziels braucht. Der Cross-Build nach `aarch64-unknown-linux-gnu` scheitert. Was hilft am ehesten?",
+      "optionen": [
+        "`cross build --target aarch64-unknown-linux-gnu`: baut in einem Container, der Cross-Linker und Ziel-Bibliotheken schon enthält",
+        "`rustup component add rust-src`",
+        "Einfach `--release` weglassen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Für reinen Rust-Code reichen `rustup target add` und ein Linker. Sobald C-Abhängigkeiten im Spiel sind, braucht man eine komplette Ziel-Umgebung (Sysroot). **cross** liefert sie als Docker-Images und kann Tests per QEMU ausführen. **cargo-zigbuild** nutzt Zig als Linker und kann sogar eine bestimmte glibc-Version anpeilen, z. B. `--target aarch64-unknown-linux-gnu.2.28`. Oft ist es aber am einfachsten, auf reine Rust-Crates wie `rustls` zu wechseln.",
+      "begruendungen": [
+        "Richtig. Gerade C-Abhängigkeiten sind der Hauptgrund für `cross`.",
+        "`rust-src` liefert den Rust-Quellcode von `std`, nicht die C-Bibliotheken des Ziels.",
+        "Das Profil ändert nichts an fehlenden Ziel-Bibliotheken."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was bedeutet es, dass ein Target in **Tier 2** eingestuft ist?",
+      "optionen": [
+        "Es wird garantiert gebaut und es gibt vorkompilierte Bibliotheken über rustup, aber die Testsuite läuft dafür nicht automatisch",
+        "Es ist vollständig getestet wie `x86_64-unknown-linux-gnu`",
+        "Es gibt keine Binärpakete, man muss `core` selbst mit nightly bauen"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "**Tier 1**: gebaut und vollständig getestet (z. B. x86-64 Linux, Windows, aarch64 Linux). **Tier 2**: gebaut, Binärpakete verfügbar, aber nicht durch die Tests abgesichert. Die meisten Mikrocontroller-Targets wie `thumbv7em-none-eabihf` sind Tier 2. **Tier 3**: nur im Quelltext unterstützt, man baut `core` mit nightly und `-Zbuild-std` selbst.",
+      "begruendungen": [
+        "Richtig. Das ist die typische Lage für Embedded-Targets.",
+        "Das beschreibt Tier 1.",
+        "Das beschreibt Tier 3."
+      ]
+    }
+  ],
+  "praxis": "In einer Embedded-Firma baut die CI meist mehrere Targets: die Firmware für `thumbv7em-none-eabihf`, Host-Tests für `x86_64-unknown-linux-gnu` und vielleicht ein Gateway für `aarch64-unknown-linux-musl`. Die Targets stehen in `rust-toolchain.toml`, Linker und Runner in `.cargo/config.toml`. So reicht ein `git clone` und `cargo build`. Prüfe bei neuen Chips zuerst die Tier-Einstufung des Targets.",
+  "labor": {
+    "titel": "Targets erkunden",
+    "anleitung": "Schau dir die Targets an, die rustc kennt, und baue ein `no_std`-Crate für einen Mikrocontroller.",
+    "befehle": [
+      "rustc --print target-list | grep -E '^thumbv|^riscv32'",
+      "rustup target add thumbv7em-none-eabihf",
+      "cargo new --lib treiber && cd treiber && sed -i '1i #![no_std]' src/lib.rs",
+      "cargo build --target thumbv7em-none-eabihf && file target/thumbv7em-none-eabihf/debug/libtreiber.rlib"
+    ],
+    "beobachtung": "Die Target-Liste ist lang, installiert ist aber nur, was du mit `rustup target add` geholt hast. Eine Bibliothek ohne `std` baut für den Mikrocontroller sofort, ganz ohne zusätzlichen C-Compiler."
+  },
+  "begriffe": [
+    {
+      "begriff": "Target-Triple",
+      "englisch": "target triple",
+      "erklaerung": "Bezeichnung der Zielplattform aus Architektur, Hersteller, Betriebssystem und ABI, z. B. `aarch64-unknown-linux-gnu`."
+    },
+    {
+      "begriff": "Cross-Kompilierung",
+      "englisch": "cross-compilation",
+      "erklaerung": "Übersetzen auf einem Rechner (Host) für eine andere Plattform (Target)."
+    },
+    {
+      "begriff": "Target-Tier",
+      "englisch": "target tier",
+      "erklaerung": "Stufe der Unterstützung eines Targets durch das Rust-Projekt: Tier 1 getestet, Tier 2 gebaut, Tier 3 nur Quelltext."
+    },
+    {
+      "begriff": "core",
+      "englisch": "core library",
+      "erklaerung": "Plattformunabhängiger Teil der Standardbibliothek ohne Heap und OS. Steht auf jedem Target zur Verfügung."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The rustc book: Platform Support",
+      "url": "https://doc.rust-lang.org/rustc/platform-support.html"
+    },
+    {
+      "titel": "The Cargo Book: Configuration",
+      "url": "https://doc.rust-lang.org/cargo/reference/config.html"
+    }
+  ]
+}

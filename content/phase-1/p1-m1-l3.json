@@ -1,0 +1,254 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m1-l3",
+  "phase": 1,
+  "modul": "1.1 Vom Quellcode zum Object-File",
+  "titel": "Makros sichtbar machen, Fehler zuordnen",
+  "lernziele": [
+    "Den Code hinter `println!` und `#[derive]` mit `cargo expand` sichtbar machen",
+    "Eine Fehlermeldung der Stufe Parser, Typprüfung, Borrow-Checker oder Linker zuordnen",
+    "Fehlercodes mit `rustc --explain` nachschlagen"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "terminal-deuten",
+      "frage": "Welche Stufe von rustc meldet diesen Fehler?",
+      "terminal": {
+        "befehl": "rustc parse.rs",
+        "ausgabe": [
+          "error: expected `;`, found `println`",
+          " --> parse.rs:2:14",
+          "  |",
+          "2 |     let x = 5",
+          "  |              ^ help: add `;` here",
+          "3 |     println!(\"{x}\");",
+          "  |     ------- unexpected token",
+          "",
+          "error: aborting due to 1 previous error"
+        ]
+      },
+      "optionen": [
+        "Parser",
+        "Typprüfung",
+        "Borrow-Checker",
+        "Linker"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Der Parser erwartet nach `let x = 5` ein Semikolon und findet ein neues Token. Parserfehler haben meist **keinen Fehlercode** `E0xxx` und beschreiben, welches Token erwartet wurde.",
+      "begruendungen": [
+        "Richtig. Die Syntax ist kaputt, bevor irgendein Typ bekannt ist.",
+        "Typfehler tragen einen Code wie `E0308` und sprechen von `expected` und `found` bei Typen, nicht bei Tokens.",
+        "Der Borrow-Checker läuft erst auf dem MIR. So weit kommt rustc hier nicht.",
+        "Linkerfehler beginnen mit `linking with `cc` failed`."
+      ],
+      "fest": true
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Fehler haben eine Handschrift",
+      "text": "Jede Stufe meldet sich typisch. Weil die Stufen nacheinander laufen, siehst du Borrow-Fehler erst, wenn Parser- und Typfehler behoben sind. Wer nach einer Korrektur plötzlich neue Fehler sieht, ist also oft eine Stufe weiter gekommen.",
+      "tabelle": {
+        "kopf": [
+          "Stufe",
+          "Typische Meldung"
+        ],
+        "zeilen": [
+          [
+            "Parser",
+            "`expected `;`, found …` (meist ohne Code)"
+          ],
+          [
+            "Namensauflösung / Makros",
+            "`E0425 cannot find value`, `cannot find macro`"
+          ],
+          [
+            "Typprüfung",
+            "`E0308 mismatched types`, `E0277 trait bound not satisfied`"
+          ],
+          [
+            "Borrow-Checker",
+            "`E0382 use of moved value`, `E0499`, `E0502`"
+          ],
+          [
+            "Linker",
+            "`linking with `cc` failed`, `undefined symbol`"
+          ]
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne jede Meldung der Stufe zu, die sie erzeugt.",
+      "paare": [
+        {
+          "links": "`error[E0308]: mismatched types`",
+          "rechts": "Typprüfung"
+        },
+        {
+          "links": "`error[E0382]: borrow of moved value: `v``",
+          "rechts": "Borrow-Checker"
+        },
+        {
+          "links": "`error: cannot find macro `printn` in this scope`",
+          "rechts": "Makro-Expansion"
+        },
+        {
+          "links": "`rust-lld: error: undefined symbol: sensor_lesen`",
+          "rechts": "Linker"
+        }
+      ],
+      "erklaerung": "Die Fehlercodes sind im **Error Index** dokumentiert. Linkerfehler stammen nicht von rustc selbst: rustc gibt die Ausgabe des Linkers (hier `rust-lld`) unter `= note:` weiter."
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Dieser Code enthält einen Typfehler **und** einen Move-Fehler. Was meldet `rustc`?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let n: u32 = \"42\";",
+          "    let v = vec![1];",
+          "    let w = v;",
+          "    drop(v);",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Nur `E0308 mismatched types`",
+        "Nur `E0382 use of moved value`",
+        "Beide Fehler, `E0308` und `E0382`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "rustc bricht nach der Typprüfung ab, wenn sie fehlschlägt. Der Borrow-Checker braucht korrekt getypten Code und läuft deshalb gar nicht erst. Sobald du Zeile 2 korrigierst, erscheint `E0382` für Zeile 5.",
+      "begruendungen": [
+        "Richtig. Die Typprüfung scheitert, die späteren Stufen werden übersprungen.",
+        "Der Move-Fehler ist zwar da, aber der Borrow-Checker kommt nicht zum Zug.",
+        "Das passiert, wenn beide Fehler in derselben Stufe entstehen. Hier liegen sie in zwei verschiedenen Stufen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was Makros wirklich erzeugen",
+      "text": "`cargo expand` (Zusatzwerkzeug: `cargo install cargo-expand`) zeigt dein Crate nach der Makro-Expansion. Intern nutzt es die instabile rustc-Option `-Zunpretty=expanded`. So sieht ein `#[derive(Debug)]` mit einem `println!` danach aus. rust-analyzer bietet dasselbe als Befehl *Expand macro recursively*.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct Messung {",
+          "    wert: u16,",
+          "}",
+          "#[automatically_derived]",
+          "impl ::core::fmt::Debug for Messung {",
+          "    #[inline]",
+          "    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {",
+          "        ::core::fmt::Formatter::debug_struct_field1_finish(f, \"Messung\",",
+          "            \"wert\", &&self.wert)",
+          "    }",
+          "}",
+          "",
+          "fn main() {",
+          "    let m = Messung { wert: 7 };",
+          "    { ::std::io::_print(format_args!(\"{0:?}\\n\", m)); };",
+          "}"
+        ],
+        "anmerkungen": [
+          {
+            "zeile": 5,
+            "text": "`#[derive(Debug)]` ist verschwunden, an seiner Stelle steht eine gewöhnliche `impl`."
+          },
+          {
+            "zeile": 15,
+            "text": "`println!` wird zu `_print` mit `format_args!`. Das ist ein eingebautes Makro, das der Compiler selbst auswertet."
+          }
+        ]
+      }
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze: Du willst wissen, was der Fehlercode `E0382` bedeutet, und danach den expandierten Code deines Crates sehen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustc {{?}} E0382",
+          "cargo {{?}}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "--explain"
+          ]
+        },
+        {
+          "loesungen": [
+            "expand"
+          ]
+        }
+      ],
+      "auswahl": [
+        "--explain",
+        "expand",
+        "--help",
+        "check"
+      ],
+      "erklaerung": "`rustc --explain E0382` gibt eine ausführliche Erklärung mit fehlerhaftem und korrigiertem Beispiel aus, offline. rustc schlägt den Befehl am Ende jeder Fehlermeldung selbst vor: `For more information about this error, try `rustc --explain E0382``. `cargo check` prüft nur, ohne Expansion anzuzeigen."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Dieser Code kompiliert nicht, und die Meldung trägt den Code `E0382`. Welche Zeile meldet rustc als Fehlerstelle?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let v = vec![1, 2, 3];",
+          "    let w = v;",
+          "    println!(\"{:?}\", v);",
+          "    println!(\"{:?}\", w);",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "In Zeile 3 wird `v` nach `w` **verschoben** (move), weil `Vec` nicht `Copy` ist. Zeile 4 benutzt `v` danach: `borrow of moved value: `v``. rustc markiert Zeile 3 als `value moved here` und schlägt `v.clone()` vor. Mehr zu Ownership in Phase 2."
+    }
+  ],
+  "praxis": "Bei einer langen Fehlerliste immer den **ersten** Fehler zuerst beheben, denn spätere sind oft Folgefehler. Bei Makro-lastigem Code (serde, tokio, embassy) hilft `cargo expand` bzw. *Expand macro* in rust-analyzer, um zu verstehen, woher eine Meldung in generiertem Code stammt. Und ein `linking with `cc` failed` ist nie ein Problem im Rust-Code selbst, sondern eines von Bibliotheken, Pfaden oder Symbolen.",
+  "labor": {
+    "titel": "Fehler Stufe für Stufe",
+    "anleitung": "Schreibe vier kleine Programme mit je einem Parser-, Typ-, Borrow- und Linkerfehler (für den Linker: eine Funktion in `unsafe extern \"C\" { … }` deklarieren und aufrufen, aber nirgends definieren).",
+    "befehle": [
+      "rustc parse.rs; rustc typ.rs; rustc borrow.rs; rustc link.rs",
+      "rustc --explain E0308 | head -20",
+      "cargo install cargo-expand",
+      "cargo expand"
+    ],
+    "beobachtung": "Nur Typ- und Borrow-Fehler tragen einen Code `E0xxx`. Der Linkerfehler erscheint unter `= note:` mit `undefined symbol: …`. `cargo expand` zeigt, dass `println!` zu `::std::io::_print(format_args!(…))` wird."
+  },
+  "begriffe": [
+    {
+      "begriff": "Makro-Expansion",
+      "englisch": "macro expansion",
+      "erklaerung": "Stufe, in der rustc Makroaufrufe und `#[derive]` durch den erzeugten Code ersetzt."
+    },
+    {
+      "begriff": "Fehlercode",
+      "englisch": "error code",
+      "erklaerung": "Kennung wie `E0382`, mit `rustc --explain` nachschlagbar und im Error Index dokumentiert."
+    },
+    {
+      "begriff": "Folgefehler",
+      "englisch": "cascading error",
+      "erklaerung": "Fehler, der nur wegen eines früheren Fehlers auftritt und mit diesem verschwindet."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust Compiler Error Index",
+      "url": "https://doc.rust-lang.org/error_codes/error-index.html"
+    },
+    {
+      "titel": "The Rust Reference: Macros",
+      "url": "https://doc.rust-lang.org/reference/macros.html"
+    }
+  ]
+}

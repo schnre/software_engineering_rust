@@ -1,0 +1,235 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p5-m4-l3",
+  "phase": 5,
+  "modul": "5.4 Performance verstehen",
+  "titel": "Allokationen und Cache-Lokalität",
+  "lernziele": [
+    "Das Wachstum von `Vec` erklären und mit `with_capacity` Allokationen sparen",
+    "Unnötige Allokationen in Schleifen erkennen und Werkzeuge wie dhat-rs einsetzen",
+    "Datenlayout nach Cache-Lokalität beurteilen (AoS vs. SoA, Felder umordnen)"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "vec-wachstum",
+      "frage": "Ein leerer `Vec<u32>` bekommt nacheinander 100 Elemente per `push`. Bei jeder Kapazitätsänderung wird die neue Kapazität ausgegeben. Was erscheint?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut v: Vec<u32> = Vec::new();",
+          "let mut alt = usize::MAX;",
+          "for i in 0..100 {",
+          "    v.push(i);",
+          "    if v.capacity() != alt {",
+          "        alt = v.capacity();",
+          "        print!(\"{alt} \");",
+          "    }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "`4 8 16 32 64 128`",
+        "`1 2 3 4 … 100`",
+        "`100`",
+        "`10 20 30 … 100`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "`Vec` verdoppelt seine Kapazität, wenn sie nicht mehr reicht. Für kleine Elemente beginnt er mit 4 (bei `u8` mit 8). Jede Vergrösserung heisst: neuen Speicher anfordern, alles kopieren, alten freigeben. Durch das Verdoppeln kostet `push` im Mittel trotzdem nur konstante Zeit (*amortisiert*). Die genauen Startwerte sind ein Implementierungsdetail, die Ausgabe stammt von Rust 1.97.",
+      "begruendungen": [
+        "Richtig.",
+        "Das wäre quadratischer Aufwand. Genau deshalb wächst `Vec` geometrisch.",
+        "Woher sollte der `Vec` die Endgrösse kennen? Dafür gibt es `with_capacity`.",
+        "Wachstum in festen Schritten wäre ebenfalls quadratisch."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Allokationen kosten",
+      "text": "Eine Heap-Allokation kostet je nach Allokator einige zehn bis hundert Nanosekunden, kann sperren und verteilt Daten über den Speicher. Typische Quellen in Rust:\n\n- `Vec`/`String` ohne `with_capacity`, wenn die Grösse bekannt ist\n- `clone()`, `to_string()`, `format!` in Schleifen\n- `collect()` in Zwischen-`Vec`s, die gleich wieder durchlaufen werden\n- `Box<dyn Trait>` für viele kleine Objekte\n\nGegenmittel: Kapazität reservieren, Puffer wiederverwenden (`clear()` behält die Kapazität), `&str` statt `String` übergeben, Iteratoren verketten statt sammeln. Für kleine, meist kurze Listen gibt es `SmallVec` (die ersten *N* Elemente inline, erst dann Heap). Auf Mikrocontrollern ohne Heap nimmt man `heapless::Vec` mit fester Kapazität (Phase 7)."
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "alloc-schleife",
+      "frage": "Diese Funktion läuft für jede Zeile einer grossen Logdatei. Welche Zeile erzeugt pro Aufruf unnötig eine Heap-Allokation?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn ist_fehler(zeile: &str) -> bool {",
+          "    let gross = zeile.to_uppercase();",
+          "    gross.contains(\"ERROR\")",
+          "}",
+          "",
+          "fn zaehle(text: &str) -> usize {",
+          "    text.lines().filter(|z| ist_fehler(z)).count()",
+          "}"
+        ]
+      },
+      "fehlerZeile": 2,
+      "erklaerung": "`to_uppercase` erzeugt für jede Zeile einen neuen `String`, nur um danach zu suchen. Je nach Anforderung reicht `zeile.contains(\"ERROR\")` oder ein Vergleich ohne Kopie, etwa über `as_bytes().windows(5)` mit `eq_ignore_ascii_case`. `lines()` und `filter` allozieren dagegen nichts: Sie liefern `&str`-Ausschnitte des Originals."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecke-capacity",
+      "frage": "Ergänze: Die Ausgabe wird ohne wiederholtes Wachsen aufgebaut, und der Puffer wird über alle Durchläufe wiederverwendet.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let mut ergebnis = Vec::{{?}}(eingaben.len());",
+          "let mut puffer = String::new();",
+          "for e in &eingaben {",
+          "    puffer.{{?}}();",
+          "    formatiere(e, &mut puffer);",
+          "    ergebnis.push(pruefsumme(&puffer));",
+          "}"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["with_capacity"] },
+        { "loesungen": ["clear"] }
+      ],
+      "auswahl": ["with_capacity", "clear", "new", "shrink_to_fit", "truncate"],
+      "erklaerung": "`with_capacity(n)` reserviert einmal genug Platz für `n` Elemente. `clear()` setzt die Länge auf 0, behält aber den reservierten Speicher. Nach wenigen Durchläufen hat `puffer` seine Endgrösse und alloziert nie wieder. `shrink_to_fit` würde genau das Gegenteil bewirken."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "dhat-ausgabe",
+      "frage": "Du hast `dhat-rs` als globalen Allokator eingebunden. Am Programmende erscheint diese Zusammenfassung. Was ist der beste nächste Schritt?",
+      "terminal": {
+        "befehl": "cargo run --release --features dhat-heap",
+        "ausgabe": [
+          "dhat: Total:     48,012,352 bytes in 1,000,214 blocks",
+          "dhat: At t-gmax: 1,204,096 bytes in 108 blocks",
+          "dhat: At t-end:  0 bytes in 0 blocks",
+          "dhat: The data has been saved to dhat-heap.json, and is viewable with dhat/dh_view.html"
+        ]
+      },
+      "optionen": [
+        "In `dh_view.html` nachsehen, welcher Aufrufstapel die rund eine Million kleinen Blöcke anfordert",
+        "Nichts tun, es gibt kein Speicherleck, denn am Ende sind 0 Bytes belegt",
+        "Mehr RAM einplanen, das Programm braucht 48 MB",
+        "Den Allokator wechseln, eine Million Blöcke ist ein Fehler im Allokator"
+      ],
+      "korrekt": 0,
+      "erklaerung": "dhat zählt alle Allokationen über die gesamte Laufzeit (`Total`), den Höchststand (`t-gmax`) und was am Ende noch belegt ist (`t-end`). Hier: Der Spitzenverbrauch ist klein (1,2 MB), aber es gab eine Million Allokationen von im Schnitt 48 Byte – ein typisches Zeichen für Allokationen in einer heissen Schleife. Der Viewer zeigt, von wo sie kommen. (Die Zahlen sind ein Beispiel. Das Format entspricht der dhat-Ausgabe.)",
+      "begruendungen": [
+        "Richtig.",
+        "Kein Leck heisst nicht effizient. Eine Million Allokationen kosten Zeit.",
+        "Insgesamt 48 MB über die Laufzeit, gleichzeitig nie mehr als 1,2 MB.",
+        "Der Allokator tut, was verlangt wird. Das Problem liegt im aufrufenden Code."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Cache-Lokalität und Datenlayout",
+      "text": "Die CPU lädt Speicher in **Cache-Zeilen** (*cache lines*) zu meist 64 Byte. Fortlaufende Zugriffe bekommen die Nachbarn gratis, verstreute Zugriffe zahlen jedes Mal den Weg zum Hauptspeicher (rund 100 ns statt 1 ns aus dem L1-Cache).\n\n- `Vec<T>` legt Elemente lückenlos hintereinander. `Vec<Box<T>>` oder `LinkedList<T>` verstreuen sie.\n- Rust ordnet Felder einer `struct` (ohne `#[repr(C)]`) selbst um, um Padding zu sparen.\n- **AoS vs. SoA**: Ein Array von Strukturen (*array of structs*) lädt alle Felder mit, auch wenn eine Schleife nur eines braucht. Eine Struktur von Arrays (*struct of arrays*) legt jedes Feld in einen eigenen `Vec`."
+    },
+    {
+      "typ": "code-lesen",
+      "id": "repr-c-groesse",
+      "frage": "Was gibt dieser Code auf x86-64 aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "struct A { a: u8, b: u64, c: u8 }",
+          "#[repr(C)]",
+          "struct B { a: u8, b: u64, c: u8 }",
+          "",
+          "println!(\"{} {} {}\",",
+          "    size_of::<A>(),",
+          "    size_of::<B>(),",
+          "    size_of::<Option<Box<u8>>>());"
+        ]
+      },
+      "optionen": [
+        "`16 24 8`",
+        "`24 24 16`",
+        "`10 10 8`",
+        "`16 16 16`"
+      ],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Ohne `#[repr(C)]` darf rustc die Felder umordnen: `b` zuerst, dann die beiden `u8`, aufgefüllt auf 16. Mit `#[repr(C)]` gilt die Reihenfolge aus dem Quelltext wie in C: 1 + 7 Padding + 8 + 1 + 7 Padding = 24. `Option<Box<u8>>` braucht kein zusätzliches Byte, weil ein `Box` nie null ist und `None` als Nullzeiger dargestellt wird (*niche optimization*). `#[repr(C)]` braucht man für FFI und Hardware-Layouts, nicht für Performance.",
+      "begruendungen": [
+        "Richtig.",
+        "Für `A` ordnet rustc die Felder um, und `Option<Box>` nutzt die Nische des Nullzeigers.",
+        "Ohne Ausrichtung wären es 10. `u64` muss aber auf 8 Byte ausgerichtet sein.",
+        "`#[repr(C)]` verbietet das Umordnen, also braucht `B` mehr Platz."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "aos-soa",
+      "frage": "Eine Simulation hat eine Million `Teilchen { pos: [f32; 3], vel: [f32; 3], masse: f32, id: u64, name: String }` in einem `Vec`. Die heisse Schleife aktualisiert nur `pos += vel * dt`. Was bringt am meisten?",
+      "optionen": [
+        "Die Daten als Struct of Arrays ablegen (`pos: Vec<[f32; 3]>`, `vel: Vec<[f32; 3]>`, …), damit die Schleife nur benötigte Bytes lädt",
+        "`Vec<Teilchen>` durch `Vec<Box<Teilchen>>` ersetzen",
+        "Die Struktur mit `#[repr(C)]` versehen",
+        "`f32` durch `f64` ersetzen, damit die Werte ausgerichtet sind"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `Teilchen` ist rund 64 Byte gross (mit dem 24 Byte grossen `String`-Kopf). Die Schleife braucht davon 24. Bei AoS wird also mehr als die Hälfte jeder geladenen Cache-Zeile verschwendet. Mit SoA liegen `pos` und `vel` dicht beieinander, und die Schleife lässt sich obendrein gut vektorisieren. Das ist der Kern von *datenorientiertem Design* (*data-oriented design*), wie es z. B. ECS-Spiel-Engines wie Bevy nutzen.",
+      "begruendungen": [
+        "Richtig.",
+        "Damit wären die Teilchen über den Heap verstreut, die Lokalität würde noch schlechter.",
+        "`#[repr(C)]` verhindert nur das Umordnen, die Grösse sinkt dadurch nicht.",
+        "`f32` ist bereits ausgerichtet. `f64` verdoppelt nur die Datenmenge."
+      ]
+    }
+  ],
+  "praxis": "Bei Performance-Problemen in Rust findest du im Flamegraph oft `malloc`, `free`, `RawVec::grow` oder `clone` weit oben. Im Review achtest du auf `to_string()`/`format!` in Schleifen, auf `collect()` in Zwischen-`Vec`s und auf Puffer, die bei jedem Aufruf neu angelegt statt wiederverwendet werden. Für heisse Datenstrukturen fragst du: Welche Felder liest die Schleife wirklich, und liegen sie beisammen?",
+  "labor": {
+    "titel": "Allokationen zählen",
+    "anleitung": "Binde `dhat` als optionalen globalen Allokator ein (siehe Doku auf docs.rs) und miss ein Programm, das Zeilen mit `to_uppercase` filtert. Ersetze die Kopie danach durch einen Vergleich ohne Allokation und miss erneut.",
+    "befehle": [
+      "cargo new alloc && cd alloc",
+      "cargo add dhat --optional",
+      "cargo run --release --features dhat",
+      "xdg-open https://nnethercote.github.io/dh_view/dh_view.html"
+    ],
+    "beobachtung": "Die Zeile `Total: … in … blocks` zeigt die Gesamtzahl Allokationen. Nach der Änderung sinkt sie von ungefähr einer pro Logzeile auf eine Handvoll. In `dh_view.html` lädst du `dhat-heap.json` und siehst die Aufrufstapel nach Anzahl Blöcken sortiert."
+  },
+  "begriffe": [
+    {
+      "begriff": "Allokation",
+      "englisch": "allocation",
+      "erklaerung": "Anfordern von Speicher vom Heap über den globalen Allokator."
+    },
+    {
+      "begriff": "Kapazität",
+      "englisch": "capacity",
+      "erklaerung": "Anzahl Elemente, für die ein `Vec` bereits Speicher reserviert hat, unabhängig von der aktuellen Länge."
+    },
+    {
+      "begriff": "Cache-Lokalität",
+      "englisch": "cache locality",
+      "erklaerung": "Eigenschaft eines Zugriffsmusters, Daten zu nutzen, die nahe beieinander liegen und deshalb schon im Cache sind."
+    },
+    {
+      "begriff": "Struct of Arrays",
+      "englisch": "struct of arrays, SoA",
+      "erklaerung": "Datenlayout, bei dem jedes Feld in einem eigenen Array liegt statt jedes Objekt als Ganzes."
+    },
+    {
+      "begriff": "Nischenoptimierung",
+      "englisch": "niche optimization",
+      "erklaerung": "Der Compiler nutzt ungültige Bitmuster eines Typs (z. B. Nullzeiger) für Enum-Varianten wie `None`, ohne zusätzlichen Platz."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Rust Performance Book: Heap Allocations",
+      "url": "https://nnethercote.github.io/perf-book/heap-allocations.html"
+    },
+    {
+      "titel": "dhat auf docs.rs",
+      "url": "https://docs.rs/dhat"
+    },
+    {
+      "titel": "The Rust Reference: Type Layout",
+      "url": "https://doc.rust-lang.org/reference/type-layout.html"
+    }
+  ]
+}

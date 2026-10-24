@@ -1,0 +1,179 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p6-m6-l2",
+  "phase": 6,
+  "modul": "6.6 Analoge Werte und DMA",
+  "titel": "DMA und Ownership",
+  "lernziele": [
+    "Erklären, wann sich DMA lohnt und was eine Übertragung braucht",
+    "Begründen, warum DMA-Puffer `'static` sein und für die Dauer der Übertragung dem Transfer gehören müssen",
+    "Cache-Probleme auf Cortex-M7 erkennen und beheben"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "warum-dma",
+      "frage": "Ein ADC liefert 100 000 Werte pro Sekunde. Jeden Wert in einer ISR abzuholen, kostet etwa 50 Takte. Was ist besser?",
+      "optionen": [
+        "Ein **DMA**-Controller kopiert die Werte selbstständig in einen Puffer, die CPU wird nur alle paar hundert Werte benachrichtigt",
+        "Eine schnellere ISR schreiben",
+        "Die Hauptschleife fragt den ADC ständig ab",
+        "Die Abtastrate halbieren"
+      ],
+      "korrekt": 0,
+      "erklaerung": "**DMA** (*direct memory access*) heisst: Ein eigener Baustein überträgt Daten zwischen Peripherie und Speicher, ohne dass die CPU jedes Wort anfasst. Bei 100 kHz würden sonst 5 Mio. Takte pro Sekunde in ISRs verschwinden. Konfiguriert werden Quelle, Ziel, Anzahl, Wortbreite, Auslöser und ob der Kanal zirkulär läuft.",
+      "begruendungen": [
+        "Richtig.",
+        "Auch eine schnelle ISR zahlt Ein- und Austritt bei jedem Wert.",
+        "Polling bindet die CPU vollständig.",
+        "Das ändert die Anforderung, statt sie zu erfüllen."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der DMA arbeitet neben dem Compiler vorbei",
+      "text": "Während einer Übertragung schreibt oder liest Hardware im Puffer. Der Compiler weiss davon nichts. Zwei Regeln müssen darum gelten, solange der DMA läuft:\n\n1. Der Puffer darf **nicht freigegeben** werden, auch nicht dadurch, dass eine Funktion zurückkehrt und ihr Stack-Frame verschwindet.\n2. Die CPU darf den Puffer **nicht anfassen**, sonst gibt es einen Data Race mit der Hardware.\n\nIn C ist das eine Konvention. In Rust lassen sich beide Regeln mit Ownership und Lebensdauern ausdrücken."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "static-puffer",
+      "frage": "Eine DMA-API verlangt `&'static mut [u8; 64]`. Was sagt dieser Fehler?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn starte_dma(puffer: &'static mut [u8; 64]) { /* … */ }",
+          "",
+          "fn sende() {",
+          "    let mut puffer = [0u8; 64];",
+          "    starte_dma(&mut puffer);",
+          "}"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "error[E0597]: `puffer` does not live long enough",
+          " --> src/main.rs:5:16",
+          "  |",
+          "4 |     let mut puffer = [0u8; 64];",
+          "  |         ---------- binding `puffer` declared here",
+          "5 |     starte_dma(&mut puffer);",
+          "  |     -----------^^^^^^^^^^^-",
+          "  |     |          |",
+          "  |     |          borrowed value does not live long enough",
+          "  |     argument requires that `puffer` is borrowed for `'static`",
+          "6 | }",
+          "  | - `puffer` dropped here while still borrowed"
+        ]
+      },
+      "optionen": [
+        "Ein Stack-Puffer verschwindet am Ende von `sende`, der DMA würde danach in fremden Speicher schreiben. Der Compiler verhindert das",
+        "Der Puffer ist zu klein",
+        "`starte_dma` muss `unsafe` sein",
+        "`[u8; 64]` kann nicht mit DMA übertragen werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Genau dieser Fehler ist in C ein klassischer Feldausfall: Ein Sende-DMA liest aus einem Stack-Puffer, der längst überschrieben ist. Woher bekommt man `&'static mut`? Mit `cortex_m::singleton!(: [u8; 64] = [0; 64])`, mit `static_cell::StaticCell` oder in RTIC und Embassy über deren Ressourcen. Alle prüfen, dass die Referenz nur einmal vergeben wird.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Grösse spielt für diesen Fehler keine Rolle.",
+        "Das würde das Problem nur verstecken, nicht lösen.",
+        "Byte-Arrays sind der Normalfall für DMA."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Transfer-Objekte",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "let puffer: &'static mut [u8; 64] = cortex_m::singleton!(: [u8; 64] = [0; 64]).unwrap();",
+          "",
+          "let transfer = tx.write_dma(puffer, dma_kanal);   // Puffer wandert hinein",
+          "// puffer[0] = 1;   // E0382: Wert wurde verschoben",
+          "andere_arbeit();",
+          "let (puffer, dma_kanal, tx) = transfer.wait();   // Puffer kommt zurück"
+        ],
+        "anmerkungen": [
+          { "zeile": 1, "text": "`singleton!` gibt das `&'static mut` genau einmal heraus, beim zweiten Mal `None`." },
+          { "zeile": 3, "text": "Schematische API: Puffer, Kanal und Peripherie gehören jetzt dem Transfer." },
+          { "zeile": 6, "text": "Erst nach dem Ende der Übertragung bekommst du alles zurück." }
+        ]
+      },
+      "text": "HALs bauen darauf ein Muster: Der Start einer Übertragung **verbraucht** Puffer und Kanal und gibt ein Transfer-Objekt zurück. Die Namen unterscheiden sich je nach HAL, die Idee ist überall gleich. Das Crate `embedded-dma` beschreibt mit den `unsafe` Traits `ReadBuffer` und `WriteBuffer`, welche Puffertypen das erfüllen: `&'static mut [T; N]` und Typen mit stabiler Adresse."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "zero-copy",
+      "frage": "Warum ist DMA in Rust trotz der Typen **zero-copy**?",
+      "optionen": [
+        "Verschoben wird nur die Referenz (ein Zeiger), nicht der Pufferinhalt. Der DMA arbeitet direkt im Originalpuffer",
+        "Weil der Compiler den Puffer in den DMA-Controller kopiert",
+        "Weil `'static` Puffer im Flash liegen",
+        "Ist es nicht, jede Übertragung kopiert den Puffer einmal"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Ein `&'static mut [u8; 64]` ist ein Zeiger von 4 Byte. Ihn in den Transfer zu verschieben, kostet nichts. Ownership ist hier reine Buchhaltung des Compilers. Zur Laufzeit bleiben nur die Registerzugriffe übrig, die ein C-Treiber auch hätte.",
+      "begruendungen": [
+        "Richtig.",
+        "Der DMA-Controller hat keinen Speicher für Nutzdaten, er bekommt nur Adressen.",
+        "`'static` beschreibt die Lebensdauer. Veränderliche Puffer liegen im RAM.",
+        "Bewegt wird nur die Referenz."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "cache",
+      "frage": "Auf einem Cortex-M7 mit eingeschaltetem Daten-Cache liest die CPU nach dem DMA-Empfang immer wieder alte Werte. Welche Zeile ist falsch?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "#[repr(C, align(32))]",
+          "struct Puffer([u8; 512]);",
+          "",
+          "fn empfang_fertig(scb: &mut SCB, p: &mut Puffer) {",
+          "    // Daten kommen frisch vom DMA, direkt auswerten:",
+          "    verarbeite(&p.0);",
+          "}"
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "Der DMA schreibt ins RAM, die CPU liest aber aus ihrem Cache, in dem noch alte Daten liegen. Vor dem Lesen muss der Bereich ungültig gemacht werden: `unsafe { scb.invalidate_dcache_by_slice(&mut p.0) }` aus `cortex-m`. Umgekehrt vor einem Sende-DMA `scb.clean_dcache_by_slice(&p.0)`, damit der Cache seine Änderungen ins RAM schreibt. Alternativ legt man DMA-Puffer per MPU in einen nicht cachebaren Bereich. Die 32-Byte-Ausrichtung ist richtig: Cache-Operationen arbeiten auf ganzen Zeilen."
+    },
+    {
+      "typ": "zuordnen",
+      "id": "dma-probleme",
+      "frage": "Ordne jedem DMA-Problem die Abhilfe zu.",
+      "paare": [
+        { "links": "Puffer lebt kürzer als die Übertragung", "rechts": "`&'static mut` verlangen, z. B. über `singleton!` oder `StaticCell`" },
+        { "links": "CPU schreibt während der Übertragung in den Puffer", "rechts": "Puffer in das Transfer-Objekt verschieben" },
+        { "links": "CPU liest alte Daten (Cortex-M7)", "rechts": "Cache invalidieren oder Puffer nicht cachebar machen" },
+        { "links": "DMA erreicht den Speicher nicht", "rechts": "Puffer per `#[link_section]` in passenden RAM-Bereich legen" }
+      ],
+      "erklaerung": "Die ersten beiden Probleme löst Rust zur Compilezeit. Die letzten beiden bleiben Hardware-Wissen: Auf manchen Chips (z. B. STM32H7) erreicht nicht jeder DMA-Controller jeden RAM-Bereich, etwa nicht das DTCM. Die Bus-Matrix im Referenzhandbuch zeigt das."
+    }
+  ],
+  "praxis": "DMA steckt hinter fast jeder schnellen Schnittstelle: Audio, Displays, UART mit hoher Datenrate, Messwerterfassung. In Rust-HALs erkennst du DMA-APIs daran, dass sie `'static`-Puffer verlangen und Transfer-Objekte zurückgeben. In Embassy sieht das anders aus: Dort borgt eine `async`-Funktion den Puffer, und das `await` sorgt dafür, dass er bis zum Ende der Übertragung lebt (Phase 7).",
+  "labor": {
+    "titel": "Lebensdauer-Regeln nachbauen",
+    "anleitung": "Baue auf dem PC eine Mini-API: `struct Transfer { puffer: &'static mut [u8; 64] }` mit `fn starte(puffer: &'static mut [u8; 64]) -> Transfer` und `fn warte(self) -> &'static mut [u8; 64]`. Versuche, einen Stack-Puffer zu übergeben und den Puffer während des Transfers zu benutzen.",
+    "befehle": [
+      "cargo new dma-sim && cd dma-sim",
+      "cargo build",
+      "rustc --explain E0597"
+    ],
+    "beobachtung": "Der Stack-Puffer scheitert an E0597, der Zugriff während des Transfers an E0382. Einen `'static`-Puffer bekommst du auf dem PC z. B. mit `Box::leak(Box::new([0u8; 64]))`."
+  },
+  "begriffe": [
+    { "begriff": "DMA", "englisch": "direct memory access", "erklaerung": "Datenübertragung zwischen Peripherie und Speicher ohne Beteiligung der CPU." },
+    { "begriff": "Transfer-Objekt", "englisch": "transfer object", "erklaerung": "Wert, der Puffer und Kanal während einer DMA-Übertragung besitzt und sie danach zurückgibt." },
+    { "begriff": "Zero-Copy", "englisch": "zero-copy", "erklaerung": "Daten werden nicht kopiert, nur Referenzen auf sie weitergegeben." },
+    { "begriff": "Cache-Kohärenz", "englisch": "cache coherency", "erklaerung": "Übereinstimmung zwischen Cache und Speicher, bei DMA manuell sicherzustellen." }
+  ],
+  "weiterlesen": [
+    { "titel": "embedded-dma (docs.rs)", "url": "https://docs.rs/embedded-dma" },
+    { "titel": "The Embedonomicon", "url": "https://docs.rust-embedded.org/embedonomicon/" },
+    { "titel": "cortex-m (docs.rs)", "url": "https://docs.rs/cortex-m" }
+  ]
+}

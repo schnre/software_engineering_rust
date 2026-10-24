@@ -1,0 +1,194 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m3-l1",
+  "phase": 7,
+  "modul": "7.3 Speicher ohne Heap",
+  "titel": "heapless und static_cell",
+  "lernziele": [
+    "Container mit fester Kapazität aus `heapless` einsetzen und den Fall „voll“ behandeln",
+    "Eine `spsc::Queue` zwischen Interrupt und Hauptprogramm aufteilen",
+    "Mit `static_cell` sicher an `&'static mut`-Daten kommen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "frage": "Was gibt dieses Programm aus?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use heapless::Vec;",
+          "",
+          "let mut v: Vec<u8, 3> = Vec::new();",
+          "for i in 0..5u8 {",
+          "    if let Err(x) = v.push(i) {",
+          "        println!(\"voll, {x} verworfen\");",
+          "    }",
+          "}",
+          "println!(\"{:?} len={} cap={}\", v, v.len(), v.capacity());"
+        ],
+        "anmerkungen": [
+          { "zeile": 3, "text": "Die Kapazität 3 ist Teil des Typs (const generic)" },
+          { "zeile": 5, "text": "`push` liefert `Result<(), T>` und gibt das Element bei vollem Vec zurück" }
+        ]
+      },
+      "optionen": [
+        "Zweimal „verworfen“ (für 3 und 4), dann `[0, 1, 2] len=3 cap=3`",
+        "Eine Panik beim vierten `push`",
+        "`[0, 1, 2, 3, 4] len=5 cap=8`, weil der Vec wächst",
+        "Ein Compilerfehler, weil `Vec` ein `Box` braucht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`heapless::Vec<T, N>` liegt komplett dort, wo die Variable liegt (Stack oder `static`), ohne Allokator. Statt zu wachsen, gibt `push` bei voller Kapazität `Err(element)` zurück. Du bekommst das Element zurück und entscheidest selbst: verwerfen, zählen, ältestes ersetzen. Ein ignoriertes `Result` meldet der Compiler als Warnung `unused_must_use`.",
+      "begruendungen": [
+        "Richtig.",
+        "`heapless` panict nicht, sondern gibt ein `Result` zurück.",
+        "Ein `heapless::Vec` wächst nie über N hinaus.",
+        "`heapless` kommt ganz ohne `alloc` aus."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die wichtigsten heapless-Typen",
+      "tabelle": {
+        "kopf": ["Typ", "Entspricht", "Wenn voll"],
+        "zeilen": [
+          ["`Vec<T, N>`", "`alloc::vec::Vec`", "`push` → `Err(T)`"],
+          ["`String<N>`", "`alloc::string::String`", "`push_str` → `Err(CapacityError)`"],
+          ["`spsc::Queue<T, N>`", "Ringpuffer für einen Erzeuger und einen Verbraucher", "`enqueue` → `Err(T)`, fasst N − 1 Elemente"],
+          ["`Deque`, `IndexMap`, `BinaryHeap`", "die Gegenstücke aus `std::collections`", "jeweils ein `Err`"],
+          ["`pool::boxed` (`box_pool!`)", "`Box` aus einem Pool fester Blöcke", "`alloc` → `Err`"]
+        ]
+      },
+      "text": "Die Kapazität ist ein **const generic** und steht damit im Typ. Speicherbedarf ist zur Übersetzungszeit bekannt, ein zu grosses `static` meldet der Linker. Seit `heapless` 0.9 gibt es zusätzlich View-Typen wie `VecView<T>`, mit denen Funktionen Container beliebiger Kapazität annehmen können, ohne generisch über N zu sein."
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein `String<8>` soll „Temp: 123“ aufnehmen. Was zeigt die Ausgabe?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "use core::fmt::Write;",
+          "let mut s: heapless::String<8> = heapless::String::new();",
+          "println!(\"{:?}\", s.push_str(\"Temp: \"));",
+          "println!(\"{:?}\", write!(s, \"{}\", 123));",
+          "println!(\"{s:?}\");"
+        ]
+      },
+      "terminal": {
+        "befehl": "cargo run -q",
+        "ausgabe": [
+          "Ok(())",
+          "Err(Error)",
+          "\"Temp: \""
+        ]
+      },
+      "optionen": [
+        "„Temp: “ passt (6 Byte), „123“ nicht mehr ganz hinein. `write!` meldet `fmt::Error`, und der String enthält nur „Temp: “",
+        "Der String wurde auf 16 Byte vergrössert",
+        "`write!` hat „12“ geschrieben und dann abgebrochen",
+        "Die Kapazität zählt Zeichen, nicht Bytes"
+      ],
+      "korrekt": 0,
+      "erklaerung": "6 + 3 = 9 Byte, Kapazität 8. `heapless::String` implementiert `core::fmt::Write`, also funktioniert `write!`. Bei zu wenig Platz liefert es `Err(core::fmt::Error)`. Wie viel bei einem Fehler schon geschrieben ist, solltest du nicht voraussetzen: Hier steht nichts von „123“ im String. Plane die Kapazität für den längsten möglichen Text.",
+      "begruendungen": [
+        "Richtig.",
+        "`heapless` vergrössert nie.",
+        "Die Ausgabe zeigt, dass von „123“ nichts angekommen ist.",
+        "Die Kapazität von `String<N>` ist in Bytes (UTF-8)."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Du legst `heapless::spsc::Queue<u32, 4>` an. Wie viele Elemente passen hinein?",
+      "optionen": ["3", "4", "5", "beliebig viele"],
+      "korrekt": 0,
+      "fest": true,
+      "erklaerung": "Die `spsc::Queue` hält **N − 1** Elemente: Ein Platz bleibt frei, damit „voll“ und „leer“ allein an den Indizes `head` und `tail` unterscheidbar sind, ohne zusätzliche Sperre. `capacity()` liefert 3, das vierte `enqueue` gibt `Err(3)` zurück. Für gute Performance empfiehlt die Dokumentation eine Zweierpotenz für N.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein Platz bleibt immer frei.",
+        "Mehr als N geht nie.",
+        "Die Kapazität ist fest."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze: Die UART-ISR schreibt empfangene Bytes in die Queue, die Hauptschleife liest sie. Beide Hälften kommen aus `split`.",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static QUEUE: StaticCell<Queue<u8, 64>> = StaticCell::new();",
+          "",
+          "let q = QUEUE.init(Queue::new());",
+          "let (erzeuger, mut verbraucher) = q.{{?}}();",
+          "// erzeuger an die ISR übergeben, z. B. als RTIC-#[local]",
+          "",
+          "// in der ISR:",
+          "if erzeuger.{{?}}(byte).is_err() { VERLOREN.fetch_add(1, Relaxed); }",
+          "",
+          "// in der Hauptschleife:",
+          "while let Some(b) = verbraucher.{{?}}() { verarbeite(b); }"
+        ]
+      },
+      "luecken": [{ "loesungen": ["split"] }, { "loesungen": ["enqueue"] }, { "loesungen": ["dequeue"] }],
+      "auswahl": ["split", "enqueue", "dequeue", "push", "pop", "lock"],
+      "erklaerung": "`split` braucht `&mut` auf die Queue und liefert `Producer` und `Consumer`. Weil jede Seite nur einen Index schreibt, braucht die Queue keine Sperre: lockfrei und mit konstanter Laufzeit, ideal für ISRs. Für `&'static mut` sorgt `StaticCell`. Ein Zähler für verlorene Bytes macht Überläufe sichtbar."
+    },
+    {
+      "typ": "fehler-finden",
+      "frage": "Diese Funktion soll einmalig einen 64-Byte-Puffer mit `'static`-Lebensdauer liefern. Mit Edition 2024 kompiliert sie nicht. Welche Zeile ist das Problem?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "static mut PUFFER: [u8; 64] = [0; 64];",
+          "",
+          "fn puffer() -> &'static mut [u8; 64] {",
+          "    unsafe { &mut PUFFER }",
+          "}"
+        ]
+      },
+      "fehlerZeile": 4,
+      "erklaerung": "Seit Edition 2024 ist `static_mut_refs` ein Fehler: „creating a mutable reference to mutable static“. Und zu Recht: Ruft man `puffer()` zweimal auf, gibt es zwei `&mut` auf denselben Speicher, also undefiniertes Verhalten. Die sichere Lösung ist `static PUFFER: StaticCell<[u8; 64]> = StaticCell::new();` mit `PUFFER.init([0; 64])`. Ein zweiter Aufruf panict dann mit „`StaticCell` is already full, it can't be initialized twice.“"
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Netzwerk-Stack braucht einen 16-KiB-Puffer als `&'static mut`. Welche `StaticCell`-Methode wählst du?",
+      "optionen": [
+        "`init_with(|| [0; 16384])`, weil der Wert direkt im `static` entstehen kann statt erst auf dem Stack",
+        "`init([0; 16384])`, das ist immer gleichwertig",
+        "`try_init`, weil es keinen Speicher braucht",
+        "`make_static!`, weil es ohne `static` auskommt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Laut Dokumentation konstruiert `init` den Wert meist zuerst auf dem Stack und verschiebt ihn dann. Bei 16 KiB kann das den Stack sprengen. `init_with` erlaubt dem Compiler, den Wert direkt an seinem Ziel zu bauen. `make_static!` erzeugt intern ebenfalls ein `static`, ist nur eine Abkürzung.",
+      "begruendungen": [
+        "Richtig.",
+        "Bei grossen Werten ist der Umweg über den Stack gefährlich.",
+        "`try_init` liefert nur `None` statt Panik, wenn schon initialisiert.",
+        "Auch `make_static!` legt ein `static` an, nur verborgen im Makro."
+      ]
+    }
+  ],
+  "praxis": "In Embedded-Rust-Projekten sind `heapless` und `static_cell` Grundausstattung: Kommandopuffer, Logzeilen, Empfangsqueues und Treiberzustände haben feste Grössen. Wichtig ist, für jeden Container zu entscheiden, was bei „voll“ passiert, und diese Fälle zu zählen. Ein Zähler für verworfene Nachrichten im Diagnose-Log spart später viel Fehlersuche.",
+  "labor": {
+    "titel": "heapless auf dem PC",
+    "anleitung": "`heapless` funktioniert auch mit `std`. Probiere `Vec`, `String` und `spsc::Queue` aus, löse den Überlauf absichtlich aus und vergleiche mit `std::mem::size_of` den Speicherbedarf mit `std::vec::Vec`.",
+    "befehle": [
+      "cargo new hl && cd hl",
+      "cargo add heapless static_cell",
+      "cargo run"
+    ],
+    "beobachtung": "`size_of::<heapless::Vec<u8, 3>>()` ist auf x86_64 16 Byte (Länge plus Daten plus Ausrichtung), ein `std::vec::Vec` immer 24 Byte plus Heap. Die Kapazität eines `heapless::Vec` steckt im Typ, nicht im Wert."
+  },
+  "begriffe": [
+    { "begriff": "Const Generics", "englisch": "const generics", "erklaerung": "Generische Parameter, die Werte statt Typen sind, z. B. die Kapazität N." },
+    { "begriff": "SPSC-Queue", "englisch": "single-producer single-consumer queue", "erklaerung": "Lockfreier Ringpuffer für genau einen Erzeuger und einen Verbraucher." },
+    { "begriff": "StaticCell", "englisch": "static cell", "erklaerung": "Typ, der zur Laufzeit genau einmal einen Wert in ein `static` legt und `&'static mut` liefert." }
+  ],
+  "weiterlesen": [
+    { "titel": "docs.rs: heapless", "url": "https://docs.rs/heapless" },
+    { "titel": "docs.rs: static_cell", "url": "https://docs.rs/static_cell" },
+    { "titel": "Edition Guide: static mut references", "url": "https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html" }
+  ]
+}

@@ -1,0 +1,208 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p10-m7-l1",
+  "phase": 10,
+  "modul": "10.7 Coding-Standards und ADRs",
+  "titel": "Coding-Standards für Rust",
+  "lernziele": [
+    "Die wichtigsten Regelwerke für Rust kennen: API Guidelines, Clippy, Safety-Critical Rust Coding Guidelines",
+    "Einen Coding-Standard als Lint-Konfiguration in `Cargo.toml` festhalten",
+    "Eine `unsafe`-Policy mit `forbid`, `deny` und begründeten Ausnahmen umsetzen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein C++-Team wechselt auf Rust und fragt: „Brauchen wir überhaupt einen Coding-Standard? Der Compiler verhindert doch Speicherfehler.“ Was antwortest du?",
+      "optionen": [
+        "Ja. Der Compiler verhindert eine ganze Fehlerklasse, aber nicht Panics durch `unwrap`, unbegründetes `unsafe`, uneinheitliche APIs oder Überläufe im Release-Build",
+        "Nein, sicheres Rust kann keine Fehler enthalten",
+        "Nur, wenn das Projekt nach MISRA zertifiziert werden muss",
+        "Ja, aber nur für Formatierung und Einrückung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Rusts Typsystem ersetzt viele MISRA-Regeln, die es in C nur gibt, weil die Sprache die Fehler zulässt. Es bleiben aber Fragen, die ein Team einheitlich beantworten muss: Wo darf ein Programm panicken? Wo ist `unsafe` erlaubt? Wie heissen Konvertierungsfunktionen? Ein Standard macht diese Antworten verbindlich und automatisch prüfbar.",
+      "begruendungen": [
+        "Richtig.",
+        "Logikfehler, Panics und Überläufe sind auch in sicherem Rust möglich.",
+        "Auch ohne Zertifizierung profitiert jedes Team von einheitlichen Regeln.",
+        "Formatierung erledigt `rustfmt` ganz ohne Diskussion."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Die Regelwerke",
+      "text": "- **Rust API Guidelines**: Empfehlungen des Rust-Library-Teams für öffentliche APIs, etwa Namenskonventionen (`as_`, `to_`, `into_`), welche Traits ein Typ implementieren soll, Dokumentation.\n- **Clippy**: über 700 Lints in Gruppen wie `correctness`, `suspicious`, `style`, `perf`, `pedantic` und `restriction`. Die Auswahl aus `restriction` (z. B. `unwrap_used`) ist das, was ein Team zum Standard macht.\n- **Safety-Critical Rust Coding Guidelines**: ein Projekt des Safety-Critical Rust Consortium, das Regeln für sicherheitskritische Software sammelt. Es greift auch auf **MISRA**-Erfahrungen zurück, MISRA selbst hat Hinweise veröffentlicht, wie seine C-Regeln auf Rust zu übertragen sind (Phase 12).\n- **rustfmt**: Formatierung ohne Diskussion."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Welches Werkzeug oder Regelwerk deckt welchen Aspekt ab?",
+      "paare": [
+        { "links": "Rust API Guidelines", "rechts": "Namen, Traits und Dokumentation öffentlicher APIs" },
+        { "links": "Clippy-Gruppe `restriction`", "rechts": "Projektspezifische Verbote wie `unwrap_used` oder `indexing_slicing`, einzeln wählbar" },
+        { "links": "Safety-Critical Rust Coding Guidelines", "rechts": "Regeln für Software nach Normen wie ISO 26262 oder IEC 61508" },
+        { "links": "`rustfmt`", "rechts": "Einheitliche Formatierung" }
+      ],
+      "erklaerung": "Die Gruppe `restriction` sollte man nie komplett aktivieren, ihre Lints widersprechen sich teilweise. Man wählt gezielt die Regeln aus, die zum Projekt passen, und hält die Auswahl fest."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Standard als Konfiguration",
+      "text": "Seit Cargo 1.74 gehört die Lint-Konfiguration in die Tabelle `[lints]` in `Cargo.toml`. In einem Workspace steht sie einmal unter `[workspace.lints]`, und jedes Crate übernimmt sie mit `lints.workspace = true`. Schwellenwerte einzelner Clippy-Lints stehen in `clippy.toml`, etwa `too-many-arguments-threshold`.\n\nSo ist der Standard Code: versioniert, im Review sichtbar und in der CI mit `cargo clippy -- -D warnings` durchgesetzt.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[lints.rust]",
+          "unsafe_code = \"forbid\"",
+          "",
+          "[lints.clippy]",
+          "unwrap_used = \"deny\"",
+          "undocumented_unsafe_blocks = \"warn\""
+        ],
+        "anmerkungen": [
+          { "zeile": 2, "text": "Kein `unsafe` in diesem Crate, auch nicht mit `allow` auszuhebeln." },
+          { "zeile": 5, "text": "Aus der Gruppe `restriction`, standardmässig aus." }
+        ]
+      }
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Mit dieser Konfiguration läuft `cargo clippy` über eine Bibliothek. Was ist richtig?",
+      "terminal": {
+        "befehl": "cargo clippy",
+        "ausgabe": [
+          "error: usage of an `unsafe` block",
+          " --> src/lib.rs:6:5",
+          "  |",
+          "6 |     unsafe { *v.get_unchecked(0) }",
+          "  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: requested on the command line with `-F unsafe-code`",
+          "",
+          "error: used `unwrap()` on an `Option` value",
+          " --> src/lib.rs:2:6",
+          "  |",
+          "2 |     *v.first().unwrap()",
+          "  |      ^^^^^^^^^^^^^^^^^^",
+          "  |",
+          "  = note: requested on the command line with `-D clippy::unwrap-used`",
+          "",
+          "warning: unsafe block missing a safety comment",
+          " --> src/lib.rs:6:5",
+          "",
+          "error: could not compile `standard` (lib) due to 2 previous errors; 1 warning emitted"
+        ]
+      },
+      "optionen": [
+        "Die Einträge aus `[lints]` wirken wie Kommandozeilen-Flags (`-F`, `-D`, `-W`). Zwei Verstösse brechen den Build ab, einer ist nur eine Warnung",
+        "Die Lints wurden auf der Kommandozeile übergeben, `Cargo.toml` wird ignoriert",
+        "Nur die Warnung ist relevant, Fehler von Clippy sind Empfehlungen",
+        "`unwrap` ist in Bibliotheken grundsätzlich ein Compilerfehler"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Cargo übersetzt die Tabelle `[lints]` in Flags für rustc und Clippy, deshalb steht in der Meldung „requested on the command line“. `forbid` wird zu `-F`, `deny` zu `-D`, `warn` zu `-W`. Der Build schlägt wegen der zwei `error` fehl.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Flags stammen gerade aus `Cargo.toml`, Cargo reicht sie weiter.",
+        "`deny` und `forbid` machen aus einem Lint einen echten Fehler.",
+        "Ohne die Konfiguration wäre `unwrap_used` gar nicht aktiv."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "frage": "Ein Entwickler will für eine einzelne, schnelle Funktion eine Ausnahme machen. Was passiert?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![forbid(unsafe_code)]",
+          "",
+          "#[allow(unsafe_code)]",
+          "fn schnell(v: &[u8]) -> u8 {",
+          "    unsafe { *v.get_unchecked(0) }",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Kompiliert, `allow` gilt für diese Funktion",
+        "Fehler `E0453`: `allow(unsafe_code)` ist mit dem vorherigen `forbid` unvereinbar",
+        "Kompiliert mit einer Warnung",
+        "Fehler `E0133`: `get_unchecked` braucht `unsafe fn`"
+      ],
+      "korrekt": 1,
+      "erklaerung": "Genau das unterscheidet `forbid` von `deny`: Bei `deny` darf eine innere Stelle mit `#[allow]` eine Ausnahme machen, bei `forbid` nicht. Eine typische `unsafe`-Policy: `forbid` in allen Crates ausser einem kleinen, gut geprüften Crate (z. B. `-sys` oder Treiber), das `deny` nutzt und jede Ausnahme mit `// SAFETY:` begründet.",
+      "begruendungen": [
+        "Bei `forbid` ist keine lokale Lockerung möglich.",
+        "Richtig.",
+        "`E0453` ist ein harter Fehler.",
+        "Der `unsafe`-Block ist korrekt, das Problem ist die Lint-Stufe."
+      ]
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Lint ist an einer Stelle zu Recht unpassend. Welche Form der Ausnahme ist am besten?",
+      "optionen": [
+        "`#[expect(clippy::unwrap_used, reason = \"…\")]` direkt an der Funktion, mit Begründung",
+        "`#![allow(clippy::all)]` am Anfang der Datei",
+        "Den Lint in `Cargo.toml` für das ganze Projekt abschalten",
+        "Den Code so umschreiben, dass Clippy ihn nicht mehr erkennt, z. B. `match` mit `panic!` statt `unwrap`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`#[expect]` (seit Rust 1.81) wirkt wie `allow`, warnt aber mit `unfulfilled_lint_expectations`, wenn der Lint dort gar nicht mehr auslöst. So veralten Ausnahmen nicht unbemerkt. Das Feld `reason` dokumentiert die Begründung, ähnlich einer dokumentierten Abweichung (deviation) bei MISRA.",
+      "begruendungen": [
+        "Richtig.",
+        "Das schaltet alle Clippy-Lints für die ganze Datei ab.",
+        "Dann gilt die Regel auch dort nicht mehr, wo sie sinnvoll ist.",
+        "Das Werkzeug zu überlisten, untergräbt den Standard und fällt im Review auf."
+      ]
+    }
+  ],
+  "praxis": "Ein guter Einstieg in einem bestehenden Projekt: `[workspace.lints]` anlegen, mit einer kleinen Auswahl beginnen (`unsafe_code`, `unwrap_used` in Bibliotheken, `undocumented_unsafe_blocks`) und `cargo clippy -- -D warnings` in die CI aufnehmen. Bestehende Verstösse mit `#[expect(…, reason = \"…\")]` markieren und schrittweise abbauen. Wer sicherheitskritische Software baut, verfolgt die Safety-Critical Rust Coding Guidelines, die gerade entstehen.",
+  "labor": {
+    "titel": "Einen Standard in Cargo.toml festhalten",
+    "anleitung": "Lege eine Bibliothek an und ergänze die `[lints]`-Tabelle aus der Lektion. Schreibe eine Funktion mit `unwrap()` und eine mit `unsafe`. Markiere danach eine Funktion mit `#[expect(clippy::unwrap_used, reason = \"…\")]`, die gar kein `unwrap` enthält.",
+    "befehle": [
+      "cargo new --lib standard && cd standard",
+      "cargo clippy",
+      "cargo clippy -- -D warnings"
+    ],
+    "beobachtung": "Clippy meldet `unsafe` und `unwrap` als Fehler mit dem Hinweis „requested on the command line“. Das überflüssige `#[expect]` erzeugt `this lint expectation is unfulfilled` und zeigt den `reason`-Text."
+  },
+  "begriffe": [
+    {
+      "begriff": "Coding-Standard",
+      "englisch": "coding standard, coding guidelines",
+      "erklaerung": "Verbindliche Regeln für Code in einem Projekt, möglichst automatisch geprüft."
+    },
+    {
+      "begriff": "Lint-Stufe",
+      "englisch": "lint level",
+      "erklaerung": "`allow`, `expect`, `warn`, `deny` oder `forbid`. `forbid` lässt sich im Code nicht mehr lockern."
+    },
+    {
+      "begriff": "Abweichung",
+      "englisch": "deviation",
+      "erklaerung": "Begründete, dokumentierte Ausnahme von einer Regel an einer bestimmten Stelle."
+    },
+    {
+      "begriff": "unsafe-Policy",
+      "englisch": "unsafe policy",
+      "erklaerung": "Teamregel, wo `unsafe` erlaubt ist und wie es begründet und geprüft wird."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Rust API Guidelines",
+      "url": "https://rust-lang.github.io/api-guidelines/"
+    },
+    {
+      "titel": "Clippy-Dokumentation",
+      "url": "https://doc.rust-lang.org/clippy/"
+    },
+    {
+      "titel": "The Cargo Book: Manifest (lints)",
+      "url": "https://doc.rust-lang.org/cargo/reference/manifest.html"
+    }
+  ]
+}

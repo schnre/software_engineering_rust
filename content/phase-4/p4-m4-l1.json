@@ -1,0 +1,213 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p4-m4-l1",
+  "phase": 4,
+  "modul": "4.4 Miri und Sanitizer",
+  "titel": "Miri: Undefined Behavior finden",
+  "lernziele": [
+    "Erklären, warum `unsafe`-Code trotz grüner Tests Undefined Behavior enthalten kann",
+    "Tests mit `cargo +nightly miri test` ausführen und eine Miri-Meldung deuten",
+    "Die Grenzen von Miri kennen: FFI, Geschwindigkeit, nur ausgeführte Pfade"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "code-lesen",
+      "id": "uaf-laeuft",
+      "frage": "Was passiert, wenn du dieses Programm mit `cargo run` auf stable ausführst?",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "fn main() {",
+          "    let v = vec![1u32, 2, 3];",
+          "    let p = v.as_ptr();",
+          "    drop(v);",
+          "    let x = unsafe { *p };",
+          "    println!(\"{x}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Es kompiliert und gibt irgendeine Zahl aus, zum Beispiel 1639364465. Der Fehler bleibt unbemerkt",
+        "Compilerfehler E0505: cannot move out of `v` because it is borrowed",
+        "Es panikt mit „use after free“",
+        "Es gibt zuverlässig 1 aus"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`as_ptr()` liefert einen **Rohzeiger** (raw pointer), und Rohzeiger haben keine Lebensdauer, die der Borrow-Checker verfolgt. Nach `drop(v)` zeigt `p` auf freigegebenen Speicher. Das Lesen in `unsafe` ist **Undefined Behavior** (UB): Rust garantiert nichts mehr. Auf dieser Maschine kam 1639364465 heraus, anderswo vielleicht 1 oder ein Absturz. Genau solche Fehler findet Miri.",
+      "begruendungen": [
+        "Richtig. UB fällt oft gar nicht auf, bis es in Produktion etwas Unerwartetes tut.",
+        "Der Borrow-Checker verfolgt nur Referenzen, nicht Rohzeiger.",
+        "Rust prüft Rohzeiger zur Laufzeit nicht.",
+        "Das kann zufällig passieren, ist aber nicht garantiert."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Was ist Miri?",
+      "text": "**Miri** ist ein Interpreter für die MIR, die Zwischendarstellung von rustc. Statt Maschinencode auszuführen, simuliert er das Programm Schritt für Schritt und führt Buch über jede Allokation, jeden Zeiger und jedes Byte. Dadurch erkennt er UB, das echte Hardware stillschweigend „durchgehen lässt“:\n\n- Zugriff auf freigegebenen oder ausserhalb liegenden Speicher\n- Lesen von nicht initialisiertem Speicher\n- falsch ausgerichtete Zugriffe\n- Verletzung der Aliasing-Regeln von Referenzen\n- Data Races zwischen Threads\n- ungültige Werte, z. B. ein `bool` mit dem Wert 3\n\nMiri gibt es nur auf **nightly**: `rustup +nightly component add miri`, dann `cargo +nightly miri test` oder `cargo +nightly miri run`."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "miri-meldung",
+      "hinweis": "Die Ausgabe ist gekürzt. Achte auf die erste Zeile und auf die Abschnitte, die die Allokation beschreiben.",
+      "frage": "Miri meldet für das Programm aus Schritt 1 Folgendes. Was steht drin?",
+      "terminal": {
+        "befehl": "cargo +nightly miri run",
+        "ausgabe": [
+          "error: Undefined Behavior: memory access failed: … has been freed, so this pointer is dangling",
+          " --> src/main.rs:5:22",
+          "  |",
+          "5 |     let x = unsafe { *p };",
+          "  |                      ^^ Undefined Behavior occurred here",
+          "  |",
+          "  = help: this indicates a bug in the program: it performed an invalid operation, and caused Undefined Behavior",
+          "help: … was allocated here:",
+          " --> src/main.rs:2:13",
+          "help: … was deallocated here:",
+          " --> src/main.rs:4:5"
+        ]
+      },
+      "optionen": [
+        "In Zeile 5 wird über einen hängenden Zeiger gelesen. Der Speicher wurde in Zeile 2 angelegt und in Zeile 4 freigegeben",
+        "Miri hat einen eigenen internen Fehler und bricht ab",
+        "Zeile 2 reserviert zu wenig Speicher für drei Werte",
+        "Es ist nur eine Warnung, das Programm läuft danach normal weiter"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wie bei AddressSanitizer erzählt die Meldung die ganze Geschichte: wo der ungültige Zugriff passiert, wo der Speicher angelegt und wo er freigegeben wurde. Miri hält beim ersten UB an. Die Ausgabe sieht aus wie ein Compilerfehler, weil Miri die Diagnose-Infrastruktur von rustc nutzt.",
+      "begruendungen": [
+        "Richtig.",
+        "Interne Fehler meldet Miri anders. `Undefined Behavior` heisst: Der Fehler liegt in deinem Programm.",
+        "Die Grösse stimmt, der Speicher wurde nur zu früh freigegeben.",
+        "Miri bricht bei UB ab, weil danach nichts mehr definiert ist."
+      ]
+    },
+    {
+      "typ": "code-lesen",
+      "id": "aliasing",
+      "frage": "Dieses Programm kompiliert, läuft auf stable und gibt `2` aus. Was meldet Miri?",
+      "code": {
+        "sprache": "rust",
+        "zeilen": [
+          "fn main() {",
+          "    let mut x = 0u32;",
+          "    let p = &mut x as *mut u32;",
+          "    let r = &mut x;",
+          "    unsafe { *p = 1; }",
+          "    *r = 2;",
+          "    println!(\"{x}\");",
+          "}"
+        ]
+      },
+      "optionen": [
+        "Einen Verstoss gegen die Aliasing-Regeln: `r` beansprucht exklusiven Zugriff, trotzdem wird über das ältere `p` geschrieben",
+        "Nichts, weil das Programm das erwartete Ergebnis liefert",
+        "Ein Speicherleck, weil `x` nie freigegeben wird"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Eine `&mut`-Referenz verspricht dem Compiler exklusiven Zugriff. Das Anlegen von `r` macht den älteren Rohzeiger `p` ungültig, das Schreiben über `p` in Zeile 5 ist UB, auch wenn es heute zufällig funktioniert. Der Optimierer darf sich auf dieses Versprechen verlassen und Zugriffe umordnen. Miri prüft solche Regeln mit einem Modell: **Stacked Borrows** (Standard) oder dem neueren, etwas grosszügigeren **Tree Borrows** (`MIRIFLAGS=-Zmiri-tree-borrows`). Beide Modelle sind noch nicht endgültig Teil der Sprachdefinition.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein richtiges Ergebnis beweist bei UB nichts.",
+        "`x` liegt auf dem Stack und wird nicht freigegeben, ein Leck ist das nicht."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "ub-arten",
+      "frage": "Welcher Code führt zu welchem von Miri gefundenen Problem?",
+      "paare": [
+        { "links": "`unsafe { MaybeUninit::<u32>::uninit().assume_init() }`", "rechts": "Nicht initialisierter Speicher wird als Wert benutzt" },
+        { "links": "`unsafe { *ptr.add(len) }` auf einem Slice der Länge `len`", "rechts": "Zugriff ausserhalb der Allokation" },
+        { "links": "`unsafe { std::mem::transmute::<u8, bool>(3) }`", "rechts": "Ungültiger Wert für den Typ" },
+        { "links": "`unsafe { *(bytes.as_ptr().add(1) as *const u32) }`", "rechts": "Falsch ausgerichteter Zugriff" }
+      ],
+      "erklaerung": "Alle vier kompilieren problemlos und laufen auf x86 oft „richtig“. Gerade auf Mikrocontrollern rächen sie sich: Ein falsch ausgerichteter Zugriff kann auf manchen Cortex-M-Kernen einen Hard Fault auslösen. Für ausgerichtete Lesezugriffe aus Byte-Puffern nimmt man `u32::from_le_bytes` oder `ptr::read_unaligned`."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "miri-befehle",
+      "frage": "Ergänze die Befehle, um die Tests eines Crates unter Miri laufen zu lassen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "rustup toolchain install nightly --component {{?}}",
+          "cargo {{?}} miri test",
+          "MIRIFLAGS=\"-Zmiri-tree-borrows\" cargo +nightly miri test"
+        ]
+      },
+      "luecken": [
+        { "loesungen": ["miri"] },
+        { "loesungen": ["+nightly"] }
+      ],
+      "auswahl": ["miri", "+nightly", "+stable", "clippy", "--release"],
+      "erklaerung": "`+nightly` wählt für diesen einen Befehl die Nightly-Toolchain, ohne den Standard zu ändern. Beim ersten Lauf baut Miri eine eigene Variante der Standardbibliothek. Über `MIRIFLAGS` gibt man Optionen weiter, etwa ein anderes Aliasing-Modell oder `-Zmiri-seed=…` für andere Zufallswerte bei Thread-Wechseln."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "grenzen",
+      "frage": "Welche Aussagen über Miri stimmen?",
+      "optionen": [
+        "Miri findet UB nur in Codepfaden, die die Tests tatsächlich ausführen",
+        "Aufrufe in C-Bibliotheken über FFI kann Miri nicht ausführen",
+        "Miri ist um Grössenordnungen langsamer als nativer Code, grosse Tests muss man oft mit `#[cfg_attr(miri, ignore)]` ausnehmen",
+        "Ein Lauf ohne Fund beweist, dass der `unsafe`-Code korrekt ist"
+      ],
+      "korrekt": [0, 1, 2],
+      "erklaerung": "Miri ist ein dynamisches Werkzeug: Es sieht nur, was passiert. Darum braucht es gute Tests, die auch Randfälle des `unsafe`-Codes treffen. Für FFI und Inline-Assembly braucht man Sanitizer (nächste Lektion). Mit `cfg!(miri)` kann man im Test Schleifen verkleinern, damit Miri in vernünftiger Zeit fertig wird.",
+      "begruendungen": [
+        "Richtig.",
+        "Richtig. Miri kennt nur Rust-Code als MIR, einige Systemaufrufe bildet es nach.",
+        "Richtig.",
+        "Miri kann nur zeigen, dass UB vorkommt, nicht, dass es fehlt."
+      ]
+    }
+  ],
+  "praxis": "Jede Crate mit `unsafe`-Code sollte einen CI-Job `cargo +nightly miri test` haben. Viele bekannte Crates wie `hashbrown`, `smallvec` oder `bytes` tun das. Auch in Embedded-Projekten lohnt es sich: Ringpuffer, DMA-Puffer und Zugriffe auf `static mut` testet man auf dem Host unter Miri, bevor sie aufs Board kommen. Im Review fragst du bei jedem neuen `unsafe`-Block: Gibt es einen `// SAFETY:`-Kommentar und einen Test, der unter Miri läuft?",
+  "labor": {
+    "titel": "Miri ausprobieren",
+    "anleitung": "Installiere die Nightly-Toolchain mit Miri und lass die beiden Beispielprogramme aus der Lektion laufen. Wechsle beim Aliasing-Beispiel das Modell auf Tree Borrows.",
+    "befehle": [
+      "rustup toolchain install nightly --component miri",
+      "cargo new ub && cd ub  # Code aus Schritt 1 einfügen",
+      "cargo run",
+      "cargo +nightly miri run",
+      "MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly miri run"
+    ],
+    "beobachtung": "`cargo run` gibt eine beliebige Zahl aus, Miri bricht mit einer Meldung über einen hängenden Zeiger ab. Vergleiche, ob beide Aliasing-Modelle das zweite Beispiel ablehnen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Undefined Behavior",
+      "englisch": "undefined behavior, UB",
+      "erklaerung": "Verhalten, für das die Sprache nichts garantiert. Der Compiler darf annehmen, dass es nie vorkommt."
+    },
+    {
+      "begriff": "Miri",
+      "englisch": "Miri",
+      "erklaerung": "Interpreter für die MIR von rustc, der Undefined Behavior zur Laufzeit erkennt. Nur auf nightly verfügbar."
+    },
+    {
+      "begriff": "Rohzeiger",
+      "englisch": "raw pointer",
+      "erklaerung": "Zeiger `*const T` oder `*mut T` ohne vom Borrow-Checker geprüfte Lebensdauer. Dereferenzieren nur in `unsafe`."
+    },
+    {
+      "begriff": "Stacked Borrows",
+      "englisch": "Stacked Borrows / Tree Borrows",
+      "erklaerung": "Modelle für die Aliasing-Regeln von Referenzen und Zeigern, mit denen Miri unerlaubte Zugriffe erkennt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "Miri auf GitHub",
+      "url": "https://github.com/rust-lang/miri"
+    },
+    {
+      "titel": "The Rustonomicon",
+      "url": "https://doc.rust-lang.org/nomicon/"
+    }
+  ]
+}

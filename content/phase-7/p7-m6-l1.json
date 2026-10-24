@@ -1,0 +1,160 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m6-l1",
+  "phase": 7,
+  "modul": "7.6 Debugging auf der Zielhardware",
+  "titel": "probe-rs, RTT und defmt",
+  "lernziele": [
+    "probe-rs als Runner für `cargo run` einrichten",
+    "SWD, JTAG und RTT einordnen",
+    "defmt-Logging einbinden und mit GDB über probe-rs debuggen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Was ist **probe-rs**?",
+      "optionen": [
+        "Eine in Rust geschriebene Debug-Werkzeugsammlung, die über eine Debug-Probe flasht, Logs per RTT liest und als GDB- oder DAP-Server dient",
+        "Ein Hardware-Debugger, den man kaufen muss",
+        "Ein Testframework für Rust-Unit-Tests",
+        "Ein Emulator für Cortex-M-Chips"
+      ],
+      "korrekt": 0,
+      "erklaerung": "probe-rs spricht direkt mit Debug-Probes wie ST-Link, J-Link, CMSIS-DAP (z. B. Raspberry Pi Debug Probe) oder ESP-USB-JTAG. Es ersetzt die klassische Kette aus OpenOCD und GDB weitgehend. Die Werkzeuge kommen im Paket `probe-rs-tools`: `probe-rs` (mit Unterbefehlen wie `run`, `attach`, `gdb`, `list`, `info`), `cargo flash` und `cargo embed`. VS Code bindet es über den DAP-Server ein.",
+      "begruendungen": [
+        "Richtig.",
+        "probe-rs ist Software, die mit vorhandenen Probes arbeitet.",
+        "Tests auf dem Gerät sind möglich, aber nicht der Kern von probe-rs.",
+        "probe-rs arbeitet mit echter Hardware, nicht mit Emulation."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die `.cargo/config.toml`, damit `cargo run` die Firmware flasht und die Logs anzeigt.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[target.thumbv7em-none-eabihf]",
+          "{{?}} = \"probe-rs run --chip STM32F411RETx\"",
+          "rustflags = [\"-C\", \"link-arg=-Tlink.x\", \"-C\", \"link-arg=-T{{?}}\"]",
+          "",
+          "[env]",
+          "{{?}} = \"debug\""
+        ]
+      },
+      "luecken": [{ "loesungen": ["runner"] }, { "loesungen": ["defmt.x"] }, { "loesungen": ["DEFMT_LOG"] }],
+      "auswahl": ["runner", "linker", "defmt.x", "memory.x", "DEFMT_LOG", "RUST_LOG"],
+      "erklaerung": "Cargo ruft den `runner` mit dem Pfad zum ELF auf. `probe-rs run` flasht, startet und zeigt RTT/defmt-Ausgaben, bis du abbrichst oder die Firmware endet. `defmt.x` ist das Linkerskript von defmt, das den Abschnitt für die Formatstrings anlegt. `DEFMT_LOG` filtert Logstufen schon beim Kompilieren. `memory.x` wird von `link.x` aus `cortex-m-rt` selbst eingebunden."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Debug-Schnittstellen zu.",
+      "paare": [
+        { "links": "SWD", "rechts": "Zwei Leitungen (SWDIO, SWCLK), Standard bei Cortex-M" },
+        { "links": "JTAG", "rechts": "Vier bis fünf Leitungen, kann mehrere Chips in einer Kette ansprechen" },
+        { "links": "RTT", "rechts": "Ringpuffer im RAM des Ziels, den die Probe über SWD im Hintergrund liest" },
+        { "links": "SWO/ITM", "rechts": "Eigene Trace-Leitung für Ausgaben und Ereignisse, ohne RAM-Puffer" }
+      ],
+      "erklaerung": "**RTT** (*Real-Time Transfer*) braucht keine zusätzlichen Pins: Die Firmware schreibt in einen Puffer, die Probe liest ihn über den Debug-Port, während die CPU weiterläuft. Eine Meldung kostet nur wenige Mikrosekunden statt Millisekunden über UART."
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "defmt einbinden",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "use cortex_m_rt::entry;",
+          "use defmt_rtt as _;      // Transport: RTT",
+          "use panic_probe as _;    // Panik-Handler, meldet über defmt",
+          "",
+          "#[derive(defmt::Format)]",
+          "struct Messung { kanal: u8, wert: i16 }",
+          "",
+          "#[entry]",
+          "fn main() -> ! {",
+          "    let m = Messung { kanal: 2, wert: -17 };",
+          "    defmt::info!(\"Start, erste Messung {}\", m);",
+          "    defmt::debug!(\"Rohwert {=i16:#x}\", m.wert);",
+          "    loop {}",
+          "}"
+        ]
+      },
+      "text": "`defmt-rtt` legt den RTT-Puffer an (Standard 1024 Byte, änderbar mit `DEFMT_RTT_BUFFER_SIZE`). `panic-probe` gibt mit dem Feature `print-defmt` Panik-Meldungen über defmt aus und lässt `probe-rs run` mit Fehlercode enden. Auf dem PC dekodiert probe-rs die Meldungen mit Hilfe des ELF, inklusive Dateiname und Zeile."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Nach einem Update der Firmware zeigt `probe-rs` nur noch unsinnige oder fehlende defmt-Meldungen. Was ist die wahrscheinlichste Ursache?",
+      "optionen": [
+        "Das ELF auf dem PC passt nicht zur geflashten Firmware, darum stimmen die String-Indizes nicht mehr",
+        "Der RTT-Puffer ist zu klein",
+        "defmt funktioniert nur im Debug-Profil",
+        "Die Probe ist defekt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "defmt überträgt nur Indizes, die Texte stehen im ELF auf dem PC. Wer beim Anhängen (`probe-rs attach`) ein anderes ELF angibt als das geflashte, bekommt Unsinn. Darum gehört zu jedem Release das passende ELF ins Archiv. defmt bettet eine Versionsangabe ein, die solche Fälle oft erkennt.",
+      "begruendungen": [
+        "Richtig.",
+        "Ein zu kleiner Puffer führt zu verlorenen oder blockierenden Meldungen, nicht zu falschem Text.",
+        "defmt funktioniert auch in Release-Builds, das ist der Normalfall.",
+        "Ein Defekt würde eher gar keine Verbindung erlauben."
+      ]
+    },
+    {
+      "typ": "reihenfolge",
+      "frage": "Du willst mit GDB einen Breakpoint auf dem Gerät setzen. Bringe die Schritte in die richtige Reihenfolge.",
+      "elemente": [
+        "Firmware mit Debug-Infos bauen (`debug = 2` im Profil)",
+        "Firmware flashen, z. B. mit `probe-rs download --chip STM32F411RETx <elf>`",
+        "GDB-Server starten: `probe-rs gdb --chip STM32F411RETx`",
+        "GDB mit dem ELF starten und `target remote :1337` eingeben",
+        "Mit `break regler` einen Breakpoint setzen und mit `continue` fortsetzen"
+      ],
+      "erklaerung": "Der GDB-Server von probe-rs lauscht standardmässig auf Port 1337. GDB braucht das ELF für Symbole. Viele bevorzugen inzwischen den DAP-Server von probe-rs mit der VS-Code-Erweiterung: Breakpoints, Variablenansicht und RTT-Ausgabe in einer Oberfläche. Bei `cargo embed` aktiviert man GDB im Abschnitt `[default.gdb]` der `Embed.toml`."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "`probe-rs run` meldet beim Start, dass keine Probe gefunden wurde. Welcher erste Schritt ist am sinnvollsten?",
+      "optionen": [
+        "`probe-rs list` ausführen, um zu sehen, ob die Probe erkannt wird, und unter Linux die udev-Regeln prüfen",
+        "Die Firmware mit `opt-level = 0` neu bauen",
+        "`#![no_main]` entfernen",
+        "Den Chip-Namen in `memory.x` eintragen"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`probe-rs list` zeigt alle angeschlossenen Probes. Ist die Liste leer, liegt es an Kabel, Treiber oder Rechten. Unter Linux braucht der Benutzer über udev-Regeln Zugriff auf das USB-Gerät, die probe-rs-Dokumentation stellt sie bereit. `probe-rs info` prüft danach, ob der Chip am Debug-Port antwortet.",
+      "begruendungen": [
+        "Richtig.",
+        "Die Optimierung hat nichts mit der Erkennung der Probe zu tun.",
+        "Das Attribut betrifft das Programm, nicht die USB-Verbindung.",
+        "`memory.x` beschreibt den Speicher für den Linker, nicht die Probe."
+      ]
+    }
+  ],
+  "praxis": "Ein modernes Embedded-Rust-Setup sieht meist so aus: `probe-rs run` als Runner, `defmt` mit `defmt-rtt` für Logs, `panic-probe` für Paniken, flip-link als Linker, VS Code mit probe-rs-Erweiterung zum Debuggen. Die Vorlage `knurling-rs/app-template` liefert genau diese Kombination. Mit `probe-rs` lassen sich auch Tests direkt auf dem Gerät ausführen, etwa mit `embedded-test` oder `defmt-test`.",
+  "labor": {
+    "titel": "probe-rs installieren",
+    "anleitung": "Installiere die probe-rs-Werkzeuge und sieh dir die Unterbefehle an. Mit einem Board und Probe kannst du danach eine Vorlage flashen.",
+    "befehle": [
+      "cargo install probe-rs-tools --locked",
+      "probe-rs --help",
+      "probe-rs list",
+      "probe-rs chip list | grep STM32F411"
+    ],
+    "beobachtung": "`probe-rs chip list` zeigt die bekannten Chipnamen, die du für `--chip` brauchst. Ohne angeschlossene Probe bleibt `probe-rs list` leer."
+  },
+  "begriffe": [
+    { "begriff": "Debug-Probe", "englisch": "debug probe", "erklaerung": "Adapter zwischen PC und Debug-Port des Chips, z. B. ST-Link, J-Link oder CMSIS-DAP." },
+    { "begriff": "SWD", "englisch": "serial wire debug", "erklaerung": "Zweidraht-Debug-Schnittstelle von ARM." },
+    { "begriff": "RTT", "englisch": "real-time transfer", "erklaerung": "Datenübertragung über einen RAM-Puffer, den die Probe über den Debug-Port liest." },
+    { "begriff": "Runner", "englisch": "runner", "erklaerung": "Programm, das Cargo bei `cargo run` mit dem gebauten Binary aufruft." }
+  ],
+  "weiterlesen": [
+    { "titel": "probe-rs", "url": "https://probe.rs/" },
+    { "titel": "defmt Book", "url": "https://defmt.ferrous-systems.com/" }
+  ]
+}

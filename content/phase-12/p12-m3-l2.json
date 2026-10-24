@@ -1,0 +1,224 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p12-m3-l2",
+  "phase": 12,
+  "modul": "12.3 Security für Embedded-Systeme",
+  "titel": "Supply-Chain-Sicherheit mit Cargo",
+  "lernziele": [
+    "Angriffsflächen der Rust-Lieferkette benennen: Typosquatting, build.rs und prozedurale Makros",
+    "Bekannte Schwachstellen mit der RustSec-Datenbank und cargo audit finden",
+    "SBOMs erzeugen und Abhängigkeiten mit cargo-vet nachvollziehbar prüfen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "id": "build-rs",
+      "frage": "Du fügst ein neues Crate mit `cargo add` hinzu und führst nur `cargo build` aus, ohne das Programm je zu starten. Kann fremder Code bereits auf deinem Rechner laufen?",
+      "optionen": [
+        "Ja: Build-Skripte (`build.rs`) und prozedurale Makros des Crates und seiner Abhängigkeiten werden beim Übersetzen mit deinen Benutzerrechten ausgeführt",
+        "Nein, Cargo lädt nur Quellcode herunter und übersetzt ihn",
+        "Nur wenn das Crate `unsafe` verwendet",
+        "Nur bei `cargo install`, nicht bei `cargo build`"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`build.rs` ist ein normales Rust-Programm, das Cargo vor dem eigentlichen Crate übersetzt und ausführt. Prozedurale Makros laufen im Compiler. Beide können Dateien lesen, Netzwerkverbindungen öffnen oder Umgebungsvariablen mit Zugangsdaten auslesen, auch auf dem CI-Server. Deshalb sind sie in einer Supply-Chain-Prüfung besonders interessant.",
+      "begruendungen": [
+        "Richtig.",
+        "Das Übersetzen selbst führt bereits fremden Code aus.",
+        "`unsafe` hat damit nichts zu tun. Ein bösartiges `build.rs` kommt ohne `unsafe` aus.",
+        "`cargo build`, `cargo check`, `cargo test` und auch rust-analyzer in der IDE lösen Build-Skripte und Makros aus."
+      ]
+    },
+    {
+      "typ": "zuordnen",
+      "id": "angriffe",
+      "frage": "Ordne die Angriffe auf die Lieferkette zu.",
+      "paare": [
+        {
+          "links": "Typosquatting",
+          "rechts": "Ein Crate mit ähnlichem Namen wie ein beliebtes (2022: `rustdecimal` statt `rust_decimal`)"
+        },
+        {
+          "links": "Übernommenes Konto",
+          "rechts": "Angreifer veröffentlicht mit gestohlenem Token eine neue Version eines echten Crates"
+        },
+        {
+          "links": "Bösartiges `build.rs`",
+          "rechts": "Liest beim Build Umgebungsvariablen des CI aus und sendet sie weg"
+        },
+        {
+          "links": "Verwundbare Abhängigkeit",
+          "rechts": "Ein ehrliches Crate mit einem bekannten Fehler, für den es eine RustSec-Meldung gibt"
+        }
+      ],
+      "erklaerung": "Das Crate `rustdecimal` wurde 2022 entdeckt und entfernt. Es enthielt Code, der gezielt in CI-Umgebungen aktiv wurde (Advisory RUSTSEC-2022-0042). Gegenmassnahmen: Namen beim `cargo add` genau prüfen, `Cargo.lock` einchecken, Builds mit `--locked`, möglichst wenige Abhängigkeiten, und CI-Jobs, die Abhängigkeiten bauen, ohne Zugriff auf Geheimnisse."
+    },
+    {
+      "typ": "terminal-deuten",
+      "id": "cargo-audit",
+      "frage": "Was sagt dir diese Ausgabe, und was ist zu tun?",
+      "terminal": {
+        "befehl": "cargo audit",
+        "ausgabe": [
+          "    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`",
+          "      Loaded 1350 security advisories (from /home/user/.cargo/advisory-db)",
+          "    Scanning Cargo.lock for vulnerabilities (3 crate dependencies)",
+          "Crate:     smallvec",
+          "Version:   0.6.13",
+          "Title:     Buffer overflow in SmallVec::insert_many",
+          "Date:      2021-01-08",
+          "ID:        RUSTSEC-2021-0003",
+          "URL:       https://rustsec.org/advisories/RUSTSEC-2021-0003",
+          "Severity:  9.8 (critical)",
+          "Solution:  Upgrade to >=0.6.14, <1.0.0 OR >=1.6.1",
+          "",
+          "error: 1 vulnerability found!"
+        ]
+      },
+      "optionen": [
+        "Im `Cargo.lock` steht eine `smallvec`-Version mit kritischer, bekannter Schwachstelle. Auf eine korrigierte Version aktualisieren und prüfen, ob die betroffene Funktion verwendet wird",
+        "`cargo audit` hat einen Fehler im eigenen Code gefunden",
+        "Die Meldung ist irrelevant, weil Rust speichersicher ist",
+        "Die Advisory-Datenbank ist veraltet und muss neu installiert werden"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Die **RustSec-Datenbank** sammelt Sicherheitsmeldungen für Crates. `cargo audit` gleicht sie mit `Cargo.lock` ab. Hier lag der Fehler in `unsafe`-Code innerhalb von `smallvec`: Speichersicherheit gilt nur, wenn auch das `unsafe` in den Abhängigkeiten korrekt ist. Für den CRA ist zudem wichtig, ob die Lücke im eigenen Produkt ausnutzbar ist. Das Ergebnis dieser Analyse dokumentiert man, z. B. als VEX-Aussage.",
+      "begruendungen": [
+        "Richtig.",
+        "`cargo audit` prüft nur Abhängigkeiten gegen bekannte Meldungen, nicht den eigenen Code.",
+        "Der Fehler steckt in `unsafe`-Code, wo die Garantien nicht greifen.",
+        "Sie wurde gerade geladen. Die Meldung ist echt."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "SBOM: Wissen, was drin ist",
+      "text": "Eine **SBOM** (*software bill of materials*) listet alle Softwarekomponenten eines Produkts mit Version und Herkunft, in Formaten wie CycloneDX oder SPDX. Der CRA verlangt sie als Teil der technischen Dokumentation. In Rust gibt es zwei Wege:\n\n- `cargo cyclonedx` erzeugt aus den Cargo-Metadaten eine CycloneDX-Datei pro Crate\n- `cargo auditable build` bettet die Abhängigkeitsliste komprimiert in das Binary ein. `cargo audit bin <datei>` kann ein ausgeliefertes Binary später prüfen, auch ohne Quellcode\n\nFür Embedded-Firmware gehören auch C-Bibliotheken, Bootloader und Vendor-HALs in die SBOM. Cargo kennt sie nicht, sie müssen ergänzt werden."
+    },
+    {
+      "typ": "multiple-choice",
+      "id": "cargo-vet",
+      "frage": "Wozu dient **cargo-vet** im Unterschied zu `cargo audit`?",
+      "optionen": [
+        "Es hält fest, dass jede Abhängigkeit in einer bestimmten Version von einer vertrauenswürdigen Person geprüft wurde, und kann Prüfergebnisse anderer Organisationen importieren",
+        "Es sucht bekannte Schwachstellen in der RustSec-Datenbank",
+        "Es erzeugt die SBOM im CycloneDX-Format",
+        "Es prüft Lizenzen und verbietet bestimmte Crates"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo audit` findet **bekannte** Probleme. `cargo-vet` beantwortet eine andere Frage: Hat jemand diesen Code angesehen? Audits werden mit Kriterien wie `safe-to-deploy` oder `safe-to-run` in `supply-chain/audits.toml` festgehalten. Organisationen wie Mozilla und Google veröffentlichen ihre Audits, die man importieren kann. Lizenzen und verbotene Crates prüft `cargo deny` (Phase 4 und 8).",
+      "begruendungen": [
+        "Richtig.",
+        "Das ist die Aufgabe von `cargo audit` (oder der Advisory-Prüfung in `cargo deny`).",
+        "Das macht `cargo cyclonedx`.",
+        "Das ist `cargo deny` mit den Prüfungen `licenses` und `bans`."
+      ]
+    },
+    {
+      "typ": "fehler-finden",
+      "id": "ci-geheimnisse",
+      "frage": "Diese CI-Pipeline baut und veröffentlicht Firmware. Welche Zeile ist aus Supply-Chain-Sicht am gefährlichsten?",
+      "code": {
+        "sprache": "yaml",
+        "datei": ".github/workflows/release.yml",
+        "zeilen": [
+          "jobs:",
+          "  release:",
+          "    runs-on: ubuntu-latest",
+          "    env:",
+          "      FIRMWARE_SIGNING_KEY: ${{ secrets.FIRMWARE_SIGNING_KEY }}",
+          "    steps:",
+          "      - uses: actions/checkout@v4",
+          "      - run: cargo build --release --locked",
+          "      - run: cargo audit",
+          "      - run: ./sign.sh target/release/firmware.bin"
+        ]
+      },
+      "fehlerZeile": 5,
+      "erklaerung": "Der Signaturschlüssel steht als Umgebungsvariable für den **ganzen Job** bereit, also auch während `cargo build`, wenn fremde `build.rs` und Makros laufen. Ein kompromittiertes Crate könnte ihn auslesen. Besser: bauen und signieren in getrennten Jobs, den Schlüssel nur im Signierschritt bereitstellen, idealerweise gar nicht als Datei, sondern über ein HSM oder einen Signierdienst. `--locked` in Zeile 8 ist dagegen genau richtig."
+    },
+    {
+      "typ": "lueckentext",
+      "id": "luecken-supply",
+      "frage": "Ergänze.",
+      "text": "Bekannte Schwachstellen in Abhängigkeiten findet `cargo {{?}}` mit der {{?}}-Datenbank. Mit `cargo {{?}} build` wird die Abhängigkeitsliste in das Binary eingebettet.",
+      "luecken": [
+        {
+          "loesungen": [
+            "audit"
+          ]
+        },
+        {
+          "loesungen": [
+            "RustSec"
+          ]
+        },
+        {
+          "loesungen": [
+            "auditable"
+          ]
+        }
+      ],
+      "auswahl": [
+        "audit",
+        "RustSec",
+        "auditable",
+        "vet",
+        "CVE-Rust",
+        "sbom"
+      ],
+      "erklaerung": "`cargo vet` prüft dagegen, ob jemand den Code begutachtet hat. Eine eigene Datenbank „CVE-Rust“ gibt es nicht, RustSec-Meldungen werden aber auch an OSV und teils als CVE weitergegeben."
+    }
+  ],
+  "praxis": "Ein typisches Embedded-Rust-Projekt hat schnell 100 und mehr transitive Abhängigkeiten. Behandle sie wie zugekaufte Teile: Liste führen (SBOM), Lieferanten kennen (cargo-vet, Maintainer), bekannte Mängel überwachen (`cargo audit` täglich im CI, nicht nur beim Release) und Updates planen. Für den sicherheitskritischen Kern lohnt sich eine kurze, gut begründete Allowlist. Und: Halte Geheimnisse von jedem Schritt fern, der fremden Code übersetzt.",
+  "labor": {
+    "titel": "Lieferkette eines Projekts untersuchen",
+    "anleitung": "Füge in einem Testprojekt bewusst eine alte Version mit bekannter Schwachstelle hinzu, prüfe mit `cargo audit`, erzeuge eine SBOM und sieh dir den Abhängigkeitsbaum an.",
+    "befehle": [
+      "cargo install cargo-audit cargo-cyclonedx cargo-auditable --locked",
+      "cargo add smallvec@=0.6.13",
+      "cargo audit",
+      "cargo cyclonedx --format json",
+      "cargo tree -e build",
+      "cargo auditable build --release && cargo audit bin target/release/<binary>"
+    ],
+    "beobachtung": "`cargo audit` meldet RUSTSEC-2021-0003 mit Schweregrad und Lösung. `cargo tree -e build` zeigt, welche Crates Build-Abhängigkeiten mitbringen, also wo `build.rs` ausgeführt wird. Das Binary aus `cargo auditable` lässt sich ohne Quellcode prüfen."
+  },
+  "begriffe": [
+    {
+      "begriff": "Lieferkette",
+      "englisch": "software supply chain",
+      "erklaerung": "Alle fremden Komponenten, Werkzeuge und Dienste, die in ein Softwareprodukt einfliessen."
+    },
+    {
+      "begriff": "SBOM",
+      "englisch": "software bill of materials",
+      "erklaerung": "Stückliste aller Softwarekomponenten eines Produkts mit Version und Herkunft."
+    },
+    {
+      "begriff": "Typosquatting",
+      "englisch": "typosquatting",
+      "erklaerung": "Veröffentlichung eines bösartigen Pakets unter einem Namen, der einem beliebten Paket zum Verwechseln ähnlich ist."
+    },
+    {
+      "begriff": "Build-Skript",
+      "englisch": "build script",
+      "erklaerung": "`build.rs`, ein Rust-Programm, das Cargo vor dem Übersetzen eines Crates ausführt."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "RustSec Advisory Database",
+      "url": "https://rustsec.org/"
+    },
+    {
+      "titel": "Rust Blog: Security advisory: malicious crate rustdecimal",
+      "url": "https://blog.rust-lang.org/2022/05/10/malicious-crate-rustdecimal/"
+    },
+    {
+      "titel": "The Cargo Book: Build Scripts",
+      "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html"
+    }
+  ]
+}

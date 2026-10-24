@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p1-m1-l2",
+  "phase": 1,
+  "modul": "1.1 Vom Quellcode zum Object-File",
+  "titel": "Codegen-Units und inkrementelle Builds",
+  "lernziele": [
+    "Erklären, warum rustc ein Crate in mehrere Codegen-Units aufteilt",
+    "Beschreiben, was im Verzeichnis `target/debug/incremental` liegt und wann es hilft",
+    "Mit `cargo build --timings` und `cargo tree` die Ursachen langsamer Builds finden"
+  ],
+  "dauerMinuten": 6,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein Crate ist in Rust **eine** Übersetzungseinheit. Trotzdem erzeugt `rustc` für ein einziges Crate oft mehrere `.o`-Dateien. Warum?",
+      "optionen": [
+        "rustc teilt das Crate für die Codegenerierung in Codegen-Units auf, die LLVM parallel übersetzt",
+        "Jedes Modul (`mod`) wird zu einem eigenen Object-File",
+        "Jede Funktion bekommt ihr eigenes Object-File, damit der Linker Unbenutztes entfernen kann"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Analyse und Typprüfung laufen über das ganze Crate. Für die teure Codegenerierung zerlegt rustc den Code danach in **Codegen-Units** (CGUs). Jede CGU ist ein eigenes LLVM-Modul und wird von einem eigenen Thread übersetzt. Standard: bis zu 16 CGUs im Release-Profil, bis zu 256 bei inkrementellen Builds.",
+      "begruendungen": [
+        "Richtig. So nutzt rustc mehrere CPU-Kerne innerhalb eines Crates.",
+        "Die Aufteilung folgt nicht strikt den Modulen. rustc partitioniert nach eigenen Regeln, oft grob entlang der Module, aber nicht eins zu eins.",
+        "Dafür gibt es Funktions-Sektionen (`.text.name`) innerhalb eines Object-Files, keine eigenen Dateien."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Der Preis der Parallelität",
+      "text": "LLVM optimiert jede CGU für sich. Ruft eine Funktion in CGU 1 eine kleine Funktion aus CGU 2 auf, kann LLVM sie nicht ohne Weiteres inlinen. Mehr CGUs bedeuten also **schnellere Builds, aber etwas langsameren Code**.\n\nDeshalb setzen viele Projekte für finale Release-Builds `codegen-units = 1` im Profil. Der Build dauert länger, dafür sieht LLVM das ganze Crate am Stück. Im Debug-Profil zählt dagegen jede Sekunde Wartezeit, dort bleiben viele CGUs sinnvoll.",
+      "code": {
+        "sprache": "toml",
+        "datei": "Cargo.toml",
+        "zeilen": [
+          "[profile.release]",
+          "codegen-units = 1   # langsamer bauen, besser optimieren"
+        ]
+      }
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Was findest du in einem Cargo-Projekt nach `cargo build` wo?",
+      "paare": [
+        {
+          "links": "`target/debug/deps/`",
+          "rechts": "Fertige Crates: `.rlib`, `.rmeta` und das Binary mit Hash im Namen"
+        },
+        {
+          "links": "`target/debug/incremental/`",
+          "rechts": "Abhängigkeitsgraph der Abfragen und zwischengespeicherte Object-Files pro CGU"
+        },
+        {
+          "links": "`target/debug/build/`",
+          "rechts": "Kompilierte Build-Skripte und deren Ausgabeverzeichnis `out/`"
+        },
+        {
+          "links": "`target/cargo-timings/`",
+          "rechts": "HTML-Bericht von `cargo build --timings`"
+        }
+      ],
+      "erklaerung": "Im Ordner eines Crates unter `incremental/` liegen u. a. `dep-graph.bin`, `query-cache.bin` und mehrere `.o`-Dateien, eine pro CGU. Ändert sich nur eine Funktion, kann rustc unveränderte CGUs wiederverwenden."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Was speichert die **inkrementelle Kompilierung** (incremental compilation) zwischen zwei Builds?",
+      "optionen": [
+        "Ergebnisse von Compiler-Abfragen und die Object-Files der CGUs, damit nur Betroffenes neu berechnet wird",
+        "Nur eine Liste geänderter Dateien. Geänderte Dateien werden komplett neu übersetzt, der Rest nicht",
+        "Die fertigen Binaries aller Abhängigkeiten aus crates.io, mehr nicht"
+      ],
+      "korrekt": 0,
+      "erklaerung": "rustc ist intern als System von **Abfragen** (queries) gebaut: „Typ dieser Funktion“, „MIR dieser Funktion“ usw. Der Abhängigkeitsgraph merkt sich, welche Abfrage welche Eingaben brauchte. Nach einer Änderung prüft rustc, welche Ergebnisse noch stimmen, und erzeugt nur betroffene CGUs neu. Im Release-Profil ist das standardmässig aus.",
+      "begruendungen": [
+        "Richtig. Das ist feiner als dateiweise.",
+        "Rust übersetzt nicht dateiweise. Die Granularität sind Abfragen und CGUs.",
+        "Abhängigkeiten werden ohnehin nur einmal gebaut und als `.rlib` wiederverwendet. Das ist keine inkrementelle Kompilierung."
+      ]
+    },
+    {
+      "typ": "terminal-deuten",
+      "frage": "Ein frisches Projekt mit `serde` (Feature `derive`) wird zum ersten Mal gebaut. Was dauert hier den Grossteil der 37 Sekunden?",
+      "terminal": {
+        "befehl": "cargo build",
+        "ausgabe": [
+          "   Compiling proc-macro2 v1.0.107",
+          "   Compiling unicode-ident v1.0.27",
+          "   Compiling quote v1.0.47",
+          "   Compiling serde_core v1.0.229",
+          "   Compiling serde v1.0.229",
+          "   Compiling syn v3.0.9",
+          "   Compiling serde_derive v1.0.229",
+          "   Compiling messwerte v0.1.0 (/home/user/messwerte)",
+          "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 37.69s"
+        ]
+      },
+      "optionen": [
+        "Die Abhängigkeiten, vor allem die Proc-Macro-Kette `proc-macro2` → `quote` → `syn` → `serde_derive`",
+        "Das eigene Crate `messwerte`, weil es zuletzt kommt",
+        "Das Herunterladen von crates.io"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Beim ersten Build müssen alle Abhängigkeiten übersetzt werden. `syn` ist ein vollständiger Rust-Parser und gross. Weil `serde_derive` auf `syn` wartet, entsteht eine lange **kritische Kette**. Ein erneutes `cargo build` nach einer Änderung in `main.rs` dauert danach unter einer Sekunde.",
+      "begruendungen": [
+        "Richtig. Proc-Macro-Abhängigkeiten sind ein klassischer Buildzeit-Treiber.",
+        "Das eigene Crate ist hier winzig. Es kommt zuletzt, weil es auf alle anderen wartet.",
+        "Downloads würden als `Downloading`/`Downloaded` erscheinen und sind zwischengespeichert. Die Zeit steckt im Kompilieren."
+      ]
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die Befehle: Zuerst den Abhängigkeitsbaum anzeigen, dann einen HTML-Bericht über die Buildzeit jedes Crates erzeugen.",
+      "code": {
+        "sprache": "bash",
+        "zeilen": [
+          "cargo {{?}}",
+          "cargo build {{?}}"
+        ]
+      },
+      "luecken": [
+        {
+          "loesungen": [
+            "tree"
+          ]
+        },
+        {
+          "loesungen": [
+            "--timings"
+          ]
+        }
+      ],
+      "auswahl": [
+        "tree",
+        "--timings",
+        "deps",
+        "--verbose"
+      ],
+      "erklaerung": "`cargo tree` zeigt, welches Crate welches zieht, auch doppelte Versionen. `cargo build --timings` schreibt einen Bericht nach `target/cargo-timings/`: ein Balken pro Crate, die Parallelität über die Zeit und welche Crates auf andere warten. `--verbose` zeigt die `rustc`-Aufrufe, aber keine Zeiten."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Welche Gründe machen Rust-Builds typischerweise langsamer als vergleichbare C-Builds?",
+      "optionen": [
+        "Monomorphisierung: generischer Code wird pro verwendetem Typ neu erzeugt",
+        "Proc-Macros müssen vor ihren Nutzern gebaut und ausgeführt werden",
+        "Das ganze Crate ist eine Übersetzungseinheit und wird bei Änderungen gemeinsam analysiert",
+        "rustc interpretiert den Code vor dem Übersetzen einmal vollständig"
+      ],
+      "korrekt": [
+        0,
+        1,
+        2
+      ],
+      "erklaerung": "Generics und Makros erzeugen viel Code, den LLVM übersetzen muss. Grosse Crates sind schwerer zu parallelisieren als viele kleine. Abhilfen: Projekt in mehrere Crates eines Workspaces aufteilen, `cargo check` statt `cargo build` beim Entwickeln, schnellere Linker (Modul 1.2).",
+      "begruendungen": [
+        "Richtig. Jede Instanz wie `Vec<u8>` und `Vec<String>` ist eigener Maschinencode.",
+        "Richtig. Sie liegen oft auf dem kritischen Pfad, wie bei `syn`.",
+        "Richtig. Ein riesiges Crate bremst Parallelität und Inkrementalität.",
+        "rustc interpretiert nichts. Nur `const`-Ausdrücke werden zur Compilezeit ausgewertet, und das ist selten der Engpass."
+      ]
+    }
+  ],
+  "praxis": "Klagt das Team über lange Builds, beginnt die Analyse mit `cargo build --timings`. Typische Befunde: ein grosses Crate auf dem kritischen Pfad (aufteilen), schwere Proc-Macro-Ketten (Features prüfen, z. B. `default-features = false`) und ein langer Link-Schritt am Ende (anderer Linker). Für die tägliche Arbeit reicht oft `cargo check`, das nur bis zur Analyse läuft und keinen Maschinencode erzeugt.",
+  "labor": {
+    "titel": "Inkrementell vs. frisch",
+    "anleitung": "Lege ein Projekt mit `serde` an und miss, wie sich ein frischer Build, ein No-Op-Build und ein Build nach einer kleinen Änderung unterscheiden.",
+    "befehle": [
+      "cargo new messwerte && cd messwerte && cargo add serde --features derive",
+      "cargo build --timings",
+      "cargo build",
+      "touch src/main.rs && cargo build",
+      "ls target/debug/incremental/*/*/"
+    ],
+    "beobachtung": "Der erste Build dauert zig Sekunden, der zweite meldet sofort `Finished`. Nach `touch` wird nur `messwerte` neu übersetzt, in weniger als einer Sekunde. Im `incremental`-Ordner liegen `dep-graph.bin`, `query-cache.bin` und mehrere `.o`-Dateien, eine pro CGU."
+  },
+  "begriffe": [
+    {
+      "begriff": "Codegen-Unit",
+      "englisch": "codegen unit, CGU",
+      "erklaerung": "Teil eines Crates, den LLVM als eigenes Modul parallel zu anderen übersetzt."
+    },
+    {
+      "begriff": "Inkrementelle Kompilierung",
+      "englisch": "incremental compilation",
+      "erklaerung": "rustc speichert Zwischenergebnisse und berechnet nach Änderungen nur Betroffenes neu."
+    },
+    {
+      "begriff": "Kritischer Pfad",
+      "englisch": "critical path",
+      "erklaerung": "Längste Kette voneinander abhängiger Crates. Sie bestimmt die minimale Buildzeit trotz Parallelität."
+    },
+    {
+      "begriff": "Proc-Macro",
+      "englisch": "procedural macro",
+      "erklaerung": "Makro als eigenes Crate, das zur Compilezeit Rust-Code erzeugt, z. B. `#[derive(Serialize)]`."
+    }
+  ],
+  "weiterlesen": [
+    {
+      "titel": "The Cargo Book: Profiles (codegen-units, incremental)",
+      "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+    },
+    {
+      "titel": "The Cargo Book: Reporting build timings",
+      "url": "https://doc.rust-lang.org/cargo/reference/timings.html"
+    }
+  ]
+}

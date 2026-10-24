@@ -1,0 +1,157 @@
+{
+  "$schema": "../../schema/lesson.schema.json",
+  "id": "p7-m3-l2",
+  "phase": 7,
+  "modul": "7.3 Speicher ohne Heap",
+  "titel": "Heap in no_std und Stackgrösse abschätzen",
+  "lernziele": [
+    "Einen Heap mit `embedded-alloc` und `#[global_allocator]` einrichten",
+    "Abwägen, wann ein Heap auf dem Mikrocontroller trotzdem sinnvoll ist",
+    "Den Stackbedarf abschätzen und Stacküberläufe mit flip-link abfangen"
+  ],
+  "dauerMinuten": 7,
+  "schritte": [
+    {
+      "typ": "multiple-choice",
+      "frage": "Ein `no_std`-Projekt schreibt `extern crate alloc;` und benutzt `alloc::vec::Vec`. Was fehlt noch, damit es linkt?",
+      "optionen": [
+        "Ein Allokator, der mit `#[global_allocator]` registriert ist, z. B. aus `embedded-alloc`",
+        "Nichts, `alloc` bringt einen eigenen Allokator mit",
+        "Die Standardbibliothek `std`",
+        "Ein Betriebssystem, das `malloc` bereitstellt"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Das Crate `alloc` enthält `Box`, `Vec`, `String`, `Rc` und `Arc`, aber keinen Allokator. Unter `std` liefert das Betriebssystem den Speicher, auf einem Mikrocontroller musst du ihn selbst bereitstellen: ein `static` vom Typ eines Allokators, markiert mit `#[global_allocator]`, und ein RAM-Bereich, den er verwalten darf.",
+      "begruendungen": [
+        "Richtig.",
+        "`alloc` definiert nur die Schnittstelle (`GlobalAlloc`) und die Typen.",
+        "`std` gibt es auf bare metal nicht.",
+        "Auf bare metal gibt es kein Betriebssystem."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "embedded-alloc einrichten",
+      "code": {
+        "sprache": "rust",
+        "datei": "src/main.rs",
+        "zeilen": [
+          "#![no_std]",
+          "#![no_main]",
+          "extern crate alloc;",
+          "",
+          "use cortex_m_rt::entry;",
+          "use embedded_alloc::LlffHeap as Heap;",
+          "",
+          "#[global_allocator]",
+          "static HEAP: Heap = Heap::empty();",
+          "",
+          "#[entry]",
+          "fn main() -> ! {",
+          "    unsafe { embedded_alloc::init!(HEAP, 8 * 1024); }",
+          "    let v: alloc::vec::Vec<u32> = (0..10).collect();",
+          "    loop {}",
+          "}"
+        ],
+        "anmerkungen": [
+          { "zeile": 6, "text": "Linked List First Fit, alternativ `TlsfHeap` (Feature `tlsf`)" },
+          { "zeile": 13, "text": "Legt ein 8-KiB-`static` an und übergibt es dem Allokator (seit embedded-alloc 0.7)" }
+        ]
+      },
+      "text": "Der Heap muss vor der ersten Allokation initialisiert werden. `embedded-alloc` schützt seine Datenstrukturen mit `critical-section`, auf einem Single-Core-Cortex-M aktiviert man dafür das Feature `critical-section-single-core` von `cortex-m`. Scheitert eine Allokation, ruft `alloc` den Fehlerhandler auf, der in `no_std` standardmässig panict."
+    },
+    {
+      "typ": "zuordnen",
+      "frage": "Ordne die Allokator-Strategien zu.",
+      "paare": [
+        { "links": "`LlffHeap`", "rechts": "Durchsucht eine Liste freier Blöcke, Laufzeit wächst mit der Fragmentierung" },
+        { "links": "`TlsfHeap`", "rechts": "Zwei Ebenen von Grössenklassen, Allokieren in konstanter Zeit" },
+        { "links": "`heapless`-Pool (`box_pool!`)", "rechts": "Nur Blöcke einer Grösse, keine Fragmentierung" },
+        { "links": "Bump-Allokator", "rechts": "Schiebt nur einen Zeiger weiter, gibt nie einzeln frei" }
+      ],
+      "erklaerung": "TLSF (*Two-Level Segregated Fit*) wurde für Echtzeitsysteme entwickelt: Die Laufzeit von `alloc` und `dealloc` ist begrenzt. Fragmentierung verhindert aber auch TLSF nicht ganz. Ein Bump-Allokator passt gut zu „nur beim Start allozieren“."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "In welcher Situation ist ein Heap auf einem Mikrocontroller am ehesten vertretbar?",
+      "optionen": [
+        "Wenn nur während der Initialisierung alloziert wird, etwa um Konfigurationsdaten oder Puffer einmalig nach einer Datei anzulegen",
+        "Wenn ein Regel-Interrupt bei jedem Durchlauf einen `Vec` anlegt",
+        "Wenn das Gerät jahrelang ohne Neustart laufen soll und Nachrichten variabler Grösse verarbeitet",
+        "Wenn der Speicherbedarf zur Übersetzungszeit genau bekannt ist"
+      ],
+      "korrekt": 0,
+      "erklaerung": "Wird nur am Anfang alloziert und nie freigegeben, kann nichts fragmentieren, und ein Fehler zeigt sich sofort beim Start. Bei dauerndem Allozieren und Freigeben im Betrieb drohen Fragmentierung und schwankende Laufzeiten. Ist der Bedarf statisch bekannt, nimm `heapless` oder `static`. Ein Heap lohnt sich auch für Bibliotheken, die `alloc` voraussetzen, z. B. manche Parser oder Krypto-Crates.",
+      "begruendungen": [
+        "Richtig.",
+        "Allokation im Interrupt macht die WCET unvorhersagbar.",
+        "Genau dort droht Fragmentierung nach Wochen oder Monaten.",
+        "Dann ist statische Allokation einfacher und sicherer."
+      ]
+    },
+    {
+      "typ": "erklaerung",
+      "titel": "Stack: das vergessene Speicherproblem",
+      "text": "Auch ohne Heap kann der Speicher ausgehen: Der **Stack** wächst mit jeder Aufruftiefe, mit grossen lokalen Variablen und mit verschachtelten Interrupts. Im Standardlayout von `cortex-m-rt` beginnt der Stack am Ende des RAM und wächst nach unten auf `.bss` und `.data` zu. Ein Überlauf überschreibt dann still deine `static`-Variablen.\n\n**flip-link** dreht das Layout um: Der Stack liegt unten im RAM, darüber die statischen Daten. Ein Überlauf läuft dann gegen die RAM-Grenze und löst einen **HardFault** aus, statt Daten zu zerstören. Man aktiviert es als Linker in `.cargo/config.toml`."
+    },
+    {
+      "typ": "lueckentext",
+      "frage": "Ergänze die `.cargo/config.toml`, damit flip-link als Linker verwendet wird.",
+      "code": {
+        "sprache": "toml",
+        "datei": ".cargo/config.toml",
+        "zeilen": [
+          "[target.thumbv7em-none-eabihf]",
+          "{{?}} = \"flip-link\"",
+          "runner = \"probe-rs run --chip STM32F411RETx\"",
+          "",
+          "[build]",
+          "{{?}} = \"thumbv7em-none-eabihf\""
+        ]
+      },
+      "luecken": [{ "loesungen": ["linker"] }, { "loesungen": ["target"] }],
+      "auswahl": ["linker", "target", "rustflags", "ar"],
+      "erklaerung": "flip-link wird mit `cargo install flip-link` installiert. Es ruft intern `rust-lld` auf, verschiebt den Stack und linkt erneut. Laut README funktioniert das mit `cortex-m-rt` 0.6 und 0.7 und dem mitgelieferten LLD-Linker, nicht mit GNU `ld`."
+    },
+    {
+      "typ": "multiple-choice",
+      "frage": "Wie bestimmst du den maximalen Stackbedarf einer Firmware am zuverlässigsten?",
+      "optionen": [
+        "Statisch mit `cargo call-stack` abschätzen und zusätzlich auf der Hardware messen, z. B. mit dem Feature `paint-stack` von `cortex-m-rt`",
+        "Nur einmal im Labor messen, das reicht",
+        "Den Stack einfach so gross wie das ganze RAM machen",
+        "Den Compiler fragen, `rustc` meldet den Stackbedarf in jeder Warnung"
+      ],
+      "korrekt": 0,
+      "erklaerung": "`cargo call-stack` baut den Aufrufgraph aus dem fertigen Binary und rechnet die maximale Tiefe aus. Es braucht dafür nightly (`-Z emit-stack-sizes`) und hat Grenzen bei Funktionszeigern, `dyn Trait` und Rekursion. Das Feature `paint-stack` von `cortex-m-rt` füllt den Stack beim Start mit `0xCCCCCCCC`. Später sieht man im Debugger, bis wohin das Muster überschrieben wurde. Beides zusammen plus Reserve ergibt eine belastbare Grösse.",
+      "begruendungen": [
+        "Richtig.",
+        "Eine Messung erwischt nicht unbedingt den tiefsten Pfad, etwa mit allen Interrupts verschachtelt.",
+        "Dann bleibt nichts für `.bss`, `.data` und Puffer übrig.",
+        "`rustc` gibt keine Stackgrössen aus."
+      ]
+    }
+  ],
+  "praxis": "Viele Teams erlauben in Embedded-Rust nur `heapless` und `static`, und `alloc` gar nicht. Wenn doch ein Heap nötig ist, gehört dazu: feste Heapgrösse in der Speicherbilanz, Allokation möglichst nur beim Start, Überwachung mit `HEAP.used()` und `HEAP.free()` im Diagnose-Log. Unabhängig vom Heap sollte jede Firmware flip-link nutzen: Es kostet nichts zur Laufzeit und macht aus stiller Datenkorruption einen klaren HardFault.",
+  "labor": {
+    "titel": "Speicherbilanz ansehen",
+    "anleitung": "Installiere die Werkzeuge und sieh dir die Optionen an. Mit einem Embedded-Projekt und installiertem Target kannst du anschliessend die Grösse von `.bss`, `.data` und `.text` vergleichen, mit und ohne `alloc`.",
+    "befehle": [
+      "cargo install flip-link",
+      "cargo install cargo-binutils && rustup component add llvm-tools",
+      "cargo size --release -- -A"
+    ],
+    "beobachtung": "Ein Heap taucht als grosses `static` in `.bss` auf. Ohne flip-link liegt `_stack_start` am Ende des RAM, mit flip-link am unteren Rand des freien Bereichs."
+  },
+  "begriffe": [
+    { "begriff": "Globaler Allokator", "englisch": "global allocator", "erklaerung": "Mit `#[global_allocator]` markiertes `static`, das alle Allokationen von `alloc` bedient." },
+    { "begriff": "TLSF", "englisch": "two-level segregated fit", "erklaerung": "Allokator mit konstanter Laufzeit für `alloc` und `dealloc`." },
+    { "begriff": "Stacküberlauf", "englisch": "stack overflow", "erklaerung": "Der Stack wächst über den für ihn vorgesehenen Bereich hinaus." },
+    { "begriff": "flip-link", "englisch": "flip-link", "erklaerung": "Linker-Wrapper, der den Stack unter die statischen Daten legt, damit ein Überlauf einen HardFault auslöst." }
+  ],
+  "weiterlesen": [
+    { "titel": "docs.rs: embedded-alloc", "url": "https://docs.rs/embedded-alloc" },
+    { "titel": "docs.rs: cortex-m-rt", "url": "https://docs.rs/cortex-m-rt" },
+    { "titel": "The Embedded Rust Book: Collections", "url": "https://docs.rust-embedded.org/book/collections/" }
+  ]
+}
