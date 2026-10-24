@@ -1,6 +1,7 @@
 {
   "name": "rust-engineering-academy",
   "private": true,
+  "license": "MIT",
   "version": "1.0.0",
   "type": "module",
   "description": "Lern-Web-App: Software-Engineering-Wissen für Rust- und Embedded-Entwickler in kurzen, spielerischen Lektionen.",
